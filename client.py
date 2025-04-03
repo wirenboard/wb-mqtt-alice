@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 
 import socketio
 
@@ -26,13 +25,12 @@ def get_controller_sn():
 def read_config():
     """Read configuration file"""
     try:
-        if not os.path.exists(CONFIG_PATH):
-            print(f"[ERR] Configuration file not found at {CONFIG_PATH}")
-            return None
-
         with open(CONFIG_PATH, "r") as file:
             config = json.load(file)
             return config
+    except FileNotFoundError:
+        print(f"[ERR] Configuration file not found at {CONFIG_PATH}")
+        return None
     except json.JSONDecodeError:
         print("[ERR] Parsing configuration file: Invalid JSON format")
         return None
@@ -60,12 +58,12 @@ async def connect_controller():
         print("[ERR] Cannot proceed without controller SN")
         return
 
-    server_domain = config.get("server_domain")
-    if not server_domain:
+    server_address = config.get("server_address")
+    if not server_address:
         print("[ERR] Server domain not specified in configuration")
         return
 
-    server_url = f"https://{server_domain}"
+    server_url = f"https://{server_address}"
     print(f"[INFO] Connecting to server: {server_url}")
 
     sio = socketio.AsyncClient()
