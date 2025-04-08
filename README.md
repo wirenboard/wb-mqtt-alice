@@ -56,13 +56,13 @@
 
    ```terminal
    $ cd /путь/к/репозиторию
-   $ python3 client.py
+   $ python3 wb-alice-client.py
    ```
 
    В случае успеха мы получим следующий текст в консоли:
 
    ```terminal
-   $ python3 client.py
+   $ python3 wb-alice-client.py
    [INFO] Readed controller ID: 00000000
    [INFO] Connecting to server: https://example.com:8000
    [SUCCESS] Connected to Socket.IO server!
