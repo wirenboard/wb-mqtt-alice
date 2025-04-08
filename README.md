@@ -9,6 +9,24 @@
 - Берет адрес сервера из конфигурационного файла (server_domain)
 - Считывает серийный номер контроллера из файла `/var/lib/wirenboard/short_sn.conf`
 
+## Сборка пакета локально из исходников
+
+Устанавливаем зависимости
+
+```terminal
+$ sudo apt-get install dh-python
+```
+
+Начинаем сборку
+
+```terminal
+dpkg-buildpackage -us -uc
+```
+
+```terminal
+$ apt install ./wb-mqtt-alice_0.0.1_all.deb
+```
+
 ## Установка на контроллер
 
 1. Клонировать репозиторий
