@@ -31,11 +31,11 @@ class AddedDevice(BaseModel):
     type: str
     room: str
 
-class Capabilities(BaseModel):
+class Capability(BaseModel):
     type: str
     mqtt: str
 
-class Properties(BaseModel):
+class Property(BaseModel):
     type: str
     mqtt: str
 
@@ -44,8 +44,8 @@ class Device(BaseModel):
     name: str
     type: str
     room: str  # The ID of the room to which the device is bound
-    capabilities: List[Capabilities] = []
-    properties: List[Properties] = []
+    capabilities: List[Capability] = []
+    properties: List[Property] = []
 
 # On this momemt this vars are use local for debug
 # TODO: In future must read from config file 
