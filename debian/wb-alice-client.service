@@ -1,0 +1,14 @@
+# wb-alice-client.service - must be installed to /etc/systemd/system/*
+#
+# Part of wb-mqtt-alice package for Wiren Board controllers
+
+[Unit]
+Description=Client for Wiren Board Yandex Alice to MQTT integration
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/wb-mqtt-alice/wb-scenarios-reloader -v
+
+# [Install]
+# This section removed, because this service not start automatically on start
+# Wb confed use for start: systemctl reload-or-restart wb-scenarios-reloader

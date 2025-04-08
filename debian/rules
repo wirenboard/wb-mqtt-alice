@@ -1,0 +1,13 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE=1
+
+# Installation will be done only via debian/install
+override_dh_auto_configure:
+	dh_auto_configure --buildsystem=none
+
+override_dh_auto_build:
+	# Пропускаем стадию build
+
+%:
+	dh \$@
