@@ -19,3 +19,7 @@ LICENSE text=auto eol=lf
 *.txt text=auto eol=lf
 *.py text=auto eol=lf
 *.conf text=auto eol=lf
+
+changelog text=auto eol=lf
+control text=auto eol=lf
+rules text=auto eol=lf
