@@ -18,3 +18,4 @@ LICENSE text=auto eol=lf
 *.md text=auto eol=lf
 *.txt text=auto eol=lf
 *.py text=auto eol=lf
+*.conf text=auto eol=lf
