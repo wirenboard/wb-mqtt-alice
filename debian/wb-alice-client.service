@@ -4,8 +4,8 @@
 
 [Unit]
 Description=Client for Wiren Board Yandex Alice to MQTT integration
-Wants=network.target
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
