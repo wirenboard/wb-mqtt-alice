@@ -13,6 +13,6 @@ ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-alice-config.py
 Restart=on-failure
 RestartSec=5
 
-# This service start automatically on start Wiren Board controller
+# This service starts automatically upon system startup
 [Install]
 WantedBy=multi-user.target
