@@ -1,0 +1,18 @@
+# wb-alice-config.service - must be installed to /etc/systemd/system/*
+#
+# Part of wb-mqtt-alice package for Wiren Board controllers
+
+[Unit]
+Description=Yandex Alice to MQTT integration configurator backend service
+Wants=network.target
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-alice-config.py
+Restart=on-failure
+RestartSec=5
+
+# This service starts automatically upon system startup
+[Install]
+WantedBy=multi-user.target

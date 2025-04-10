@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE=1
+export PYBUILD_NAME=wb-mqtt-alice
+
+override_dh_builddeb:
+	dh_builddeb -- -Zgzip
+
+# Python req resolved by setup.py
+# File installation will be done only via debian/install
+override_dh_auto_install:
+	dh_auto_install
+	dh_install --fail-missing
+
+override_dh_installsystemd:
+	dh_installsystemd --name=wb-alice-client
+	dh_installsystemd --name=wb-alice-config
+
+# Installation will be done only via debian/install
+%:
+	dh \$@ --with python3  --buildsystem=pybuild

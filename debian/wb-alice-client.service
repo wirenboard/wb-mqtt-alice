@@ -1,0 +1,18 @@
+# wb-alice-client.service - must be installed to /etc/systemd/system/*
+#
+# Part of wb-mqtt-alice package for Wiren Board controllers
+
+[Unit]
+Description=Client for Wiren Board Yandex Alice to MQTT integration
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-alice-client.py
+Restart=on-failure
+RestartSec=5
+
+# This service starts automatically upon system startup
+[Install]
+WantedBy=multi-user.target
