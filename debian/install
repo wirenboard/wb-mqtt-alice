@@ -1,4 +1,5 @@
 wb-alice-client.conf /etc/
 wb-alice-devices.conf /etc/
+50wb-alice /etc/wb-configs.d/
 wb-alice-client.py /usr/lib/wb-mqtt-alice/
 wb-alice-config.py /usr/lib/wb-mqtt-alice/
