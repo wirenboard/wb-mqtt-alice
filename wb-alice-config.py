@@ -26,6 +26,11 @@ def load_config() -> Config:
     return Config(**config)
 
 
+def save_config(config: Config):
+    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        json.dump(config.model_dump(), f, ensure_ascii=False, indent=2)
+
+
 def generate_id():
     return str(uuid.uuid4())
 
