@@ -1,62 +1,14 @@
 import uuid
-from typing import Dict, List
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+
+from models import AddRoom, Room, Capability, Property, AddDevice, Device, Config
 
 app = FastAPI(
     title="Alice Integration API",
     version="1.0.0",
 )
-
-
-# Models
-class AddRoom(BaseModel):
-    name: str
-
-
-class AddedRoom(BaseModel):
-    id: str
-    name: str
-
-
-class Room(BaseModel):
-    id: str
-    name: str
-    devices: List[str] = []
-
-
-class AddDevice(BaseModel):
-    name: str
-    room: str  # The ID of the room to which the device is bound
-
-
-class AddedDevice(BaseModel):
-    id: str
-    name: str
-    type: str
-    room: str
-
-
-class Capability(BaseModel):
-    type: str
-    mqtt: str
-
-
-class Property(BaseModel):
-    type: str
-    mqtt: str
-
-
-class Device(BaseModel):
-    id: str
-    name: str
-    type: str
-    room: str  # The ID of the room to which the device is bound
-    capabilities: List[Capability] = []
-    properties: List[Property] = []
-
 
 # On this momemt this vars are use local for debug
 # TODO: In future must read from config file
