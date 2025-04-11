@@ -10,10 +10,20 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# On this momemt this vars are use local for debug
-# TODO: In future must read from config file
-rooms_repo: Dict[str, Room] = {}
-devices_repo: Dict[str, Device] = {}
+CONFIG_PATH = "/etc/wb-alice-devices.conf"
+
+
+def load_config() -> Config:
+    if not os.path.exists(CONFIG_PATH):
+        config_default = dict({"rooms": [{"id": "without_rooms","name": "Без комнаты","devices": []}
+                                         ],"devices": []})
+        config = Config(**config_default)
+        save_config(config)
+        return config
+    
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    return Config(**config)
 
 
 def generate_id():
@@ -139,6 +149,7 @@ async def delete_device(device_id: str):
     del devices_repo[device_id]
     return {"message": "Device deleted successfully"}
 
+config = load_config()
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
