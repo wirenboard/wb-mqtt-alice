@@ -14,6 +14,8 @@ CONFIG_PATH = "/etc/wb-alice-devices.conf"
 
 
 def load_config() -> Config:
+    """Load configurations from file"""
+    
     if not os.path.exists(CONFIG_PATH):
         config_default = dict({"rooms": [{"id": "without_rooms","name": "Без комнаты","devices": []}
                                          ],"devices": []})
@@ -27,6 +29,8 @@ def load_config() -> Config:
 
 
 def save_config(config: Config):
+    """Save configurations to file"""
+    
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
         json.dump(config.model_dump(), f, ensure_ascii=False, indent=2)
 
@@ -36,122 +40,157 @@ def generate_id():
 
 
 # API Endpoints
-@app.get("/integrations/alice", response_model=dict)
+
+@app.get("/integrations/alice", response_model=Config)
 async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
-    return {"rooms": list(rooms_repo.values()), "devices": list(devices_repo.values())}
+    
+    return load_config()
 
 
-@app.post("/integrations/alice/room", response_model=AddedRoom, status_code=201)
+@app.post("/integrations/alice/room", response_model=Room, status_code=201)
 async def create_room(room_data: AddRoom):
-    """Create a new room"""
+    """Create new room"""
+
+    # Check if room with given name exists
+    if room_name_exist(room_data.name, config.rooms):
+        raise HTTPException(
+                status_code=400,
+                detail="Room with this name already exists")
+    # Create room
     room_id = generate_id()
-    new_room = Room(id=room_id, name=room_data.name)
-    rooms_repo[room_id] = new_room
-    return AddedRoom(id=room_id, name=room_data.name)
+    response = Room(id=room_id, name=room_data.name, devices=list())
+    config.rooms.append(response)
+    
+    save_config(config)
+    return response
 
 
 @app.put("/integrations/alice/room/{room_id}", response_model=Room)
 async def update_room(room_id: str, room_data: Room):
-    """Update room information"""
-    if room_id not in rooms_repo:
-        raise HTTPException(status_code=404, detail="Room not found")
-
-    # Save the device list before updating
-    devices = rooms_repo[room_id].devices
-
-    # Renovating the room
-    rooms_repo[room_id] = room_data
-    rooms_repo[room_id].devices = devices  # Restore the device list
-
-    return rooms_repo[room_id]
+    """Update room"""
+    
+    # Check for the presence of room with given id
+    if not room_id_exist(room_id, config.rooms):
+        raise HTTPException(
+            status_code=404,
+            detail="There is no room with this ID.")
+    # Update room
+    response = Room(id=room_id, name=room_data.name, devices=room_data.devices)
+    index = room_index(room_id, config.rooms)
+    config.rooms[index] = response
+    
+    save_config(config)
+    return response
 
 
 @app.delete("/integrations/alice/room/{room_id}")
-async def delete_room(room_id: str):
-    """Delete the room and all associated devices"""
-    if room_id not in rooms_repo:
-        raise HTTPException(status_code=404, detail="Room not found")
+async def delete_room(room_id: str, room_data: Room):
+    """Delete room"""
+    
+    # Check for the presence of room with given id
+    if not room_id_exist(room_id, config.rooms):
+        raise HTTPException(
+            status_code=404,
+            detail="There is no room with this ID.")
+    # Delete room
+    index = room_index(room_id, config.rooms)
+    devices_roomless = config.rooms[index].devices
+    del config.rooms[index]
+    # Transfer device ids from room being deleted to room "without_rooms"
+    index = room_index("without_rooms", config.rooms)
+    config.rooms[index].devices.extend(devices_roomless)
+    # Change device id of room being deleted to "without_rooms"
+    for device_id in devices_roomless:
+        index = device_index(device_id, config.devices)
+        config.devices[index].room_id = "without_rooms"
+        
+    save_config(config)
+    return {"message": "Room deleted successfully"}
 
-    # Remove all devices in this room
-    for device_id in list(devices_repo.keys()):
-        if devices_repo[device_id].room == room_id:
-            del devices_repo[device_id]
 
-    del rooms_repo[room_id]
-    return {"message": "Room and its devices deleted successfully"}
-
-
-@app.post("/integrations/alice/device", response_model=AddedDevice, status_code=201)
+@app.post("/integrations/alice/device", response_model=Device, status_code=201)
 async def register_device(device_data: AddDevice):
-    """Create a new device"""
-    # Checking the existence of the room
-    if device_data.room not in rooms_repo:
-        raise HTTPException(status_code=400, detail="Room does not exist")
-
+    """Create new device"""
+    
+    # Check for device with given name
+    if device_name_exist(device_data.name, device_data.room_id, config.devices):
+        raise HTTPException(
+            status_code=400,
+            detail="Device with this name already exists")
+    # Create device
     device_id = generate_id()
-    new_device = Device(
-        id=device_id,
-        name=device_data.name,
-        type=device_data.type,
-        room=device_data.room,
-    )
-    devices_repo[device_id] = new_device
-
-    # Добавляем устройство в комнату
-    rooms_repo[device_data.room].devices.append(device_id)
-
-    return AddedDevice(
-        id=device_id,
-        name=device_data.name,
-        type=device_data.type,
-        room=device_data.room,
-    )
+    response = Device(id=device_id,
+                      name=device_data.name,
+                      #status_info=device_data.status_info,
+                      #description=device_data.description,
+                      room_id=device_data.room_id,
+                      type=device_data.type,
+                      capabilities=device_data.capabilities,
+                      properties=device_data.properties)
+    index = room_index(device_data.room_id, config.rooms)
+    config.rooms[index].devices.append(device_id)
+    config.devices.append(response)
+    
+    save_config(config)
+    return response
 
 
 @app.put("/integrations/alice/device/{device_id}", response_model=Device)
 async def update_device(device_id: str, device_data: Device):
-    """Update device information"""
-    if device_id not in devices_repo:
-        raise HTTPException(status_code=404, detail="Device not found")
-
-    # Verifying the existence of the new room
-    if device_data.room not in rooms_repo:
-        raise HTTPException(status_code=400, detail="Room does not exist")
-
-    old_room_id = devices_repo[device_id].room
-    new_room_id = device_data.room
-
-    # If the room has changed, update the links
-    if old_room_id != new_room_id:
-        # Удаляем из старой комнаты
-        if old_room_id in rooms_repo:
-            rooms_repo[old_room_id].devices = [
-                d for d in rooms_repo[old_room_id].devices if d != device_id
-            ]
-
-        # Добавляем в новую комнату
-        rooms_repo[new_room_id].devices.append(device_id)
-
-    # Adding in a new room
-    devices_repo[device_id] = device_data
-    return device_data
+    """Update device"""
+    
+    # Check for the presence of device with given id
+    if not device_id_exist(device_id, config.devices):
+        raise HTTPException(
+            status_code=400,
+            detail="There is no device with this ID.")
+    # Check for the presence of room with given id
+    if not room_id_exist(device_data.room_id, config.rooms):
+        raise HTTPException(
+            status_code=404,
+            detail="There is no room with this ID.")
+    # Update device
+    response = Device(id=device_id,
+                      name=device_data.name,
+                      #status_info=device_data.status_info,
+                      #description=device_data.description,
+                      room_id=device_data.room_id,
+                      type=device_data.type,
+                      capabilities=device_data.capabilities,
+                      properties=device_data.properties)
+    index = device_index(device_id, config.devices)
+    del_room_id = config.devices[index].room_id
+    config.devices[index] = response
+    # Update room
+    if device_data.room_id != del_room_id:
+        index = room_index(del_room_id, config.rooms)
+        config.rooms[index].devices.remove(device_id)
+        index = room_index(device_data.room_id, config.rooms)
+        config.rooms[index].devices.append(device_id)
+    
+    save_config(config)
+    return response
 
 
 @app.delete("/integrations/alice/device/{device_id}")
 async def delete_device(device_id: str):
-    """Remove the device"""
-    if device_id not in devices_repo:
-        raise HTTPException(status_code=404, detail="Device not found")
-
-    # Removing the device from the room
-    room_id = devices_repo[device_id].room
-    if room_id in rooms_repo:
-        rooms_repo[room_id].devices = [
-            d for d in rooms_repo[room_id].devices if d != device_id
-        ]
-
-    del devices_repo[device_id]
+    """Delete device"""
+    
+    # Check for the presence of device with given id
+    if not device_id_exist(device_id, config.devices):
+        raise HTTPException(
+            status_code=400,
+            detail="There is no device with this ID.")
+    # Delete device
+    index = device_index(device_id, config.devices)
+    del_room_id = config.devices[index].room_id
+    del config.devices[index]
+    # Update room
+    index = room_index(del_room_id, config.rooms)
+    config.rooms[index].devices.remove(device_id)
+        
+    save_config(config)
     return {"message": "Device deleted successfully"}
 
 config = load_config()
