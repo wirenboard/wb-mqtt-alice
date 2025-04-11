@@ -41,6 +41,32 @@ def generate_id():
     return str(uuid.uuid4())
 
 
+def room_name_exist(name: str, rooms) -> bool:
+    return any(room.name == name for room in rooms)
+
+
+def room_id_exist(room_id: str, rooms) -> bool:
+    return any(room.id == room_id for room in rooms)
+
+
+def room_index(room_id: str, rooms) -> int:
+    index = next(i for i, room in enumerate(rooms) if room.id == room_id)
+    return index
+
+
+def device_name_exist(name: str, room_id: str, devices) -> bool:
+    return any((device.name == name)&(device.room_id == room_id) for device in devices)
+
+
+def device_id_exist(device_id: str, devices) -> bool:
+    return any(device.id == device_id for device in devices)
+
+
+def device_index(device_id: str, devices) -> int:
+    index = next(i for i, device in enumerate(devices) if device.id == device_id)
+    return index
+
+
 # API Endpoints
 
 @app.get("/integrations/alice", response_model=Config)
