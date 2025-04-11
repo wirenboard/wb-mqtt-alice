@@ -88,7 +88,7 @@ async def create_room(room_data: AddRoom):
     # Create room
     room_id = generate_id()
     response = Room(id=room_id, name=room_data.name, devices=list())
-    config.rooms.append(response)
+    config.rooms.insert(-1, response)
     
     save_config(config)
     return response
