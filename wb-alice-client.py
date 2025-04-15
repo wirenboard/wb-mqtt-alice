@@ -22,9 +22,12 @@ logger = logging.getLogger(__name__)
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/etc/wb-alice-client.conf"
 
-YANDEX_SKILL_ID = "164955c4-cf6d-4b2c-bdfb-63277042101b"
-YANDEX_OAUTH_TOKEN = "y0__xCAvtL0Bxij9xMg1aay2RJywqcZFALIyCvP-9OR3B2gAZIzFA"
-YANDEX_USER_ID = "test-user"
+YANDEX_SKILL_ID = (
+    "add0dfb6-5b76-4eb9-a07e-7f4fe401881d"  # Скил с именем: Вайренбоард интеграция
+)
+YANDEX_SKILL_OAUTH_TOKEN = "y0__xCAvtL0Bxij9xMg1aay2RJywqcZFALIyCvP-9OR3B2gAZIzFA"
+YANDEX_USER_ID = "wb-test-user"
+
 # Если до этого яндекс не получал пакет обновления девайсов с этим именем то у него будут ошибки возвращаться
 # INFO:__main__:[INCOME] Server response: {'data': 'Message received'}
 # INFO:__main__:[YANDEX] Ошибка 400: {"request_id":"c21191a3-ce61-4f77-8d3b-a5f5da9163f6","status":"error","error_code":"UNKNOWN_USER"}
