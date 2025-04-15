@@ -1,19 +1,18 @@
 # client.py (Socket.IO client)
 import asyncio
-import signal
 import json
+import logging
 import os
-import requests
+import signal
 import time
-
-import socketio
-from wb_common.mqtt_client import MQTTClient
 
 import paho.mqtt.client as mqtt
 import paho.mqtt.subscribe as subscribe
+import requests
+import socketio
+from wb_common.mqtt_client import MQTTClient
 
 from mqtt_topic import MQTTTopic
-import logging
 
 logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
