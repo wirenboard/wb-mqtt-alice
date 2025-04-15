@@ -228,15 +228,24 @@ def on_message(client, userdata, message):
             #             - Минимальное время - если есть выбросы копить и усреднять,
             #               чтобы не передавать изменения температуры от каждого
             #               дуновения ветра из окна
-            if last_temp_value is None or abs(new_temp - last_temp_value) >= 0.2:
+
+            if last_temp_value is None:
                 last_temp_value = new_temp
                 send_temperature_to_yandex(
                     "7065fcf8-963e-42a2-a4f5-e668e412d1c4", new_temp
                 )
             else:
-                logger.info(
-                    "[TEMP] Температура не изменилась существенно — не отправляем."
-                )
+                cur_abs_dif = abs(new_temp - last_temp_value)
+                goal_abs_dif = 0.04
+                if cur_abs_dif >= goal_abs_dif:
+                    last_temp_value = new_temp
+                    send_temperature_to_yandex(
+                        "7065fcf8-963e-42a2-a4f5-e668e412d1c4", new_temp
+                    )
+                else:
+                    logger.info(
+                        f"[TEMP] Температура не изменилась существенно — не отправляем. Последнее значение: '{last_temp_value}', разница '{cur_abs_dif}', но нужна '{goal_abs_dif}'"
+                    )
         except ValueError:
             logger.info("[TEMP] Ошибка при разборе float температуры")
 
@@ -249,6 +258,18 @@ def on_message(client, userdata, message):
                 relay_on = True
 
             send_relay_state_to_yandex("f52856d1-4fca-40ce-8ee3-e5ed37298d6e", relay_on)
+
+        except Exception as e:
+            logger.info(f"[RELAY] Ошибка при разборе состояния реле: {e}")
+    elif topic == mqtt_topics["light_bedroom"].full:
+        try:
+            relay_state = payload_str.strip().lower()
+            if relay_state in ["0", "off", "false"]:
+                relay_on = False
+            else:
+                relay_on = True
+
+            send_relay_state_to_yandex("67a2d9b9-666b-41e1-957e-90cd742ec554", relay_on)
 
         except Exception as e:
             logger.info(f"[RELAY] Ошибка при разборе состояния реле: {e}")
