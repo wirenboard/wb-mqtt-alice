@@ -304,13 +304,14 @@ async def main():
     mqtt_client.stop()
     logger.info("[MAIN] Завершено.")
 
-def get_controller_id():
+
+def get_controller_sn():
     """Get controller ID from the configuration file"""
     try:
         with open(SHORT_SN_PATH, "r") as file:
-            controller_id = file.read().strip()
-            logger.info(f"[INFO] Read controller ID: {controller_id}")
-            return controller_id 
+            controller_sn = file.read().strip()
+            logger.info(f"[INFO] Read controller ID: {controller_sn}")
+            return controller_sn
     except FileNotFoundError:
         logger.info(
             f"[ERR] Controller ID file not found! Check the path: {SHORT_SN_PATH}"
@@ -390,8 +391,8 @@ async def connect_controller():
         )
         return
 
-    controller_id = get_controller_id()
-    if not controller_id:
+    controller_sn = get_controller_sn()
+    if not controller_sn:
         logger.info("[ERR] Cannot proceed without controller ID")
         return
 
@@ -422,7 +423,7 @@ async def connect_controller():
     @sio.event
     async def connect():
         logger.info("[SUCCESS] Connected to Socket.IO server!")
-        await sio.emit("message", {"controller_id": controller_id, "status": "online"})
+        await sio.emit("message", {"controller_sn": controller_sn, "status": "online"})
 
     @sio.event
     def private_event(data):
@@ -715,11 +716,11 @@ async def connect_controller():
 
     try:
         # Connect to server and keep connection active
-        # Pass controller_id via custom header
+        # Pass controller_sn via custom header
         await sio.connect(
             server_url,
             socketio_path="/socket.io",
-            headers={"X-Controller-Id": controller_id},
+            headers={"X-Controller-SN": controller_sn},
         )
         await sio.wait()
 
