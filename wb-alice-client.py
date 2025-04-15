@@ -25,6 +25,12 @@ CONFIG_PATH = "/etc/wb-alice-client.conf"
 YANDEX_SKILL_ID = "164955c4-cf6d-4b2c-bdfb-63277042101b"
 YANDEX_OAUTH_TOKEN = "y0__xCAvtL0Bxij9xMg1aay2RJywqcZFALIyCvP-9OR3B2gAZIzFA"
 YANDEX_USER_ID = "test-user"
+# Если до этого яндекс не получал пакет обновления девайсов с этим именем то у него будут ошибки возвращаться
+# INFO:__main__:[INCOME] Server response: {'data': 'Message received'}
+# INFO:__main__:[YANDEX] Ошибка 400: {"request_id":"c21191a3-ce61-4f77-8d3b-a5f5da9163f6","status":"error","error_code":"UNKNOWN_USER"}
+# INFO:__main__:[MQTT] Получено сообщение: 0 в топике /devices/wb-mr6c_1/controls/K2
+# INFO:__main__:[MQTT] Получено сообщение: 22.29 в топике /devices/wb-msw-v4_2/controls/Temperature
+# INFO:__main__:[YANDEX] Ошибка 400: {"request_id":"58c1d457-9651-42b8-8a7c-52f1cea4d44f","status":"error","error_code":"UNKNOWN_USER"}
 
 mqtt_topics = {
     "light_corridor": None,
