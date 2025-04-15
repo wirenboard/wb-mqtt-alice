@@ -77,8 +77,8 @@ def send_temperature_to_yandex(device_id, temp_value):
     timestamp = int(time.time())
     url = f"https://dialogs.yandex.net/api/v1/skills/{YANDEX_SKILL_ID}/callback/state"
     headers = {
-        "Authorization": f"OAuth {YANDEX_OAUTH_TOKEN}",
         "Content-Type": "application/json"
+        "Authorization": f"OAuth {YANDEX_SKILL_OAUTH_TOKEN}",
     }
     payload = {
         "ts": timestamp,
@@ -147,8 +147,8 @@ def send_relay_state_to_yandex(device_id, raw_state):
     timestamp = int(time.time())
     url = f"https://dialogs.yandex.net/api/v1/skills/{YANDEX_SKILL_ID}/callback/state"
     headers = {
-        "Authorization": f"OAuth {YANDEX_OAUTH_TOKEN}",
         "Content-Type": "application/json"
+        "Authorization": f"OAuth {YANDEX_SKILL_OAUTH_TOKEN}",
     }
     payload = {
         "ts": timestamp,
