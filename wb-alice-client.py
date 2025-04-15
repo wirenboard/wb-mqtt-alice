@@ -21,9 +21,7 @@ logger = logging.getLogger(__name__)
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/etc/wb-alice-client.conf"
 
-YANDEX_SKILL_ID = (
-    "add0dfb6-5b76-4eb9-a07e-7f4fe401881d"  # Скил с именем: Вайренбоард интеграция
-)
+YANDEX_SKILL_ID = "add0dfb6-5b76-4eb9-a07e-7f4fe401881d"  # Скил с именем: 'Wiren Board'
 YANDEX_SKILL_OAUTH_TOKEN = "y0__xCAvtL0Bxij9xMg1aay2RJywqcZFALIyCvP-9OR3B2gAZIzFA"
 YANDEX_USER_ID = "wb-test-user"
 
