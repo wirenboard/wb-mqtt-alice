@@ -571,7 +571,7 @@ async def connect_controller():
         # Возвращаем
         devices_response = {
             "requestId": 123,
-            "payload": {"user_id": "test-user", "devices": devices_list},
+            "payload": {"user_id": YANDEX_USER_ID, "devices": devices_list},
         }
 
         return devices_response
