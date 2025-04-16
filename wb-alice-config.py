@@ -34,7 +34,7 @@ def save_config(config: Config):
     """Save configurations to file"""
     
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(config.model_dump(), f, ensure_ascii=False, indent=2)
+        json.dump(config.dict(), f, ensure_ascii=False, indent=2)
 
 
 def generate_id():
@@ -94,7 +94,7 @@ async def create_room(room_data: AddRoom):
     return response
 
 
-@app.put("/integrations/alice/room/{room_id}", response_model=Room, status_code=204)
+@app.put("/integrations/alice/room/{room_id}", response_model=Room, status_code=200)
 async def update_room(room_id: str, room_data: Room):
     """Update room"""
     
@@ -112,7 +112,7 @@ async def update_room(room_id: str, room_data: Room):
     return response
 
 
-@app.delete("/integrations/alice/room/{room_id}", status_code=204)
+@app.delete("/integrations/alice/room/{room_id}", status_code=200)
 async def delete_room(room_id: str, room_data: Room):
     """Delete room"""
     
@@ -164,7 +164,7 @@ async def register_device(device_data: AddDevice):
     return response
 
 
-@app.put("/integrations/alice/device/{device_id}", response_model=Device, status_code=204)
+@app.put("/integrations/alice/device/{device_id}", response_model=Device, status_code=200)
 async def update_device(device_id: str, device_data: Device):
     """Update device"""
     
@@ -201,7 +201,7 @@ async def update_device(device_id: str, device_data: Device):
     return response
 
 
-@app.delete("/integrations/alice/device/{device_id}", status_code=204)
+@app.delete("/integrations/alice/device/{device_id}", status_code=200)
 async def delete_device(device_id: str):
     """Delete device"""
     
