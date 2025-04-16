@@ -69,7 +69,7 @@ def device_index(device_id: str, devices) -> int:
 
 # API Endpoints
 
-@app.get("/integrations/alice", response_model=Config)
+@app.get("/integrations/alice", response_model=Config, status_code=200)
 async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
     
@@ -83,7 +83,7 @@ async def create_room(room_data: AddRoom):
     # Check if room with given name exists
     if room_name_exist(room_data.name, config.rooms):
         raise HTTPException(
-                status_code=400,
+                status_code=409,
                 detail="Room with this name already exists")
     # Create room
     room_id = generate_id()
@@ -94,7 +94,7 @@ async def create_room(room_data: AddRoom):
     return response
 
 
-@app.put("/integrations/alice/room/{room_id}", response_model=Room)
+@app.put("/integrations/alice/room/{room_id}", response_model=Room, status_code=204)
 async def update_room(room_id: str, room_data: Room):
     """Update room"""
     
@@ -112,7 +112,7 @@ async def update_room(room_id: str, room_data: Room):
     return response
 
 
-@app.delete("/integrations/alice/room/{room_id}")
+@app.delete("/integrations/alice/room/{room_id}", status_code=204)
 async def delete_room(room_id: str, room_data: Room):
     """Delete room"""
     
@@ -144,7 +144,7 @@ async def register_device(device_data: AddDevice):
     # Check for device with given name
     if device_name_exist(device_data.name, device_data.room_id, config.devices):
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail="Device with this name already exists")
     # Create device
     device_id = generate_id()
@@ -164,14 +164,14 @@ async def register_device(device_data: AddDevice):
     return response
 
 
-@app.put("/integrations/alice/device/{device_id}", response_model=Device)
+@app.put("/integrations/alice/device/{device_id}", response_model=Device, status_code=204)
 async def update_device(device_id: str, device_data: Device):
     """Update device"""
     
     # Check for the presence of device with given id
     if not device_id_exist(device_id, config.devices):
         raise HTTPException(
-            status_code=400,
+            status_code=404,
             detail="There is no device with this ID.")
     # Check for the presence of room with given id
     if not room_id_exist(device_data.room_id, config.rooms):
@@ -201,14 +201,14 @@ async def update_device(device_id: str, device_data: Device):
     return response
 
 
-@app.delete("/integrations/alice/device/{device_id}")
+@app.delete("/integrations/alice/device/{device_id}", status_code=204)
 async def delete_device(device_id: str):
     """Delete device"""
     
     # Check for the presence of device with given id
     if not device_id_exist(device_id, config.devices):
         raise HTTPException(
-            status_code=400,
+            status_code=404,
             detail="There is no device with this ID.")
     # Delete device
     index = device_index(device_id, config.devices)
