@@ -1,4 +1,4 @@
-fastapi==0.115.11
+fastapi==0.63.0
 requests==2.25.1
 uvicorn[standard]==0.34.0
 python-socketio==5.12.1
