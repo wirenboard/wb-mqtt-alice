@@ -19,6 +19,5 @@ setup(
     maintainer_email="info@wirenboard.com",
     url="https://github.com/wirenboard/wb-alice-client",
     # Files installed by debian/install file
-    # Files installed by debian/install file
     # Requirements installed from debian/control file
 )
