@@ -17,7 +17,14 @@ Section: python
 Architecture: all
 Depends: ${misc:Depends},
          ${python3:Depends},
-         wb-mqtt-homeui (>= 2.82.5~~)
+         wb-mqtt-homeui (>= 2.82.5~~),
+         python3-fastapi (>= 0.63.0),
+         python3-requests (>= 2.25.1),
+         python3-uvicorn (>= 0.13.3),
+         python3-socketio (>= 5.0.3),
+         python3-websocket (>= 0.57.0)  | python3-websocket-client,
+         python3-aiohttp (>= 3.7.4),
+         python3-paho-mqtt (>= 1.5.1)
 Description: Yandex smart home with Alice to MQTT for Wiren Board controllers
  A bridge between Yandex Alice voice assistant and Wiren Board MQTT-based
  smart home system. This package allows users to control devices connected
