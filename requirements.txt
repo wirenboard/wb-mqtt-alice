@@ -1,7 +1,0 @@
-fastapi==0.115.11
-requests==2.25.1
-uvicorn[standard]==0.34.0
-python-socketio==5.12.1
-websocket-client==1.8.0
-aiohttp==3.11.14
-paho-mqtt==1.5.1
