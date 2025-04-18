@@ -8,9 +8,6 @@ def get_version():
         return f.readline().split()[1][1:-1]
 
 
-with open("requirements.txt") as f:
-    requirements = f.read().splitlines()
-
 setup(
     name="wb-mqtt-alice",
     version=get_version(),
@@ -21,6 +18,6 @@ setup(
     maintainer="Wiren Board Team",
     maintainer_email="info@wirenboard.com",
     url="https://github.com/wirenboard/wb-alice-client",
-    install_requires=requirements,
     # Files installed by debian/install file
+    # Requirements installed from debian/control file
 )
