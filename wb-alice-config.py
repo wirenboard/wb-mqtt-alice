@@ -40,7 +40,7 @@ def save_config(config: Config):
     
     try:
         with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-            json.dump(config.model_dump(), f, ensure_ascii=False, indent=2)
+            json.dump(config.dict(), f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise
 
@@ -199,7 +199,6 @@ async def update_device(device_id: str, device_data: Device):
                       type=device_data.type,
                       capabilities=device_data.capabilities,
                       properties=device_data.properties)
-    
     room_change(device_id, device_data.room_id, config)
     
     save_config(config)
