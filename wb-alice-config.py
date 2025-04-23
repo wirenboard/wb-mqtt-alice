@@ -18,23 +18,31 @@ CONFIG_PATH = "/etc/wb-alice-devices.conf"
 def load_config() -> Config:
     """Load configurations from file"""
     
-    if not os.path.exists(CONFIG_PATH):
-        config_default = dict({"rooms": [{"id": "without_rooms","name": "Без комнаты","devices": []}
-                                         ],"devices": []})
-        config = Config(**config_default)
-        save_config(config)
+    try:
+        if not os.path.exists(CONFIG_PATH):
+            config_default = dict({"rooms":
+                                   {"without_rooms": {"name": "Без комнаты","devices": []}},
+                                   "devices": {}
+                                   })
+            config = Config(**config_default)
+            save_config(config)
+            return config
+        
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            config = Config(**json.load(f))
         return config
-    
-    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-        config = json.load(f)
-    return Config(**config)
+    except Exception as e:
+        raise
 
 
 def save_config(config: Config):
     """Save configurations to file"""
     
-    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(config.dict(), f, ensure_ascii=False, indent=2)
+    try:
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(config.model_dump(), f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        raise
 
 
 def generate_id():
