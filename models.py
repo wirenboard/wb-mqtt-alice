@@ -6,7 +6,7 @@ class StatusInfo(BaseModel):
     reportable: bool = False
 
 class AddRoom(BaseModel):
-    name: str   
+    name: str
 
 class Room(AddRoom):
     devices: List[str] = []
@@ -47,5 +47,5 @@ class RoomChange(BaseModel):
     room_id: str
 
 class Config(BaseModel):
-    rooms: Dict[str, Room] 
-    devices: Dict[str, Device] 
+    rooms: Dict[str, Room]
+    devices: Dict[str, Device]
