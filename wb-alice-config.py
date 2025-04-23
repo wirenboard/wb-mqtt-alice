@@ -53,6 +53,14 @@ def room_name_exist(name: str, rooms) -> bool:
     return any(room.name == name for room in rooms.values())
 
 
+def room_change(device_id, room_id, config):
+    del_room_id = config.devices[device_id].rooms_id
+    if room_id != del_room_id:
+        config.rooms[del_room_id].devices.remove(device_id)
+        config.rooms[room_id].devices.append(device_id)
+    return 
+
+
 def device_name_exist(name: str, room_id: str, devices) -> bool:
     return any((device.name == name)&(device.room_id == room_id) for device in devices.values())
 
@@ -216,6 +224,30 @@ async def delete_device(device_id: str):
         
     save_config(config)
     return {"message": "Device deleted successfully"}
+
+
+@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomChange, status_code=200)
+async def change_room(device_id: str, device_data: RoomChange):
+    """Change room"""
+    
+    config = load_config()
+    # Check for the presence of device with given id
+    if not device_id in config.devices:
+        raise HTTPException(
+            status_code=404,
+            detail="There is no device with this ID.")
+    # Check for the presence of room with given id
+    if not device_data.room_id in config.rooms:
+        raise HTTPException(
+            status_code=404,
+            detail="There is no room with this ID.")
+    # Change room   
+    room_change(device_id, device_data.room_id, config)
+    config.devices[device_id].rooms_id = device_data.room_id
+    response = RoomChange(room_id=device_data.room_id)
+    
+    save_config(config)
+    return response
 
 
 if __name__ == "__main__":
