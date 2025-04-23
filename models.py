@@ -1,16 +1,18 @@
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List, Dict, Optional
+from pydantic import BaseModel, RootModel
+from uuid import UUID
 
 class StatusInfo(BaseModel):
     reportable: bool = False
 
 class AddRoom(BaseModel):
-    name: str
+    name: str   
 
-class Room(BaseModel):
-    id: str
-    name: str
+class Room(AddRoom):
     devices: List[str] = []
+    
+class RoomResponse(RootModel[Dict[UUID, Room]]):
+    pass
 
 class Capability(BaseModel):
     type: str
@@ -30,7 +32,6 @@ class AddDevice(BaseModel):
     properties: List[Property] = []
 
 class Device(BaseModel):
-    id: str
     name: str
     status_info: Optional[dict] = None
     description: Optional[str] = None
@@ -38,7 +39,13 @@ class Device(BaseModel):
     type: str
     capabilities: List[Capability] = []
     properties: List[Property] = []
+    
+class DeviceResponse(RootModel[Dict[UUID, Device]]):
+    pass
+
+class RoomChange(BaseModel):
+    room_id: str
 
 class Config(BaseModel):
-    rooms: List[Room]
-    devices: List[Device]
+    rooms: Dict[str, Room] 
+    devices: Dict[str, Device] 
