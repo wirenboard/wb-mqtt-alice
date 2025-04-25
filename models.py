@@ -40,8 +40,8 @@ class Device(BaseModel):
     capabilities: List[Capability] = []
     properties: List[Property] = []
     
-class DeviceResponse(RootModel[Dict[UUID, Device]]):
-    pass
+class DeviceResponse(BaseModel):
+    root: Dict[UUID, Device]
 
 class RoomChange(BaseModel):
     room_id: str
