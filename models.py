@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel
 from uuid import UUID
 
 class StatusInfo(BaseModel):
@@ -11,8 +11,8 @@ class AddRoom(BaseModel):
 class Room(AddRoom):
     devices: List[str] = []
     
-class RoomResponse(RootModel[Dict[UUID, Room]]):
-    pass
+class RoomResponse(BaseModel):
+    root: Dict[UUID, Room]
 
 class Capability(BaseModel):
     type: str
