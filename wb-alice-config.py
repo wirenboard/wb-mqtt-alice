@@ -93,7 +93,7 @@ async def create_room(room_data: AddRoom):
     rooms_dict[room_id] = new_room
     rooms_dict["without_rooms"] = without_rooms
     config.rooms = rooms_dict
-    response = RoomResponse({room_id: new_room})
+    response = RoomResponse(root={room_id: new_room})
     
     save_config(config)
     return response
@@ -168,7 +168,7 @@ async def create_device(device_data: Device):
                       type=device_data.type,
                       capabilities=device_data.capabilities,
                       properties=device_data.properties)
-    response = DeviceResponse({device_id: new_device})
+    response = DeviceResponse(root={device_id: new_device})
     config.devices[device_id] = new_device
     config.rooms[device_data.room_id].devices.append(device_id)
     
