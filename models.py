@@ -12,7 +12,7 @@ class Room(AddRoom):
     devices: List[str] = []
     
 class RoomResponse(BaseModel):
-    root: Dict[UUID, Room]
+    __root__: Dict[UUID, Room]
 
 class Capability(BaseModel):
     type: str
@@ -41,7 +41,7 @@ class Device(BaseModel):
     properties: List[Property] = []
     
 class DeviceResponse(BaseModel):
-    root: Dict[UUID, Device]
+    __root__: Dict[UUID, Device]
 
 class RoomChange(BaseModel):
     room_id: str
