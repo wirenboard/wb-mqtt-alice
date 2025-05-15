@@ -123,7 +123,7 @@ async def update_room(room_id: str, room_data: Room):
 
 
 @app.delete("/integrations/alice/room/{room_id}", status_code=200)
-async def delete_room(room_id: str, room_data: Room):
+async def delete_room(room_id: str):
     """Delete room"""
 
     config = load_config()
