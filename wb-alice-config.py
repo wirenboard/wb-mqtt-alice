@@ -54,7 +54,7 @@ def room_name_exist(name: str, rooms) -> bool:
 
 
 def room_change(device_id, room_id, config):
-    del_room_id = config.devices[device_id].rooms_id
+    del_room_id = config.devices[device_id].room_id
     if room_id != del_room_id:
         config.rooms[del_room_id].devices.remove(device_id)
         config.rooms[room_id].devices.append(device_id)
