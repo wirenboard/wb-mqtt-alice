@@ -199,8 +199,8 @@ async def update_device(device_id: str, device_data: Device):
                       type=device_data.type,
                       capabilities=device_data.capabilities,
                       properties=device_data.properties)
-    config.devices[device_id] = response
     room_change(device_id, device_data.room_id, config)
+    config.devices[device_id] = response
     
     save_config(config)
     return response
