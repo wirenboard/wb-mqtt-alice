@@ -110,7 +110,9 @@ async def update_room(room_id: str, room_data: Room):
             status_code=404,
             detail="There is no room with this ID.")
     # Check if room with given name exists
-    if room_name_exist(room_data.name, config.rooms):
+    other_rooms = config.rooms.copy()
+    other_rooms.pop(room_id)
+    if room_name_exist(room_data.name, other_rooms):
         raise HTTPException(
                 status_code=409,
                 detail="Room with this name already exists")
