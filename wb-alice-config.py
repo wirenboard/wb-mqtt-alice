@@ -124,7 +124,7 @@ async def update_room(room_id: str, room_data: Room):
     return response
 
 
-@app.delete("/integrations/alice/room/{room_id}", status_200)
+@app.delete("/integrations/alice/room/{room_id}", status_code=200)
 async def delete_room(room_id: str):
     """Delete room"""
 
