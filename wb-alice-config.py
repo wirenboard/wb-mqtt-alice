@@ -84,7 +84,8 @@ async def create_room(room_data: AddRoom):
     if room_name_exist(room_data.name, config.rooms):
         raise HTTPException(
                 status_code=409,
-                detail="Room with this name already exists")
+                detail="Room with this name already exists",
+                code="err_room_exists")
     # Create room
     room_id = generate_id()
     new_room = Room(name=room_data.name, devices=[])
@@ -108,14 +109,16 @@ async def update_room(room_id: str, room_data: Room):
     if not room_id in config.rooms:
         raise HTTPException(
             status_code=404,
-            detail="There is no room with this ID.")
+            detail="There is no room with this ID",
+            code="err_no_room_ID")
     # Check if room with given name exists
     other_rooms = config.rooms.copy()
     other_rooms.pop(room_id)
     if room_name_exist(room_data.name, other_rooms):
         raise HTTPException(
                 status_code=409,
-                detail="Room with this name already exists")
+                detail="Room with this name already exists",
+                code="err_room_exists")
     # Update room
     response = Room(name=room_data.name, devices=room_data.devices)
     config.rooms[room_id] = response
@@ -133,12 +136,14 @@ async def delete_room(room_id: str):
     if room_id == "without_rooms":
         raise HTTPException(
             status_code=409,
-            detail="Cannot delete special room.")
+            detail="Cannot delete special room",
+            code="err_no_del_special room")
     # Check for the presence of room with given id
     if not room_id in config.rooms:
         raise HTTPException(
             status_code=404,
-            detail="There is no room with this ID.")
+            detail="There is no room with this ID"),
+            code="err_no_room_ID"
     # Delete room
     devices_to_move = config.rooms[room_id].devices.copy()
     for device_id in devices_to_move:
@@ -160,7 +165,8 @@ async def create_device(device_data: Device):
     if device_name_exist(device_data.name, device_data.room_id, config.devices):
         raise HTTPException(
             status_code=409,
-            detail="Device with this name already exists")
+            detail="Device with this name already exists",
+            code="err_device_exists")
     # Create device
     device_id = generate_id()
     new_device = Device(name=device_data.name,
@@ -187,12 +193,14 @@ async def update_device(device_id: str, device_data: Device):
     if not device_id in config.devices:
         raise HTTPException(
             status_code=404,
-            detail="There is no device with this ID.")
+            detail="There is no device with this ID",
+            code="err_no_device_ID")
     # Check for the presence of room with given id
     if not device_data.room_id in config.rooms:
         raise HTTPException(
             status_code=404,
-            detail="There is no room with this ID.")
+            detail="There is no room with this ID",
+            code="err_no_room_ID")
     # Update device
     response = Device(name=device_data.name,
                       #status_info=device_data.status_info,
@@ -217,7 +225,8 @@ async def delete_device(device_id: str):
     if not device_id in config.devices:
         raise HTTPException(
             status_code=404,
-            detail="There is no device with this ID.")
+            detail="There is no device with this ID",
+            code="err_no_device_ID")
     # Delete device
     del_room_id = config.devices[device_id].room_id
     del config.devices[device_id]
@@ -237,12 +246,14 @@ async def change_room(device_id: str, device_data: RoomChange):
     if not device_id in config.devices:
         raise HTTPException(
             status_code=404,
-            detail="There is no device with this ID.")
+            detail="There is no device with this ID",
+            code="err_no_device_ID")
     # Check for the presence of room with given id
     if not device_data.room_id in config.rooms:
         raise HTTPException(
             status_code=404,
-            detail="There is no room with this ID.")
+            detail="There is no room with this ID",
+            code="err_no_room_ID")
     # Change room   
     room_change(device_id, device_data.room_id, config)
     config.devices[device_id].rooms_id = device_data.room_id
