@@ -142,8 +142,8 @@ async def delete_room(room_id: str):
     if not room_id in config.rooms:
         raise HTTPException(
             status_code=404,
-            detail="There is no room with this ID"),
-            code="err_no_room_ID"
+            detail="There is no room with this ID",
+            code="err_no_room_ID")
     # Delete room
     devices_to_move = config.rooms[room_id].devices.copy()
     for device_id in devices_to_move:
