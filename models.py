@@ -17,10 +17,12 @@ class RoomResponse(BaseModel):
 class Capability(BaseModel):
     type: str
     mqtt: str
+    parameters: Optional[dict][ = None
 
 class Property(BaseModel):
     type: str
     mqtt: str
+    parameters: Optional[dict][ = None
 
 class AddDevice(BaseModel):
     name: str
