@@ -48,6 +48,7 @@ class DeviceResponse(BaseModel):
 class RoomChange(BaseModel):
     room_id: str
 
+
 class Config(BaseModel):
     rooms: Dict[str, Room]
     devices: Dict[str, Device]
