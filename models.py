@@ -5,10 +5,8 @@ from uuid import UUID
 class StatusInfo(BaseModel):
     reportable: bool = False
 
-class AddRoom(BaseModel):
+class Room(BaseModel):
     name: str
-
-class Room(AddRoom):
     devices: List[str] = []
     
 class RoomResponse(BaseModel):
@@ -24,15 +22,6 @@ class Property(BaseModel):
     mqtt: str
     parameters: Optional[dict] = None
 
-class AddDevice(BaseModel):
-    name: str
-    status_info: Optional[dict] = None
-    description: Optional[str] = None
-    room_id: str
-    type: str
-    capabilities: List[Capability] = []
-    properties: List[Property] = []
-
 class Device(BaseModel):
     name: str
     status_info: Optional[dict] = None
@@ -47,7 +36,6 @@ class DeviceResponse(BaseModel):
 
 class RoomChange(BaseModel):
     room_id: str
-
 
 class Config(BaseModel):
     rooms: Dict[str, Room]
