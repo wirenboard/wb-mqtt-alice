@@ -5,7 +5,7 @@ import uuid
 import uvicorn
 from fastapi import FastAPI, HTTPException
 
-from models import Room, RoomResponse, Capability, Property, Device, DeviceResponse, RoomChange, Config
+from models import Room, Capability, Property, Device, RoomChange, Config
 
 app = FastAPI(
     title="Alice Integration API",
@@ -75,7 +75,7 @@ async def get_all_rooms_and_devices():
     return config
 
 
-@app.post("/integrations/alice/room", response_model=RoomResponse, status_code=201)
+@app.post("/integrations/alice/room", status_code=201)
 async def create_room(room_data: Room):
     """Create new room"""
 
@@ -87,19 +87,18 @@ async def create_room(room_data: Room):
                 detail="Room with this name already exists")
     # Create room
     room_id = generate_id()
-    new_room = Room(name=room_data.name, devices=[])
     rooms_dict = config.rooms.copy()
     without_rooms = rooms_dict.pop("without_rooms")
-    rooms_dict[room_id] = new_room
+    rooms_dict[room_id] = room_data
     rooms_dict["without_rooms"] = without_rooms
     config.rooms = rooms_dict
-    response = RoomResponse(__root__={room_id: new_room})
+    response = room_data.post_response(room_id)
     
     save_config(config)
     return response
 
 
-@app.put("/integrations/alice/room/{room_id}", response_model=Room, status_code=200)
+@app.put("/integrations/alice/room/{room_id}", status_code=200)
 async def update_room(room_id: str, room_data: Room):
     """Update room"""
 
@@ -117,7 +116,7 @@ async def update_room(room_id: str, room_data: Room):
                 status_code=409,
                 detail="Room with this name already exists")
     # Update room
-    response = Room(name=room_data.name, devices=room_data.devices)
+    response = room_data.put_response()
     config.rooms[room_id] = response
     
     save_config(config)
@@ -151,7 +150,7 @@ async def delete_room(room_id: str):
     return {"message": "Room deleted successfully"}
 
 
-@app.post("/integrations/alice/device", response_model=DeviceResponse, status_code=201)
+@app.post("/integrations/alice/device", status_code=201)
 async def create_device(device_data: Device):
     """Create new device"""
 
@@ -163,22 +162,15 @@ async def create_device(device_data: Device):
             detail="Device with this name already exists")
     # Create device
     device_id = generate_id()
-    new_device = Device(name=device_data.name,
-                      #status_info=device_data.status_info,
-                      #description=device_data.description,
-                      room_id=device_data.room_id,
-                      type=device_data.type,
-                      capabilities=device_data.capabilities,
-                      properties=device_data.properties)
-    response = DeviceResponse(__root__={device_id: new_device})
-    config.devices[device_id] = new_device
+    response = device_data.post_response(device_id)
+    config.devices[device_id] = device_data
     config.rooms[device_data.room_id].devices.append(device_id)
     
     save_config(config)
     return response
 
 
-@app.put("/integrations/alice/device/{device_id}", response_model=Device, status_code=200)
+@app.put("/integrations/alice/device/{device_id}", status_code=200)
 async def update_device(device_id: str, device_data: Device):
     """Update device"""
 
@@ -194,13 +186,7 @@ async def update_device(device_id: str, device_data: Device):
             status_code=404,
             detail="There is no room with this ID")
     # Update device
-    response = Device(name=device_data.name,
-                      #status_info=device_data.status_info,
-                      #description=device_data.description,
-                      room_id=device_data.room_id,
-                      type=device_data.type,
-                      capabilities=device_data.capabilities,
-                      properties=device_data.properties)
+    response = device_data
     room_change(device_id, device_data.room_id, config)
     config.devices[device_id] = response
     
