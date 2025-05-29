@@ -5,7 +5,7 @@ import uuid
 import uvicorn
 from fastapi import FastAPI, HTTPException
 
-from models import AddRoom, Room, RoomResponse, Capability, Property, Device, DeviceResponse, RoomChange, Config
+from models import Room, RoomResponse, Capability, Property, Device, DeviceResponse, RoomChange, Config
 
 app = FastAPI(
     title="Alice Integration API",
@@ -76,7 +76,7 @@ async def get_all_rooms_and_devices():
 
 
 @app.post("/integrations/alice/room", response_model=RoomResponse, status_code=201)
-async def create_room(room_data: AddRoom):
+async def create_room(room_data: Room):
     """Create new room"""
 
     config = load_config()
