@@ -1,102 +1,113 @@
-# client.py (Socket.IO client)
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Wiren Board Alice Integration Client
+This script provides integration between Wiren Board controllers
+and "Yandex smart home" platform with Alice
+
+Usage:
+    python3 wb-alice-client.py
+"""
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import signal
 import time
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import paho.mqtt.client as mqtt
 import paho.mqtt.subscribe as subscribe
-import requests
 import socketio
 from wb_common.mqtt_client import MQTTClient
 
 from mqtt_topic import MQTTTopic
 
-logging.basicConfig(level=logging.INFO, force=True)
+logging.basicConfig(level=logging.DEBUG, force=True)
+logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/etc/wb-alice-client.conf"
 
-YANDEX_SKILL_ID = "add0dfb6-5b76-4eb9-a07e-7f4fe401881d"  # Скил с именем: 'Wiren Board'
-YANDEX_SKILL_OAUTH_TOKEN = "y0__xCAvtL0Bxij9xMg1aay2RJywqcZFALIyCvP-9OR3B2gAZIzFA"
-YANDEX_USER_ID = "wb-test-user"
+MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
+"""
+Global asyncio event loop, used to safely schedule coroutines from non-async
+threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
+"""
 
-# Если до этого яндекс не получал пакет обновления девайсов с этим именем то у него будут ошибки возвращаться
-# INFO:__main__:[INCOME] Server response: {'data': 'Message received'}
-# INFO:__main__:[YANDEX] Ошибка 400: {"request_id":"c21191a3-ce61-4f77-8d3b-a5f5da9163f6","status":"error","error_code":"UNKNOWN_USER"}
-# INFO:__main__:[MQTT] Получено сообщение: 0 в топике /devices/wb-mr6c_1/controls/K2
-# INFO:__main__:[MQTT] Получено сообщение: 22.29 в топике /devices/wb-msw-v4_2/controls/Temperature
-# INFO:__main__:[YANDEX] Ошибка 400: {"request_id":"58c1d457-9651-42b8-8a7c-52f1cea4d44f","status":"error","error_code":"UNKNOWN_USER"}
+# Событие, которое «будит» основной цикл и инициирует остановку
+stop_event: Optional[asyncio.Event] = None
 
-mqtt_topics = {
-    "light_corridor": None,
-    "light_bedroom": None,
-    "temperature_corridor": None,
-}
+sio = socketio.AsyncClient(
+    logger=True,
+    engineio_logger=True,
+    reconnection=True,  # auto-reconnect ON
+    reconnection_attempts=0,  # 0 = infinite retries
+    reconnection_delay=2,  # first delay 2 s
+    reconnection_delay_max=30,  # cap at 30 s
+    randomization_factor=0.5,  # jitter
+)
+
+controller_sn: Optional[str] = None
 
 
-def read_mqtt_topics(repo):
+def _emit_async(event: str, data: dict) -> None:
+    """
+    Safely schedules a Socket.IO event to be emitted
+    from any thread (async or not).
+    """
+    logger.info("[SOCKET.IO] Connected status: %s", sio.connected)
+
+    if not sio.connected:
+        logger.warning("[SOCKET.IO] Not connected, skipping emit '%s'", event)
+        logger.warning("            Payload: %s", json.dumps(data))
+        return
+
+    logger.info("[SOCKET.IO] Attempting to emit '%s' with payload: %s", event, data)
+
     try:
-        with open("/etc/wb-alice-devices.conf", "r") as f:
-            config = json.load(f)
+        # We're in an asyncio thread – safe to call create_task directly
+        asyncio.get_running_loop()
+        asyncio.create_task(sio.emit(event, data))
+        logger.debug("[SOCKET.IO] Scheduled emit '%s' via asyncio task", event)
 
-        repo["light_corridor"] = MQTTTopic(
-            config["devices"][0]["capabilities"][0]["mqtt"]
-        )
-        repo["light_bedroom"] = MQTTTopic(
-            config["devices"][1]["capabilities"][0]["mqtt"]
-        )
-        repo["temperature_corridor"] = MQTTTopic(
-            config["devices"][2]["properties"][0]["mqtt"]
-        )
+    except RuntimeError:
+        # No running loop in current thread – fallback to MAIN_LOOP
+        logger.debug("[SOCKET.IO] No running loop in current thread – using MAIN_LOOP")
 
-        logger.info("Загружены топики:")
-        if repo["light_corridor"]:
-            logger.info(
-                f"Свет light_corridor: {repo['light_corridor'].short} (полный: {repo['light_corridor'].full})"
+        if MAIN_LOOP is None:
+            logger.warning(
+                "[SOCKET.IO] MAIN_LOOP not available – dropping event '%s'", event
             )
-        else:
-            logger.info("Топик для света light_corridor не найден")
+            return
 
-        if repo["light_bedroom"]:
-            logger.info(
-                f"Свет light_bedroom: {repo['light_bedroom'].short} (полный: {repo['light_bedroom'].full})"
+        if MAIN_LOOP.is_running():
+            fut = asyncio.run_coroutine_threadsafe(sio.emit(event, data), MAIN_LOOP)
+
+            # Log if the future raises an exception
+            def log_emit_exception(f: asyncio.Future):
+                exc = f.exception()
+                if exc:
+                    logger.error(
+                        "[SOCKET.IO] Emit '%s' failed: %s", event, exc, exc_info=True
+                    )
+
+            fut.add_done_callback(log_emit_exception)
+        else:
+            logger.error(
+                "[SOCKET.IO] MAIN_LOOP is not running – cannot emit '%s'", event
             )
-        else:
-            logger.info("Топик для света light_bedroom не найден")
-
-        if repo["temperature_corridor"]:
-            logger.info(
-                f"Температура: {repo['temperature_corridor'].short} (полный: {repo['temperature_corridor'].full})"
-            )
-        else:
-            logger.info("Топик для температуры не найден")
-        return True
-    except Exception as e:
-        logger.info(f"Ошибка при чтении конфигурационного файла: {e}")
-        return False
 
 
-read_mqtt_topics(mqtt_topics)
-
-last_temp_value = None
-
-
-def send_temperature_to_yandex(device_id, temp_value):
-    timestamp = int(time.time())
-    url = f"https://dialogs.yandex.net/api/v1/skills/{YANDEX_SKILL_ID}/callback/state"
-    headers = {
-        "Authorization": f"OAuth {YANDEX_SKILL_OAUTH_TOKEN}",
-        "Content-Type": "application/json",
-    }
+def send_temperature_to_server(device_id: str, temp_value: float) -> None:
     payload = {
-        "ts": timestamp,
+        "ts": int(time.time()),
         "payload": {
-            "user_id": YANDEX_USER_ID,
+            # user_id будет добавлен сервером
             "devices": [
                 {
                     "id": device_id,
@@ -111,18 +122,332 @@ def send_temperature_to_yandex(device_id, temp_value):
             ],
         },
     }
+    try:
+        _emit_async("device_state", payload)
+    except Exception:
+        logging.exception("Error when processing MQTT message")
+
+
+async def read_topic_once(
+    topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0
+):
+    """
+    Читает одно retained-сообщение из MQTT в отдельном потоке.
+    Возвращает paho.mqtt.client.MQTTMessage либо None при тайм-ауте.
+    """
+    logger.debug(
+        "[read_topic_once] wait %s message on '%s' (retain=%s, %.1fs)",
+        "retained" if retain else "live",
+        topic,
+        retain,
+        timeout,
+    )
 
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        if response.status_code == 202:
-            logger.info(f"[YANDEX] Отправлено новое значение температуры: {temp_value}")
+        res = await asyncio.wait_for(
+            asyncio.to_thread(
+                subscribe.simple, topic, hostname=host, retained=retain, msg_count=1
+            ),
+            timeout=timeout,
+        )
+        logger.info("Current topic '%s' state: '%s'" % (topic, res))
+        return res
+    except asyncio.TimeoutError:
+        logger.warning("[read_topic_once] timeout waiting '%s'", topic)
+        return None
+
+
+class DeviceRegistry:
+    """Parses WB config and routes MQTT ↔ Yandex"""
+
+    def __init__(
+        self,
+        cfg_path: str,
+        *,
+        send_to_yandex: Callable[[str, str, Optional[str], Any], None],
+        publish_to_mqtt: Callable[[str, str], None],
+    ) -> None:
+        self._send_to_yandex = send_to_yandex
+        self._publish_to_mqtt = publish_to_mqtt
+
+        self.devices: Dict[str, Dict] = {}  # id → full json block
+        self.topic2info: Dict[str, Tuple[str, str, int]] = {}
+        self.cap_index: Dict[Tuple[str, str, Optional[str]], str] = {}
+        self.rooms: Dict[str, Dict] = {}  # room_id → block
+
+        self._load_config(cfg_path)
+
+    # ---------- config loader ----------
+    def _load_config(self, path: str) -> None:
+        """Reads /etc/wb-alice-devices.conf and fills:
+        • self.devices        – полный json-блок устройства
+        • self.topic2info     – full_topic → (device_id, 'capabilities' / 'properties', index)
+        • self.cap_index      – 'capabilities' / 'properties'(device_id, type, instance) → full_topic
+        """
+
+        logger.info(f"[REG] Try read config file '{path}'")
+        with open(path, "r") as f:
+            config_data = json.load(f)
+            logger.info(
+                f"[REG] Readed data from config file '{json.dumps(config_data, indent=2, ensure_ascii=False)}'"
+            )
+
+        self.rooms = config_data.get("rooms", {})
+        devices_config = config_data.get("devices", {})
+        for device_id, device_data in devices_config.items():
+            self.devices[device_id] = device_data
+
+            for i, cap in enumerate(device_data.get("capabilities", [])):
+                mqtt_topic = MQTTTopic(cap["mqtt"])  # convert once
+                full = mqtt_topic.full  # always full form
+                self.topic2info[full] = (device_id, "capabilities", i)
+                inst = cap.get("instance")
+
+                # TODO: Add all correct instance types for each capabilities
+                #       https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
+                if cap["type"].endswith("on_off") and not inst:
+                    # Для on/off по спецификации Яндекса instance == "on"
+                    self.cap_index[(device_id, cap["type"], "on")] = full
+                else:
+                    self.cap_index[(device_id, cap["type"], inst)] = full
+
+            for i, prop in enumerate(device_data.get("properties", [])):
+                mqtt_topic = MQTTTopic(prop["mqtt"])
+                full = mqtt_topic.full
+                self.topic2info[full] = (device_id, "properties", i)
+                self.cap_index[(device_id, prop["type"], prop.get("instance"))] = full
+
+        logger.info(
+            f"[REG] Devices loaded: {len(self.devices)}, "
+            f"mqtt topics: {len(self.topic2info)}"
+        )
+
+    def build_yandex_devices_list(self) -> list[dict]:
+        """
+        Формирует массив `devices` в формате, который ожидает
+        Яндекс-Диалоги в ответе /user/devices ( discovery ).
+        """
+        devices_out: list[dict] = []
+
+        for dev_id, dev in self.devices.items():
+            room_name = ""
+            room_id = dev.get("room_id")
+            if room_id and room_id in self.rooms:
+                room_name = self.rooms[room_id].get("name", "")
+
+            dev_block: dict[str, Any] = {
+                "id": dev_id,
+                "name": dev.get("name", dev_id),
+                "status_info": dev.get("status_info", {"reportable": False}),
+                "description": dev.get("description", ""),
+                "room": room_name,
+                "type": dev["type"],
+            }
+
+            # ---- capabilities ----
+            caps = []
+            for cap in dev.get("capabilities", []):
+                caps.append(
+                    {
+                        "type": cap["type"],
+                        "retrievable": True,
+                    }
+                )
+            if caps:
+                dev_block["capabilities"] = caps
+
+            # ---- properties ----
+            props = []
+            for prop in dev.get("properties", []):
+                prop_obj = {
+                    "type": prop["type"],
+                    "retrievable": True,
+                    "reportable": True,
+                }
+                # добавим parameters, если знаем instance
+                instance = prop.get("instance")
+                if instance or prop["type"].endswith("float"):
+                    prop_obj["parameters"] = {
+                        "instance": instance or "temperature",
+                        "unit": "unit.temperature.celsius",
+                    }
+                props.append(prop_obj)
+            if props:
+                dev_block["properties"] = props
+
+            devices_out.append(dev_block)
+
+        return devices_out
+
+    # ---------- MQTT → Yandex ----------
+    def handle_mqtt(self, topic: str, raw: str) -> None:
+        if topic not in self.topic2info:
+            return
+
+        device_id, section, idx = self.topic2info[topic]
+        blk = self.devices[device_id][section][idx]
+
+        cap_type = blk["type"]
+        instance = blk.get("instance")
+
+        if cap_type.endswith("on_off"):
+            value = raw.strip().lower() not in ("0", "false", "off")
+        elif cap_type.endswith("float"):
+            try:
+                value = float(raw)
+            except ValueError:
+                logger.warning(f"[REG] Can't convert '{raw}' to float")
+                return
         else:
-            logger.info(f"[YANDEX] Ошибка {response.status_code}: {response.text}")
-    except Exception as e:
-        logger.info(f"[YANDEX] Ошибка при отправке: {e}")
+            value = raw
+
+        self._send_to_yandex(device_id, cap_type, instance, value)
+
+    # ---------- Yandex → MQTT ----------
+    def handle_action(
+        self,
+        device_id: str,
+        cap_type: str,
+        instance: Optional[str],
+        value: Any,
+    ) -> None:
+        key = (device_id, cap_type, instance)
+        if key not in self.cap_index:
+            logger.warning(f"[REG] No mapping for {key}")
+            return
+
+        base = self.cap_index[key]  # already full topic
+        # Check what user write topic with or without '\on'
+        cmd_topic = base if base.endswith("/on") else f"{base}/on"
+
+        if cap_type.endswith("on_off"):
+            payload = "1" if value else "0"
+        else:
+            payload = str(value)
+
+        self._publish_to_mqtt(cmd_topic, payload)
+        logger.info(f"[REG] Published '{payload}' → {cmd_topic}")
+
+    async def _read_capability_state(self, device_id: str, cap: dict) -> Optional[dict]:
+        key = (device_id, cap["type"], cap.get("instance"))
+        topic = self.cap_index.get(key)
+        if not topic:
+            logger.debug(f"[REG] No MQTT topic found for capability: {key}")
+            return None
+        try:
+            value = await read_mqtt_state(topic, mqtt_host="localhost")
+
+            # Normalize boolean values for on_off capabilities
+            if cap["type"].endswith("on_off"):
+                value = bool(value)
+
+            return {
+                "type": cap["type"],
+                "state": {
+                    "instance": cap.get("instance", "on"),
+                    "value": value,
+                },
+            }
+        except Exception as e:
+            logger.debug(f"[REG] Failed to read capability topic '{topic}': {e}")
+            return None
+
+    async def _read_property_state(self, device_id: str, prop: dict) -> Optional[dict]:
+        key = (device_id, prop["type"], prop.get("instance"))
+        topic = self.cap_index.get(key)
+        if not topic:
+            logger.debug(f"[REG] No MQTT topic found for property: {key}")
+            return None
+        try:
+            msg = await read_topic_once(topic, timeout=1)
+            if msg is None:
+                logger.debug(f"[REG] No retained payload in '{topic}'")
+                return None
+            raw = msg.payload.decode().strip()
+            value = float(raw)  # Currently only float is supported
+
+            return {
+                "type": prop["type"],
+                "state": {
+                    "instance": prop.get("instance", "temperature"),
+                    "value": value,
+                },
+            }
+        except Exception as e:
+            logger.warning(f"[REG] Failed to read property topic '{topic}': {e}")
+            return None
+
+    async def get_device_current_state(self, device_id: str) -> dict:
+        device = self.devices.get(device_id)
+        if not device:
+            logger.warning(
+                f"[REG] get_device_current_state: unknown device_id '{device_id}'"
+            )
+            return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
+
+        # TODO: тут очень важно проверить есть ли вообще такой топик
+        #       так же важно понимать retained ли топик или нет.
+        #       очень желательно чтобы все топики были retain
+
+        capabilities_output: list[dict] = []
+        properties_output: list[dict] = []
+
+        for cap in device.get("capabilities", []):
+            logger.debug(f"[SOCKET.IO] Reading capability state: '%s'", cap)
+            cap_state = await self._read_capability_state(device_id, cap)
+            if cap_state:
+                capabilities_output.append(cap_state)
+
+        for prop in device.get("properties", []):
+            logger.debug(f"[SOCKET.IO] Reading property state: '%s'", prop)
+            prop_state = await self._read_property_state(device_id, prop)
+            if prop_state:
+                properties_output.append(prop_state)
+
+        # ► Если ничего не прочитали – ошибка
+        if not capabilities_output and not properties_output:
+            logger.warning(
+                "[REG] %s: no live or retained data — marking DEVICE_UNREACHABLE",
+                device_id,
+            )
+            return {
+                "id": device_id,
+                "error_code": "DEVICE_UNREACHABLE",
+                "error_message": "MQTT topics unavailable",
+            }
+
+        # ► Если хотя бы что-то есть – возвращаем
+        device_output = {"id": device_id}
+        if capabilities_output:
+            device_output["capabilities"] = capabilities_output
+        if properties_output:
+            device_output["properties"] = properties_output
+
+        return device_output
 
 
-def send_relay_state_to_yandex(device_id, raw_state):
+# ------------------------------------------------------------------
+# Unified sender to Yandex used by registry
+# ------------------------------------------------------------------
+
+
+def send_to_yandex_state(
+    device_id: str, cap_type: str, instance: Optional[str], value: Any
+) -> None:
+    if cap_type == "devices.capabilities.on_off":
+        send_relay_state_to_server(device_id, value)
+    elif cap_type == "devices.properties.float":
+        send_temperature_to_server(device_id, value)
+    else:
+        logger.info(f"[YANDEX] TODO sender for {cap_type} (instance={instance})")
+
+
+# Helper for publishing from registry
+def publish_to_mqtt(topic: str, payload: str) -> None:
+    mqtt_client.publish(topic, payload)
+
+
+def send_relay_state_to_server(device_id, raw_state):
     """
     Преобразует входное значение (строка или число) в булево и отправляет состояние реле в Яндекс.Диалоги.
 
@@ -159,16 +484,10 @@ def send_relay_state_to_yandex(device_id, raw_state):
         logger.info(f"[RELAY] Ошибка при преобразовании состояния в bool: {e}")
         is_on = False
 
-    timestamp = int(time.time())
-    url = f"https://dialogs.yandex.net/api/v1/skills/{YANDEX_SKILL_ID}/callback/state"
-    headers = {
-        "Authorization": f"OAuth {YANDEX_SKILL_OAUTH_TOKEN}",
-        "Content-Type": "application/json",
-    }
     payload = {
-        "ts": timestamp,
+        "ts": int(time.time()),
         "payload": {
-            "user_id": YANDEX_USER_ID,
+            # "user_id" field added later when proxy
             "devices": [
                 {
                     "id": device_id,
@@ -183,96 +502,28 @@ def send_relay_state_to_yandex(device_id, raw_state):
             ],
         },
     }
-
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        if response.status_code == 202:
-            logger.info(f"[YANDEX] Отправлено новое состояние реле: {is_on}")
-        else:
-            logger.info(f"[YANDEX] Ошибка {response.status_code}: {response.text}")
-    except Exception as e:
-        logger.info(f"[YANDEX] Ошибка при отправке состояния реле: {e}")
+        _emit_async("device_state", payload)
+    except Exception:
+        logging.exception("Error when processing MQTT message")
 
 
 def on_connect(client, userdata, flags, rc):
-    logger.info(f"[MQTT] Подключено с кодом: {rc}")
-
-    # Подписываемся на все топики в mqtt_topics
-    for topic_key, topic_obj in mqtt_topics.items():
-        if topic_obj:  # Проверка, что топик не None
-            client.subscribe(topic_obj.full, qos=0)
-            logger.info(f"[MQTT] Подписан на топик '{topic_key}': {topic_obj.full}")
-        else:
-            logger.info(f"[MQTT] Топик '{topic_key}' не определен, подписка невозможна")
+    logger.info(f"[MQTT] Connected with code: {rc}")
+    # subscribe to every topic from registry
+    for t in registry.topic2info.keys():
+        client.subscribe(t, qos=0)
+        logger.info(f"[MQTT] Subscribed to {t}")
 
 
 def on_message(client, userdata, message):
-    global last_temp_value
-
-    topic = message.topic
+    topic_str = message.topic
     payload_str = message.payload.decode().strip()
-
-    logger.info(f"[MQTT] Получено сообщение: {payload_str} в топике {topic}")
-
-    if topic == mqtt_topics["temperature_corridor"].full:
-        try:
-            new_temp = float(payload_str)
-
-            # TODO:(vg) Реализовать больше оптимизаций по передаваемым данным
-            #           Важно сделать ограничение частоты отправляемых данных чтобы
-            #           не отправлять все данные с провогдного датчика температуры
-            #           если он изменяется 10 раз в секунду.
-            #           Возможные оптимизации:
-            #             - Минимальое изменение численное, например для температуры 0.2,
-            #               чтобы не передавать каждый раз изменения на 0.01 градус
-            #             - Минимальное время - если есть выбросы копить и усреднять,
-            #               чтобы не передавать изменения температуры от каждого
-            #               дуновения ветра из окна
-
-            if last_temp_value is None:
-                last_temp_value = new_temp
-                send_temperature_to_yandex(
-                    "7065fcf8-963e-42a2-a4f5-e668e412d1c4", new_temp
-                )
-            else:
-                cur_abs_dif = abs(new_temp - last_temp_value)
-                goal_abs_dif = 0.04
-                if cur_abs_dif >= goal_abs_dif:
-                    last_temp_value = new_temp
-                    send_temperature_to_yandex(
-                        "7065fcf8-963e-42a2-a4f5-e668e412d1c4", new_temp
-                    )
-                else:
-                    logger.info(
-                        f"[TEMP] Температура не изменилась существенно — не отправляем. Последнее значение: '{last_temp_value}', разница '{cur_abs_dif}', но нужна '{goal_abs_dif}'"
-                    )
-        except ValueError:
-            logger.info("[TEMP] Ошибка при разборе float температуры")
-
-    elif topic == mqtt_topics["light_corridor"].full:
-        try:
-            relay_state = payload_str.strip().lower()
-            if relay_state in ["0", "off", "false"]:
-                relay_on = False
-            else:
-                relay_on = True
-
-            send_relay_state_to_yandex("f52856d1-4fca-40ce-8ee3-e5ed37298d6e", relay_on)
-
-        except Exception as e:
-            logger.info(f"[RELAY] Ошибка при разборе состояния реле: {e}")
-    elif topic == mqtt_topics["light_bedroom"].full:
-        try:
-            relay_state = payload_str.strip().lower()
-            if relay_state in ["0", "off", "false"]:
-                relay_on = False
-            else:
-                relay_on = True
-
-            send_relay_state_to_yandex("67a2d9b9-666b-41e1-957e-90cd742ec554", relay_on)
-
-        except Exception as e:
-            logger.info(f"[RELAY] Ошибка при разборе состояния реле: {e}")
+    logger.info(f"[MQTT] Incoming from topic '{topic_str}':")
+    logger.info(f"       - Size   : '{len(message.payload)}'")
+    logger.info(f"       - Message: '{payload_str}'")
+    # delegate parsing to registry
+    registry.handle_mqtt(topic_str, payload_str)
 
 
 mqtt_client = MQTTClient(
@@ -284,44 +535,14 @@ mqtt_client.on_message = on_message
 mqtt_client.on_connect = on_connect
 
 
-# === Основной async-запуск с бесконечным ожиданием ===
-async def main():
-    logger.info("[MAIN] Запускаем MQTT клиент...")
-    mqtt_client.start()
+# Instantiate registry (after mqtt_client is defined)
+# ------------------------------------------------------------------
 
-    # Создаем asyncio-событие, чтобы держать программу "живой" и блокировать цикл до SIGINT (Ctrl+C)
-    stop_event = asyncio.Event()
-
-    # Обработчик SIGINT/SIGTERM (Перехватываем Ctrl+C, systemd stop)
-    def shutdown_handler():
-        logger.info("\n[MAIN] Получен сигнал завершения")
-        stop_event.set()
-
-    # Кроссплатформенно: в Unix можно использовать `loop.add_signal_handler`
-    loop = asyncio.get_running_loop()
-    for sig in ("SIGINT", "SIGTERM"):
-        try:
-            loop.add_signal_handler(getattr(signal, sig), shutdown_handler)
-        except NotImplementedError:
-            # На Windows add_signal_handler не работает
-            pass
-
-    # Параллельно запускаем контроллер (Socket.IO)
-    controller_task = asyncio.create_task(connect_controller())
-
-    # Ждём завершения либо контроллера, либо сигнала
-    logger.info("[MAIN] Клиент работает. Для выхода нажмите Ctrl+C.")
-    done, pending = await asyncio.wait(
-        [controller_task, stop_event.wait()],  # ждем, пока не вызовется .set()
-        return_when=asyncio.FIRST_COMPLETED,
-    )
-
-    if controller_task in done and controller_task.exception():
-        logger.info("[MAIN] Ошибка в connect_controller:", controller_task.exception())
-
-    logger.info("[MAIN] Останавливаем MQTT клиент...")
-    mqtt_client.stop()
-    logger.info("[MAIN] Завершено.")
+registry = DeviceRegistry(
+    "/etc/wb-alice-devices.conf",
+    send_to_yandex=send_to_yandex_state,
+    publish_to_mqtt=publish_to_mqtt,
+)
 
 
 def get_controller_sn():
@@ -359,44 +580,186 @@ def read_config():
         return None
 
 
-def read_mqtt_state(topic: str, mqtt_host="localhost", timeout=1) -> bool:
+async def read_mqtt_state(
+    topic: str, mqtt_host="localhost", timeout=1
+) -> Optional[bool]:
     """
-    Читает значение топика (0/1, "false"/"true" и т.п.) и возвращает Python bool.
-    Используем subscribe.simple(...) из paho.mqtt, который БЛОКИРУЕТСЯ на время чтения.
-    По умолчанию timeout=1 секунду.
+    Reads the value of a topic (0/1, "false"/"true", etc.) and returns a Python bool
+    Uses subscribe.simple(...) from paho.mqtt, which BLOCKS for the duration of reading
     """
-    logger.info(f"[read_mqtt_state] try read topic: {topic}")
-    try:
-        msg = subscribe.simple(topic, hostname=mqtt_host, retained=True)
-        logger.info("Current topic '%s' state: '%s'" % (msg.topic, msg.payload))
+    logger.info("[read_mqtt_state] trying to read topic: %s", topic)
 
-        payload_str = msg.payload.decode().strip().lower()
-        # Интерпретируем разные варианты
-        if payload_str in ["1", "true", "on"]:
-            return True
-        elif payload_str in ["0", "false", "off"]:
-            return False
-        else:
-            logger.info(
-                f"[WARN] Unexpected payload in topic '{topic}': {payload_str}, defaulting to False"
-            )
-            return False
+    try:
+        msg = await read_topic_once(topic, timeout=timeout)
+        if msg is None:
+            logger.debug("[REG] No retained payload in '%s'", topic)
+            return None
     except Exception as e:
-        logger.info(f"[WARN] Could not read MQTT topic '{topic}': {e}")
-        # При ошибке чтения вернём False или делайте как вам нужно
+        logger.warning("[REG] Failed to read topic '%s': %s", topic, e)
+        return None
+
+    payload_str = msg.payload.decode().strip().lower()
+
+    # Interpret different payload variants
+    if payload_str in {"1", "true", "on"}:
+        return True
+    elif payload_str in {"0", "false", "off"}:
+        return False
+    else:
+        logger.info("[WARN] Unexpected payload in topic '%s': %s", topic, payload_str)
         return False
 
 
-def write_mqtt_state(mqtt_client: mqtt.Client, topic: str, is_on: bool):
+def write_mqtt_state(mqtt_client: mqtt.Client, topic: str, is_on: bool) -> None:
     """
-    Публикует "1" (True) или "0" (False) в указанный топик.
+    Publishes "1" (True) or "0" (False) to the given topic
     """
     payload_str = "1" if is_on else "0"
-    mqtt_client.publish(topic + "/on", payload_str)
-    logger.info(f"[MQTT] Published '{payload_str}' to '{topic}'")
+    full_topic = f"{topic}/on"
+    mqtt_client.publish(full_topic, payload_str)
+    logger.debug("[MQTT] Published '%s' to '%s'", payload_str, full_topic)
+
+
+@sio.event
+async def connect():
+    logger.info("[SUCCESS] Connected to Socket.IO server!")
+    await sio.emit("message", {"controller_sn": controller_sn, "status": "online"})
+
+
+@sio.event
+async def disconnect():
+    logger.info("[ERR] Disconnected from server")
+
+
+@sio.event
+async def response(data):
+    logger.info(f"[INCOME] Server response: {data}")
+
+
+@sio.event
+async def error(data):
+    logger.info(f"[ERR] Server error: {data}")
+    logger.info("[ERR] Terminating connection due to server error")
+    await sio.disconnect()
+
+
+@sio.event
+async def connect_error(data):
+    logger.info(f"❌ Connection refused by server: {data}")
+
+
+# ----------------- Обработчики alice_* -----------------
+# При использовании sio.call("alice_devices_list") на сервере,
+# клиенту прилетит событие "alice_devices_list". Нужно вернуть ответ.
+
+
+@sio.on("alice_devices_list")
+async def on_alice_devices_list(data):
+    """
+    Клиент-контроллер получил запрос списка устройств от сервера
+    Формируем полный список устройств по конфигу
+    """
+    logger.info(f"[SOCKET.IO] alice_devices_list event: {data}")
+    devices_list = registry.build_yandex_devices_list()
+    req_id = data.get("request_id")
+    devices_response = {
+        "request_id": req_id,
+        "payload": {
+            # "user_id" field added later when this msg will be proxyded
+            "devices": devices_list,
+        },
+    }
+
+    logger.info("[SOCKET.IO] answer device list to Yandex:")
+    logger.info(json.dumps(devices_response, ensure_ascii=False, indent=2))
+    return devices_response
+
+
+@sio.on("alice_devices_query")
+async def on_alice_devices_query(data):
+    """
+    Handles a Yandex request to retrieve the current state of devices.
+    """
+    logger.info("[SOCKET.IO] alice_devices_query event:")
+    logger.info(json.dumps(data, ensure_ascii=False, indent=2))
+
+    request_id = data.get("request_id", "unknown")
+    devices_response = []
+
+    for dev in data.get("devices", []):
+        device_id = dev.get("id")
+        logger.info(f"[SOCKET.IO] Try get data for device: '{device_id}'")
+        devices_response.append(await registry.get_device_current_state(device_id))
+
+    query_response = {
+        "request_id": request_id,
+        "payload": {
+            "devices": devices_response,
+        },
+    }
+
+    logger.info("[SOCKET.IO] answer devices query to Yandex:")
+    logger.info(json.dumps(query_response, ensure_ascii=False, indent=2))
+    return query_response
+
+
+@sio.on("alice_devices_action")
+async def on_alice_devices_action(data):
+    """
+    Обработка действия над устройством (включить/выключить).
+    Меняем состояние в LIGHT_STATE, возвращаем результат.
+    """
+    logger.info("[SOCKET.IO] alice_devices_action event:")
+    logger.info(json.dumps(data, ensure_ascii=False, indent=2))
+
+    request_id = data.get("request_id", "unknown")
+
+    action_devices_resp = []  # will be returned to Yandex
+
+    for dev_block in data.get("payload", {}).get("devices", []):
+        device_id = dev_block["id"]
+
+        cap_results = []
+        for cap in dev_block.get("capabilities", []):
+            # 1) доставляем команду в MQTT
+            registry.handle_action(
+                device_id,
+                cap["type"],
+                cap.get("state", {}).get("instance"),
+                cap.get("state", {}).get("value"),
+            )
+
+            # 2) формируем ответ для этой capability
+            cap_results.append(
+                {
+                    "type": cap["type"],
+                    "state": {
+                        # возвращаем тот же instance, если был
+                        "instance": cap.get("state", {}).get("instance"),
+                        "action_result": {"status": "DONE"},
+                    },
+                }
+            )
+
+        # формируем блок устройства
+        action_devices_resp.append(
+            {
+                "id": device_id,
+                "capabilities": cap_results,
+            }
+        )
+
+    action_response = {
+        "request_id": request_id,
+        "payload": {"devices": action_devices_resp},
+    }
+
+    return action_response
 
 
 async def connect_controller():
+    global controller_sn
+
     config = read_config()
     if not config:
         logger.info("[ERR] Cannot proceed without configuration")
@@ -421,12 +784,13 @@ async def connect_controller():
         return
 
     # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
-    mqtt_client = mqtt.Client("wb-alice-client")
+    local_mqtt_client = mqtt.Client("wb-alice-client")
     try:
-        mqtt_client.connect("localhost", 1883, 60)
-        mqtt_client.loop_start()
+        local_mqtt_client.connect("localhost", 1883, 60)
+        local_mqtt_client.loop_start()
         logger.info(
-            f"[INFO] Connected to local MQTT broker, using topic '{mqtt_topics['light_corridor'].full}'"
+            # f"[INFO] Connected to local MQTT broker, using topic '{mqtt_topics['light_corridor'].full}'"
+            "[INFO] Connected to local MQTT broker"
         )
     except Exception as e:
         logger.info(f"[ERR] MQTT connect failed: {e}")
@@ -437,302 +801,6 @@ async def connect_controller():
     server_url = f"https://{server_address}"
     logger.info(f"[INFO] Connecting to Socket.IO server: {server_url}")
 
-    sio = socketio.AsyncClient()
-
-    @sio.event
-    async def connect():
-        logger.info("[SUCCESS] Connected to Socket.IO server!")
-        await sio.emit("message", {"controller_sn": controller_sn, "status": "online"})
-
-    @sio.event
-    def private_event(data):
-        """
-        Called when server sends 'private_event'.
-        Here we also publish to the MQTT topic.
-        """
-        logger.info(f"[SOCKET.IO] private_event received: {data}")
-        # Publish to MQTT
-        try:
-            current_state = read_mqtt_state(
-                mqtt_topics["light_corridor"].full, mqtt_host="localhost", timeout=1
-            )
-            new_state = not current_state  # Инвертируем
-            write_mqtt_state(mqtt_client, mqtt_topics["light_corridor"].full, new_state)
-            logger.info(f"Inverted state from {current_state} to {new_state}")
-        except Exception as e:
-            logger.info(f"[ERR] Error in private_event logic: {e}")
-
-        # payload = json.dumps(data)
-
-        # msg = subscribe.simple(mqtt_topics['light_corridor'].full, hostname="localhost")
-        # logger.info("Current topic '%s' state: '%s'" % (msg.topic, msg.payload))
-
-        # current_k1_state = msg.payload.decode()
-
-        # # Инвертируем
-        # new_state = "1" if current_k1_state == "0" else "0"
-        # logger.info(f"Inverting K1 from {current_k1_state} to {new_state}")
-
-        # # Публикуем новое состояние
-        # mqtt_client.publish(mqtt_topics['light_corridor'].full + '/on', new_state)
-        # logger.info(f"[MQTT] Published to topic '{mqtt_topics['light_corridor'].full}/on': {new_state}")
-
-    @sio.event
-    async def disconnect():
-        logger.info("[ERR] Disconnected from server")
-
-    @sio.event
-    async def response(data):
-        logger.info(f"[INCOME] Server response: {data}")
-
-    @sio.event
-    async def error(data):
-        logger.info(f"[ERR] Server error: {data}")
-        logger.info("[ERR] Terminating connection due to server error")
-        await sio.disconnect()
-
-    @sio.event
-    async def connect_error(data):
-        logger.info(f"❌ Connection refused by server: {data}")
-
-    # ----------------- ВАЖНО: Обработчики alice_* -----------------
-    # При использовании sio.call("alice_devices_list") на сервере,
-    # клиенту прилетит событие "alice_devices_list". Нужно вернуть ответ.
-
-    @sio.on("alice_devices_list")
-    async def on_alice_devices_list(data):
-        """
-        Получаем запрос на список устройств и формируем ответ.
-        В ответе сохраняем текущие состояния (если нужно).
-        """
-        logger.info(f"[SOCKET.IO] alice_devices_list event: {data}")
-
-        # Формируем список всех устройств (без state или вместе? вроде лучше вместе с состоянием).
-        devices_list = []
-
-        # Свет
-        devices_list.append(
-            {
-                "id": "f52856d1-4fca-40ce-8ee3-e5ed37298d6e",
-                "name": "Свет",
-                "status_info": {"reportable": False},
-                "description": "Свет в коридоре",
-                "room": "Коридор",
-                "type": "devices.types.light",
-                "capabilities": [
-                    {
-                        "type": "devices.capabilities.on_off",
-                        "retrievable": True,
-                    }
-                ],
-            }
-        )
-
-        devices_list.append(
-            {
-                "id": "67a2d9b9-666b-41e1-957e-90cd742ec554",
-                "name": "Свет",
-                "status_info": {"reportable": False},
-                "description": "Свет в спальне",
-                "room": "Спальня",
-                "type": "devices.types.light",
-                "capabilities": [
-                    {
-                        "type": "devices.capabilities.on_off",
-                        "retrievable": True,
-                    }
-                ],
-            }
-        )
-
-        # Датчик температуры
-        devices_list.append(
-            {
-                "id": "7065fcf8-963e-42a2-a4f5-e668e412d1c4",
-                "name": "Температура",
-                "status_info": {"reportable": False},
-                "description": "Датчик температуры в спальне",
-                "room": "Спальня",
-                "type": "devices.types.sensor.climate",
-                "properties": [
-                    {
-                        "type": "devices.properties.float",
-                        "retrievable": True,
-                        "reportable": True,
-                        "parameters": {
-                            "instance": "temperature",
-                            "unit": "unit.temperature.celsius",
-                        },
-                    }
-                ],
-            }
-        )
-
-        # Возвращаем
-        devices_response = {
-            "requestId": 123,
-            "payload": {"user_id": YANDEX_USER_ID, "devices": devices_list},
-        }
-
-        return devices_response
-
-    @sio.on("alice_devices_query")
-    async def on_alice_devices_query(data):
-        """
-        Получаем запрос на текущее состояние устройств
-        """
-        logger.info("[SOCKET.IO] alice_devices_query event:")
-        logger.info(json.dumps(data, ensure_ascii=False, indent=2))
-
-        request_id = data.get("requestId", "unknown")
-
-        # Массив ответов: сюда добавим блоки "id" + "capabilities"/"properties" для каждого
-        devices_response = []
-
-        for dev_request in data.get("devices", []):
-            device_id = dev_request.get("id")
-            if not device_id:
-                continue
-
-            if device_id == "f52856d1-4fca-40ce-8ee3-e5ed37298d6e":
-                # Считываем из MQTT текущее состояние (bool)
-                is_on = read_mqtt_state(
-                    mqtt_topics["light_corridor"].full, mqtt_host="localhost"
-                )
-                devices_response.append(
-                    {
-                        "id": device_id,
-                        "capabilities": [
-                            {
-                                "type": "devices.capabilities.on_off",
-                                "state": {"instance": "on", "value": is_on},
-                            }
-                        ],
-                    }
-                )
-
-            elif device_id == "67a2d9b9-666b-41e1-957e-90cd742ec554":
-                # Считываем из MQTT текущее состояние (bool)
-                is_on = read_mqtt_state(
-                    mqtt_topics["light_bedroom"].full, mqtt_host="localhost"
-                )
-                devices_response.append(
-                    {
-                        "id": device_id,
-                        "capabilities": [
-                            {
-                                "type": "devices.capabilities.on_off",
-                                "state": {"instance": "on", "value": is_on},
-                            }
-                        ],
-                    }
-                )
-
-            elif device_id == "7065fcf8-963e-42a2-a4f5-e668e412d1c4":
-                # Считываем из MQTT float-значение температуры
-                temp_topic = mqtt_topics["temperature_corridor"].full
-                # temp_topic = "/devices/vd-water-meter-1/controls/litres_used_value"
-
-                temperature_value = 0.0
-                try:
-                    msg = subscribe.simple(
-                        temp_topic, hostname="localhost", retained=True
-                    )
-                    temperature_value = float(msg.payload.decode().strip())
-                    logger.info(f"[INFO] Read temperature: {temperature_value}")
-                except Exception as e:
-                    logger.info(f"[WARN] Could not read temperature: {e}")
-
-                devices_response.append(
-                    {
-                        "id": device_id,
-                        "properties": [
-                            {
-                                "type": "devices.properties.float",
-                                "state": {
-                                    "instance": "temperature",
-                                    "value": temperature_value,
-                                },
-                            }
-                        ],
-                    }
-                )
-
-            else:
-                # Если Алиса запросила устройство, о котором мы ничего не знаем
-                logger.info(f"[WARN] Unknown device id={device_id} requested.")
-                devices_response.append(
-                    {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
-                )
-
-        query_response = {
-            "requestId": request_id,
-            "payload": {"devices": devices_response},
-        }
-        return query_response
-
-    @sio.on("alice_devices_action")
-    async def on_alice_devices_action(data):
-        """
-        Обработка действия над устройством (включить/выключить).
-        Меняем состояние в LIGHT_STATE, возвращаем результат.
-        """
-        logger.info("[SOCKET.IO] alice_devices_action event:")
-        logger.info(json.dumps(data, ensure_ascii=False, indent=2))
-
-        request_id = data.get("requestId", "unknown")
-
-        # May be "f52856d1-4fca-40ce-8ee3-e5ed37298d6e" or "67a2d9b9-666b-41e1-957e-90cd742ec554"
-        device_id = data.get("payload", {}).get("devices", [])[0].get("id")
-
-        for device in data.get("payload", {}).get("devices", []):
-            if device.get("id") == "f52856d1-4fca-40ce-8ee3-e5ed37298d6e":
-                for capability in device.get("capabilities", []):
-                    if capability.get("type") == "devices.capabilities.on_off":
-                        value = capability.get("state", {}).get("value")
-                        if value is not None:
-                            # value True -> "1", False -> "0"
-                            write_mqtt_state(
-                                mqtt_client, mqtt_topics["light_corridor"].full, value
-                            )
-                            logger.info(
-                                f"Set device '{device_id}' to {value} (MQTT published)"
-                            )
-            if device.get("id") == "67a2d9b9-666b-41e1-957e-90cd742ec554":
-                for capability in device.get("capabilities", []):
-                    if capability.get("type") == "devices.capabilities.on_off":
-                        value = capability.get("state", {}).get("value")
-                        if value is not None:
-                            # value True -> "1", False -> "0"
-                            write_mqtt_state(
-                                mqtt_client, mqtt_topics["light_bedroom"].full, value
-                            )
-                            logger.info(
-                                f"Set device '{device_id}' to {value} (MQTT published)"
-                            )
-
-        action_response = {
-            "requestId": request_id,
-            "payload": {
-                "devices": [
-                    {
-                        "id": device_id,
-                        "capabilities": [
-                            {
-                                "type": "devices.capabilities.on_off",
-                                "state": {
-                                    "instance": "on",
-                                    "action_result": {"status": "DONE"},
-                                },
-                            }
-                        ],
-                        "action_result": {"status": "DONE"},
-                    }
-                ]
-            },
-        }
-        return action_response
-
     try:
         # Connect to server and keep connection active
         # Pass controller_sn via custom header
@@ -741,26 +809,85 @@ async def connect_controller():
             socketio_path="/socket.io",
             headers={"X-Controller-SN": controller_sn},
         )
-        await sio.wait()
+        logger.info("[CONNECT_CONTROLLER] Socket.IO connected successfully")
 
     except socketio.exceptions.ConnectionError as e:
-        logger.info(f"[ERR] Socket.IO connection error: {e}")
+        logger.error(f"[ERR] Socket.IO connection error: {e}")
         logger.info(
             "[ERR] Unable to connect. The controller might have been unregistered."
         )
+        return
     except Exception as e:
-        logger.info(f"[ERR] Exception while connecting to server: {e}")
-    finally:
-        if sio.connected:
-            await sio.disconnect()
-        # Stop MQTT client loop
-        mqtt_client.loop_stop()
-        mqtt_client.disconnect()
-        logger.info("[INFO] MQTT disconnected")
+        logger.exception(f"[ERR] Unexpected exception during connection: {e}")
+        return
+
+
+def _log_and_stop(sig: signal.Signals) -> None:
+    """
+    Generic signal handler:
+    1) logs which signal was received;
+    2) sets the global stop_event so the main loop can exit.
+    Idempotent: repeated signals after the first one do nothing.
+    """
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    logger.warning("[SIGNAL] %s received at %s – shutting down…", sig.name, ts)
+
+    # stop_event is created in main() before signal handlers are registered,
+    # but we keep the guard just in case.
+    if stop_event is not None and not stop_event.is_set():
+        stop_event.set()
+
+
+async def main() -> None:
+    global stop_event
+    global MAIN_LOOP
+    MAIN_LOOP = asyncio.get_running_loop()
+
+    stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
+    MAIN_LOOP.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
+    MAIN_LOOP.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
+
+    logger.info("[MAIN] Start background services ...")
+
+    logger.info("[MAIN] Starting MQTT client...")
+    mqtt_client.start()
+
+    logger.info("[MAIN] Connecting Socket.IO client...")
+    await connect_controller()
+    sio_task = asyncio.create_task(sio.wait())
+
+    # Wait for shutdown signal
+    await stop_event.wait()
+    logger.info("[MAIN] Shutdown signal received")
+
+    logger.info("[MAIN] Stopping Socket.IO client ...")
+    if sio.connected:
+        await sio.disconnect()
+    if not sio_task.done():
+        sio_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sio_task
+
+    # Cancel any remaining asyncio tasks
+    pending = {t for t in asyncio.all_tasks() if t is not asyncio.current_task()}
+    logger.info("[EXIT] Cancelling %d pending tasks…", len(pending))
+    for task in pending:
+        task.cancel()
+
+    # Gather only if something is pending
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+        logger.info("[EXIT] %d tasks cancelled", len(pending))
+
+    logger.info("[MAIN] Stopping MQTT client")
+    mqtt_client.stop()  # WB func - do inside loop_stop + disconnect
+    logger.info("[MAIN] MQTT disconnected")
+
+    logger.info("[MAIN] Shutdown complete")
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(main(), debug=True)
     except KeyboardInterrupt:
         logger.info("[MAIN] Выполнение прерывано пользователем (Ctrl+C)")
