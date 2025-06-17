@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import subprocess
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -13,6 +14,7 @@ app = FastAPI(
 )
 
 CONFIG_PATH = "/etc/wb-alice-devices.conf"
+CLIENT_SERVICE_NAME = "wb-alice-client"
 
 
 def load_config() -> Config:
@@ -43,6 +45,24 @@ def save_config(config: Config):
             json.dump(config.dict(), f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise
+
+
+def is_service_active(CLIENT_SERVICE_NAME: str):
+    result = subprocess.run(["systemctl", "is-active", CLIENT_SERVICE_NAME],
+        capture_output=True,
+        text=True)
+    return result.stdout.strip() == "active"
+
+
+def restart_service(CLIENT_SERVICE_NAME: str):
+    if not is_service_active(CLIENT_SERVICE_NAME):
+        return
+    
+    try:
+        subprocess.run(["systemctl", "restart", CLIENT_SERVICE_NAME],
+            check=True)
+    except subprocess.CalledProcessError as e:
+        return
 
 
 def generate_id():
