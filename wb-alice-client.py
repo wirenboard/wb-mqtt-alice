@@ -16,7 +16,7 @@ import logging
 import os
 import signal
 import time
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 import paho.mqtt.client as mqtt
 import paho.mqtt.subscribe as subscribe
@@ -28,6 +28,17 @@ from mqtt_topic import MQTTTopic
 logging.basicConfig(level=logging.DEBUG, force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
+
+logger.info("socketio module path: %s", socketio.__file__)
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info("python-socketio version: %s", version("python-socketio"))
+except PackageNotFoundError:
+    logger.warning("python-socketio is not installed.")
 
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
@@ -51,6 +62,8 @@ sio = socketio.AsyncClient(
     reconnection_delay_max=30,  # cap at 30 s
     randomization_factor=0.5,  # jitter
 )
+for name in ("engineio", "socketio"):
+    logging.getLogger(name).setLevel(logging.DEBUG)
 
 controller_sn: Optional[str] = None
 
@@ -103,31 +116,6 @@ def _emit_async(event: str, data: dict) -> None:
             )
 
 
-def send_temperature_to_server(device_id: str, temp_value: float) -> None:
-    payload = {
-        "ts": int(time.time()),
-        "payload": {
-            # user_id будет добавлен сервером
-            "devices": [
-                {
-                    "id": device_id,
-                    "status": "online",
-                    "properties": [
-                        {
-                            "type": "devices.properties.float",
-                            "state": {"instance": "temperature", "value": temp_value},
-                        }
-                    ],
-                }
-            ],
-        },
-    }
-    try:
-        _emit_async("device_state", payload)
-    except Exception:
-        logging.exception("Error when processing MQTT message")
-
-
 async def read_topic_once(
     topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0
 ):
@@ -170,10 +158,10 @@ class DeviceRegistry:
         self._send_to_yandex = send_to_yandex
         self._publish_to_mqtt = publish_to_mqtt
 
-        self.devices: Dict[str, Dict] = {}  # id → full json block
-        self.topic2info: Dict[str, Tuple[str, str, int]] = {}
-        self.cap_index: Dict[Tuple[str, str, Optional[str]], str] = {}
-        self.rooms: Dict[str, Dict] = {}  # room_id → block
+        self.devices: dict[str, dict] = {}  # id → full json block
+        self.topic2info: dict[str, Tuple[str, str, int]] = {}
+        self.cap_index: dict[Tuple[str, str, Optional[str]], str] = {}
+        self.rooms: dict[str, dict] = {}  # room_id → block
 
         self._load_config(cfg_path)
 
@@ -235,7 +223,7 @@ class DeviceRegistry:
             if room_id and room_id in self.rooms:
                 room_name = self.rooms[room_id].get("name", "")
 
-            dev_block: dict[str, Any] = {
+            device: dict[str, Any] = {
                 "id": dev_id,
                 "name": dev.get("name", dev_id),
                 "status_info": dev.get("status_info", {"reportable": False}),
@@ -254,7 +242,7 @@ class DeviceRegistry:
                     }
                 )
             if caps:
-                dev_block["capabilities"] = caps
+                device["capabilities"] = caps
 
             # ---- properties ----
             props = []
@@ -273,9 +261,9 @@ class DeviceRegistry:
                     }
                 props.append(prop_obj)
             if props:
-                dev_block["properties"] = props
+                device["properties"] = props
 
-            devices_out.append(dev_block)
+            devices_out.append(device)
 
         return devices_out
 
@@ -426,86 +414,121 @@ class DeviceRegistry:
         return device_output
 
 
-# ------------------------------------------------------------------
-# Unified sender to Yandex used by registry
-# ------------------------------------------------------------------
-
-
-def send_to_yandex_state(
-    device_id: str, cap_type: str, instance: Optional[str], value: Any
-) -> None:
-    if cap_type == "devices.capabilities.on_off":
-        send_relay_state_to_server(device_id, value)
-    elif cap_type == "devices.properties.float":
-        send_temperature_to_server(device_id, value)
-    else:
-        logger.info(f"[YANDEX] TODO sender for {cap_type} (instance={instance})")
-
-
 # Helper for publishing from registry
 def publish_to_mqtt(topic: str, payload: str) -> None:
     mqtt_client.publish(topic, payload)
 
 
-def send_relay_state_to_server(device_id, raw_state):
-    """
-    Преобразует входное значение (строка или число) в булево и отправляет состояние реле в Яндекс.Диалоги.
-
-    Поддерживаемые значения:
-      - строки: "1", "0", "true", "false", "on", "off"
-      - числа: 1, 0, любые другие
-      - булевы значения: True, False
-    """
-
-    is_on = False  # по умолчанию — выключено
-
-    try:
-        if isinstance(raw_state, str):
-            raw_state = raw_state.strip().lower()
-            if raw_state in ["1", "true", "on"]:
-                is_on = True
-            elif raw_state in ["0", "false", "off"]:
-                is_on = False
-            elif raw_state.isdigit():
-                is_on = int(raw_state) != 0
-            else:
-                logger.info(
-                    f"[RELAY] Неизвестная строка состояния: '{raw_state}' — по умолчанию выключено"
-                )
-        elif isinstance(raw_state, (int, float)):
-            is_on = raw_state != 0
-        elif isinstance(raw_state, bool):
-            is_on = raw_state
+def to_bool(raw_state: Any) -> bool:
+    """Conversion to bool according to Yandex on_off rules"""
+    if isinstance(raw_state, bool):
+        return raw_state
+    elif isinstance(raw_state, (int, float)):
+        return raw_state != 0
+    elif isinstance(raw_state, str):
+        raw_state = raw_state.strip().lower()
+        if raw_state in {"1", "true", "on"}:
+            return True
+        elif raw_state in {"0", "false", "off"}:
+            return False
+        elif raw_state.isdigit():
+            return int(raw_state) != 0
         else:
-            logger.info(
-                f"[RELAY] Неизвестный тип состояния: {type(raw_state)} — по умолчанию выключено"
-            )
-    except Exception as e:
-        logger.info(f"[RELAY] Ошибка при преобразовании состояния в bool: {e}")
-        is_on = False
+            logger.debug("[to_bool] Unknown string %s → False", raw_state)
+            return False
+    else:
+        logger.debug("[to_bool] Unknown value type %s → False", type(raw_state))
+        return False
+
+
+def to_float(raw: Any) -> float:
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        logger.debug("[to_float] Cannot convert %s to float → 0.0", raw)
+        return 0.0
+
+
+def _build_state_block(
+    block_type: str,
+    instance: Optional[str],
+    value: Any,
+    *,
+    is_property: bool,
+) -> dict:
+    """
+    Builds either a capability **or** a property state block depending
+    on *is_property* flag
+    """
+    key = "properties" if is_property else "capabilities"
+    state_key = {
+        "type": block_type,
+        "state": {"instance": instance, "value": value},
+    }
+    return {key: [state_key]}
+
+
+def send_state_to_server(
+    device_id: str,
+    block_type: str,
+    instance: Optional[str],
+    value: Any,
+) -> None:
+    """
+    Pushes **any** single capability / property
+    state update to the cloud proxy via Socket.IO
+    """
+    is_prop = block_type.startswith("devices.properties")
+
+    # normalise known value types
+    if block_type.endswith("on_off"):
+        value = to_bool(value)
+    elif block_type.endswith("float"):
+        value = to_float(value)
 
     payload = {
         "ts": int(time.time()),
         "payload": {
-            # "user_id" field added later when proxy
+            # user_id will be added by the proxy
             "devices": [
                 {
                     "id": device_id,
                     "status": "online",
-                    "capabilities": [
-                        {
-                            "type": "devices.capabilities.on_off",
-                            "state": {"instance": "on", "value": is_on},
-                        }
-                    ],
+                    **_build_state_block(
+                        block_type, instance, value, is_property=is_prop
+                    ),
                 }
-            ],
+            ]
         },
     }
     try:
         _emit_async("device_state", payload)
     except Exception:
         logging.exception("Error when processing MQTT message")
+
+
+def send_to_yandex_state(
+    device_id: str, cap_type: str, instance: Optional[str], value: Any
+) -> None:
+    """
+    Unified sender to Yandex used by registry
+    """
+    if cap_type == "devices.capabilities.on_off":
+        send_state_to_server(
+            device_id,
+            "devices.capabilities.on_off",
+            "on",
+            value,
+        )
+    elif cap_type == "devices.properties.float":
+        send_state_to_server(
+            device_id,
+            "devices.properties.float",
+            "temperature",
+            value,
+        )
+    else:
+        logger.info(f"[YANDEX] TODO sender for {cap_type} (instance={instance})")
 
 
 def on_connect(client, userdata, flags, rc):
@@ -626,9 +649,11 @@ async def connect():
     await sio.emit("message", {"controller_sn": controller_sn, "status": "online"})
 
 
+# NOTE: argument "reason" not accesable in current client 5.0.3
+#       implemented on version 5.12
 @sio.event
 async def disconnect():
-    logger.info("[ERR] Disconnected from server")
+    logger.info("[DISCONNECT] This client disconnected from server")
 
 
 @sio.event
@@ -644,33 +669,41 @@ async def error(data):
 
 
 @sio.event
-async def connect_error(data):
-    logger.info(f"❌ Connection refused by server: {data}")
+async def connect_error(data: dict[str, Any]) -> None:
+    """
+    Called when initial connection to server fails
+    """
+    logger.warning("[SOCKET.IO] Connection refused by server: %s", data)
 
 
-# ----------------- Обработчики alice_* -----------------
-# При использовании sio.call("alice_devices_list") на сервере,
-# клиенту прилетит событие "alice_devices_list". Нужно вернуть ответ.
+@sio.on("*")
+async def any_event(event, sid, data):
+    logger.info(f"[Socket.IO/ANY] Not handled event {event}")
 
 
 @sio.on("alice_devices_list")
-async def on_alice_devices_list(data):
+async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
     """
-    Клиент-контроллер получил запрос списка устройств от сервера
-    Формируем полный список устройств по конфигу
+    Handles a device discovery request from the server
+    Returns a list of devices defined in the controller config
     """
-    logger.info(f"[SOCKET.IO] alice_devices_list event: {data}")
-    devices_list = registry.build_yandex_devices_list()
-    req_id = data.get("request_id")
-    devices_response = {
+    logger.debug("[SOCKET.IO] Received 'alice_devices_list' event:")
+    logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
+
+    req_id: str = data.get("request_id")
+    devices_list: list[dict[str, Any]] = registry.build_yandex_devices_list()
+    if not devices_list:
+        logger.warning("[SOCKET.IO] No devices found in configuration")
+
+    devices_response: dict[str, Any] = {
         "request_id": req_id,
         "payload": {
-            # "user_id" field added later when this msg will be proxyded
+            # "user_id" will be added on the server proxy side
             "devices": devices_list,
         },
     }
 
-    logger.info("[SOCKET.IO] answer device list to Yandex:")
+    logger.info("[SOCKET.IO] Sending device list response to Yandex:")
     logger.info(json.dumps(devices_response, ensure_ascii=False, indent=2))
     return devices_response
 
@@ -703,57 +736,77 @@ async def on_alice_devices_query(data):
     return query_response
 
 
-@sio.on("alice_devices_action")
-async def on_alice_devices_action(data):
+def handle_single_device_action(device: dict[str, Any]) -> dict[str, Any]:
     """
-    Обработка действия над устройством (включить/выключить).
-    Меняем состояние в LIGHT_STATE, возвращаем результат.
+    Processes all capabilities for a single device and returns the result block,
+    formatted according to Yandex Smart Home action response spec.
     """
-    logger.info("[SOCKET.IO] alice_devices_action event:")
-    logger.info(json.dumps(data, ensure_ascii=False, indent=2))
+    device_id: str = device.get("id", "")
+    if not device_id:
+        logger.warning("[SOCKET.IO] Device block missing 'id': %s", device)
+        return {}
 
-    request_id = data.get("request_id", "unknown")
+    cap_results: list[dict[str, Any]] = []
+    for cap in device.get("capabilities", []):
+        cap_type: str = cap.get("type")
+        instance: str = cap.get("state", {}).get("instance")
+        value: Any = cap.get("state", {}).get("value")
 
-    action_devices_resp = []  # will be returned to Yandex
-
-    for dev_block in data.get("payload", {}).get("devices", []):
-        device_id = dev_block["id"]
-
-        cap_results = []
-        for cap in dev_block.get("capabilities", []):
-            # 1) доставляем команду в MQTT
-            registry.handle_action(
-                device_id,
-                cap["type"],
-                cap.get("state", {}).get("instance"),
-                cap.get("state", {}).get("value"),
+        try:
+            registry.handle_action(device_id, cap_type, instance, value)
+            logger.info(
+                "[SOCKET.IO] Action applied to %s: %s = %s", device_id, instance, value
             )
-
-            # 2) формируем ответ для этой capability
-            cap_results.append(
-                {
-                    "type": cap["type"],
-                    "state": {
-                        # возвращаем тот же instance, если был
-                        "instance": cap.get("state", {}).get("instance"),
-                        "action_result": {"status": "DONE"},
-                    },
-                }
+            status = "DONE"
+        except Exception as e:
+            logger.exception(
+                "[SOCKET.IO] Failed to apply action for device '%s'", device_id
             )
+            status = "ERROR"
 
-        # формируем блок устройства
-        action_devices_resp.append(
+        cap_results.append(
             {
-                "id": device_id,
-                "capabilities": cap_results,
+                "type": cap_type,
+                "state": {
+                    "instance": instance,
+                    "action_result": {"status": status},
+                },
             }
         )
 
-    action_response = {
-        "request_id": request_id,
-        "payload": {"devices": action_devices_resp},
+    return {
+        "id": device_id,
+        "capabilities": cap_results,
     }
 
+
+@sio.on("alice_devices_action")
+async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Handles a device action request from Yandex (e.g., turn on/off)
+    Applies the command to the device and returns the result
+    """
+    logger.debug("[SOCKET.IO] Received 'alice_devices_action' event")
+
+    logger.debug("[SOCKET.IO] Full payload:")
+    logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
+
+    request_id: str = data.get("request_id", "unknown")
+    devices_in: list[dict[str, Any]] = data.get("payload", {}).get("devices", [])
+    devices_info: list[dict[str, Any]] = []
+
+    for device in devices_in:
+        result = handle_single_device_action(device)
+        if result:
+            devices_info.append(result)
+
+    action_response: dict[str, Any] = {
+        "request_id": request_id,
+        "payload": {"devices": devices_info},
+    }
+
+    logger.debug("[SOCKET.IO] Sending action response:")
+    logger.debug(json.dumps(action_response, ensure_ascii=False, indent=2))
     return action_response
 
 
@@ -813,13 +866,13 @@ async def connect_controller():
 
     except socketio.exceptions.ConnectionError as e:
         logger.error(f"[ERR] Socket.IO connection error: {e}")
-        logger.info(
-            "[ERR] Unable to connect. The controller might have been unregistered."
-        )
-        return
+        # Unable to connect
+        # - The controller might have been unregistered
+        # - Or Server may have error or offline
+        # ACTION - do reconnection
     except Exception as e:
         logger.exception(f"[ERR] Unexpected exception during connection: {e}")
-        return
+        # ACTION - do reconnection
 
 
 def _log_and_stop(sig: signal.Signals) -> None:
@@ -887,7 +940,15 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    logger.info("[MAIN] Starting wb-alice-client...")
+
     try:
         asyncio.run(main(), debug=True)
     except KeyboardInterrupt:
-        logger.info("[MAIN] Выполнение прерывано пользователем (Ctrl+C)")
+        logger.warning("[MAIN] Interrupted by user (Ctrl+C)")
+    except SystemExit as e:
+        logger.warning("[MAIN] System exit with code %s", e.code)
+    except Exception as e:
+        logger.exception("[MAIN] Unhandled exception: %s", e)
+    finally:
+        logger.info("[MAIN] wb-alice-client stopped.")
