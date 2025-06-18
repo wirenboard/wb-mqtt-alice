@@ -1,6 +1,8 @@
 import os
 import json
 import uuid
+import logging
+import subprocess
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -12,7 +14,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s',
+    force=True)
+logging.captureWarnings(True)
+logger = logging.getLogger(__name__)
+
 CONFIG_PATH = "/etc/wb-alice-devices.conf"
+CLIENT_SERVICE_NAME = "wb-alice-client"
 
 
 def load_config() -> Config:
@@ -43,6 +53,29 @@ def save_config(config: Config):
             json.dump(config.dict(), f, ensure_ascii=False, indent=2)
     except Exception as e:
         raise
+
+    restart_service(CLIENT_SERVICE_NAME)
+
+
+def is_service_active(CLIENT_SERVICE_NAME):
+    result = subprocess.run(["systemctl", "is-active", CLIENT_SERVICE_NAME],
+        capture_output=True,
+        text=True)
+    return result.stdout.strip() == "active"
+
+
+def restart_service(CLIENT_SERVICE_NAME: str):
+    if not is_service_active(CLIENT_SERVICE_NAME):
+        logger.info(f"'{CLIENT_SERVICE_NAME}' service not started")
+        return
+    
+    try:
+        subprocess.run(["systemctl", "restart", CLIENT_SERVICE_NAME],
+            check=True)
+        logger.info(f"'{CLIENT_SERVICE_NAME}' service restart...")
+    except subprocess.CalledProcessError as e:
+        logger.info(f"'{CLIENT_SERVICE_NAME}' service restart error")
+        return
 
 
 def generate_id():
