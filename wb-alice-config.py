@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 CONFIG_PATH = "/etc/wb-alice-devices.conf"
 CLIENT_SERVICE_NAME = "wb-alice-client"
+DEFAULT_CONFIG = {
+    "rooms": {},
+    "devices": {}
+}
 
 
 def load_config() -> Config:
@@ -30,11 +34,7 @@ def load_config() -> Config:
     
     try:
         if not os.path.exists(CONFIG_PATH):
-            config_default = dict({"rooms":
-                                   {"without_rooms": {"name": "Без комнаты","devices": []}},
-                                   "devices": {}
-                                   })
-            config = Config(**config_default)
+            config = Config(**DEFAULT_CONFIG)
             save_config(config)
             return config
         
