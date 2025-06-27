@@ -3,6 +3,7 @@ import json
 import uuid
 import logging
 import subprocess
+import requests
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -21,12 +22,47 @@ logging.basicConfig(
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
+
+SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/etc/wb-alice-devices.conf"
 CLIENT_SERVICE_NAME = "wb-alice-client"
 DEFAULT_CONFIG = {
     "rooms": {},
     "devices": {}
 }
+
+
+def get_controller_sn():
+    """Get controller ID from the configuration file"""
+    try:
+        with open(SHORT_SN_PATH, "r") as file:
+            controller_sn = file.read().strip()
+            logger.info(f"[INFO] Read controller ID: {controller_sn}")
+            return controller_sn
+    except FileNotFoundError:
+        logger.info(
+            f"[ERR] Controller ID file not found! Check the path: {SHORT_SN_PATH}"
+        )
+        return None
+    except Exception as e:
+        logger.info(f"[ERR] Reading controller ID exception: {e}")
+        return None
+
+
+def is_controller_linked(controller_sn: str) -> bool:
+    """Checks if the controller is bound to the service"""
+    url = f"https://voidlib.com:8042/controllers/{controller_sn}/status"
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Проверяем на ошибки HTTP
+        data = response.json()
+        return data.get('registered', False)
+    except requests.exceptions.RequestException as e:
+        # Логируем ошибку или пробрасываем дальше
+        print(f"Error checking controller status: {e}")
+        raise
+
 
 
 def load_config() -> Config:
@@ -105,6 +141,13 @@ async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
 
     config = load_config()
+
+    if not is_controller_linked(controller_sn):
+        config.link_url = f"https://voidlib.com:8042/link-controller?sn={controller_sn}"
+        config.unlink_url = None
+    else:
+        config.link_url = None
+        config.unlink_url = "https://voidlib.com:8042/"
     return config
 
 
@@ -269,6 +312,8 @@ async def change_room(device_id: str, device_data: RoomChange):
     
     save_config(config)
     return response
+
+controller_sn = get_controller_sn()
 
 
 if __name__ == "__main__":
