@@ -122,7 +122,7 @@ def room_name_exist(name: str, rooms) -> bool:
     return any(room.name == name for room in rooms.values())
 
 
-def room_change(device_id, room_id, config):
+def move_device_to_room(device_id, room_id, config):
     del_room_id = config.devices[device_id].room_id
     if room_id != del_room_id:
         config.rooms[del_room_id].devices.remove(device_id)
@@ -263,7 +263,7 @@ async def update_device(device_id: str, device_data: Device):
             detail="There is no room with this ID")
     # Update device
     response = device_data
-    room_change(device_id, device_data.room_id, config)
+    move_device_to_room(device_id, device_data.room_id, config)
     config.devices[device_id] = response
     
     save_config(config)
@@ -305,8 +305,8 @@ async def change_room(device_id: str, device_data: RoomID):
         raise HTTPException(
             status_code=404,
             detail="There is no room with this ID")
-    # Change room   
-    room_change(device_id, device_data.room_id, config)
+    # Change device room
+    move_device_to_room(device_id, device_data.room_id, config)
     config.devices[device_id].rooms_id = device_data.room_id
     response = RoomID(room_id=device_data.room_id)
     
