@@ -143,11 +143,13 @@ async def get_all_rooms_and_devices():
     config = load_config()
 
     if not is_controller_linked(controller_sn):
-        config.link_url = f"https://voidlib.com:8042/link-controller?sn={controller_sn}"
+        config.link_url = f"https://voidlib.com:8043/link-controller?sn={controller_sn}"
         config.unlink_url = None
     else:
         config.link_url = None
-        config.unlink_url = "https://voidlib.com:8042/"
+        config.unlink_url = "https://voidlib.com:8043/"
+    
+    save_config(config)
     return config
 
 
