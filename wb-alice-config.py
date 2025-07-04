@@ -8,7 +8,7 @@ import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException
 
-from models import Room, Capability, Property, Device, RoomChange, Config
+from models import Room, Capability, Property, Device, RoomID, Config
 
 app = FastAPI(
     title="Alice Integration API",
@@ -290,8 +290,8 @@ async def delete_device(device_id: str):
     return {"message": "Device deleted successfully"}
 
 
-@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomChange, status_code=200)
-async def change_room(device_id: str, device_data: RoomChange):
+@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomID, status_code=200)
+async def change_room(device_id: str, device_data: RoomID):
     """Change room"""
     
     config = load_config()
@@ -308,7 +308,7 @@ async def change_room(device_id: str, device_data: RoomChange):
     # Change room   
     room_change(device_id, device_data.room_id, config)
     config.devices[device_id].rooms_id = device_data.room_id
-    response = RoomChange(room_id=device_data.room_id)
+    response = RoomID(room_id=device_data.room_id)
     
     save_config(config)
     return response
