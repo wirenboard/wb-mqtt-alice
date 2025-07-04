@@ -123,9 +123,9 @@ def room_name_exist(name: str, rooms) -> bool:
 
 
 def move_device_to_room(device_id, room_id, config):
-    del_room_id = config.devices[device_id].room_id
-    if room_id != del_room_id:
-        config.rooms[del_room_id].devices.remove(device_id)
+    old_room_id = config.devices[device_id].room_id
+    if room_id != old_room_id:
+        config.rooms[old_room_id].devices.remove(device_id)
         config.rooms[room_id].devices.append(device_id)
     return 
 
