@@ -27,8 +27,15 @@ SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/etc/wb-alice-devices.conf"
 CLIENT_SERVICE_NAME = "wb-alice-client"
 DEFAULT_CONFIG = {
-    "rooms": {},
-    "devices": {}
+    "rooms": {
+        "without_rooms": {
+            "name": "Без комнаты",
+            "devices": []
+        }
+    },
+    "devices": {},
+    "link_url": None,
+    "unlink_url": None
 }
 
 
