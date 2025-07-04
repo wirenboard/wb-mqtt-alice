@@ -163,11 +163,7 @@ async def create_room(room_data: Room):
                 detail="Room with this name already exists")
     # Create room
     room_id = generate_id()
-    rooms_dict = config.rooms.copy()
-    without_rooms = rooms_dict.pop("without_rooms")
-    rooms_dict[room_id] = room_data
-    rooms_dict["without_rooms"] = without_rooms
-    config.rooms = rooms_dict
+    config.rooms[room_id] = room_data
     response = room_data.post_response(room_id)
     
     save_config(config)
