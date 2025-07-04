@@ -307,7 +307,7 @@ async def change_room(device_id: str, device_data: RoomID):
             detail="There is no room with this ID")
     # Change device room
     move_device_to_room(device_id, device_data.room_id, config)
-    config.devices[device_id].rooms_id = device_data.room_id
+    config.devices[device_id].room_id = device_data.room_id
     response = RoomID(room_id=device_data.room_id)
     
     save_config(config)
