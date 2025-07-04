@@ -40,61 +40,64 @@ DEFAULT_CONFIG = {
 
 
 def get_controller_sn():
-    """Get controller ID from the configuration file"""
+    """Get controller SN from the configuration file"""
+
+    logger.debug(f"Reading controller SN...")
     try:
         with open(SHORT_SN_PATH, "r") as file:
             controller_sn = file.read().strip()
-            logger.info(f"[INFO] Read controller ID: {controller_sn}")
+            logger.debug(f"Сontroller SN: {controller_sn}")
             return controller_sn
     except FileNotFoundError:
-        logger.info(
-            f"[ERR] Controller ID file not found! Check the path: {SHORT_SN_PATH}"
-        )
+        logger.error(f"Controller SN file not found! Check the path: {SHORT_SN_PATH}")
         return None
     except Exception as e:
-        logger.info(f"[ERR] Reading controller ID exception: {e}")
+        logger.error(f"Error reading controller SN: {e}")
         return None
 
 
 def is_controller_linked(controller_sn: str) -> bool:
     """Checks if the controller is bound to the service"""
-    url = f"https://voidlib.com:8042/controllers/{controller_sn}/status"
     
+    url = f"https://voidlib.com:8042/controllers/{controller_sn}/status"
+    logger.debug(f"Сhecking controller binding status...")
+
     try:
         response = requests.get(url)
-        response.raise_for_status()  # Проверяем на ошибки HTTP
+        response.raise_for_status()
         data = response.json()
         return data.get('registered', False)
     except requests.exceptions.RequestException as e:
-        # Логируем ошибку или пробрасываем дальше
-        print(f"Error checking controller status: {e}")
+        logger.error(f"Error checking controller binding status: {e}")
         raise
-
 
 
 def load_config() -> Config:
     """Load configurations from file"""
     
+    logger.debug(f"Reading configuration file...")
+
     try:
-        if not os.path.exists(CONFIG_PATH):
-            config = Config(**DEFAULT_CONFIG)
-            save_config(config)
-            return config
-        
         with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
             config = Config(**json.load(f))
         return config
     except Exception as e:
-        raise
+        config = Config(**DEFAULT_CONFIG)
+        save_config(config)
+        logger.error(f"Error reading configuration file: {e}")
+        return config
 
 
 def save_config(config: Config):
-    """Save configurations to file"""
+    """Save configuration file"""
+
+    logger.debug(f"Saving configuration file...")
     
     try:
         with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(config.dict(), f, ensure_ascii=False, indent=2)
     except Exception as e:
+        logger.error(f"Error saveing configuration file: {e}")
         raise
 
     restart_service(CLIENT_SERVICE_NAME)
@@ -322,4 +325,4 @@ controller_sn = get_controller_sn()
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
