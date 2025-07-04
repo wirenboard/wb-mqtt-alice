@@ -291,8 +291,8 @@ async def delete_device(device_id: str):
 
 
 @app.put("/integrations/alice/device/{device_id}/room", response_model=RoomID, status_code=200)
-async def change_room(device_id: str, device_data: RoomID):
-    """Change room"""
+async def change_device_room(device_id: str, device_data: RoomID):
+    """Changes the room for the device"""
     
     config = load_config()
     # Check for the presence of device with given id
