@@ -55,7 +55,7 @@ class Device(BaseModel):
             }
         }
 
-class RoomChange(BaseModel):
+class RoomID(BaseModel):
     room_id: str
 
 class Config(BaseModel):
