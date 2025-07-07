@@ -18,6 +18,7 @@ import signal
 import time
 from typing import Any, Callable, Optional, Tuple
 
+import engineio.packet as _eio_pkt
 import paho.mqtt.client as mqtt
 import paho.mqtt.subscribe as subscribe
 import socketio
@@ -33,8 +34,6 @@ logger.info("socketio module path: %s", socketio.__file__)
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    import logging
-
     logger = logging.getLogger(__name__)
     logger.info("python-socketio version: %s", version("python-socketio"))
 except PackageNotFoundError:
@@ -53,17 +52,155 @@ threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
 # Событие, которое «будит» основной цикл и инициирует остановку
 stop_event: Optional[asyncio.Event] = None
 
-sio = socketio.AsyncClient(
-    logger=True,
-    engineio_logger=True,
-    reconnection=True,  # auto-reconnect ON
-    reconnection_attempts=0,  # 0 = infinite retries
-    reconnection_delay=2,  # first delay 2 s
-    reconnection_delay_max=30,  # cap at 30 s
-    randomization_factor=0.5,  # jitter
-)
+sio: Optional[socketio.AsyncClient] = None  # пока заглушка
+
+
+# This watchdog monitors connection health and handles reconnection manually
+# without SocketIO mechanism
+# TODO: Need to investigate more to fix standard SocketIO reconnection
+async def _watchdog_task(sock: socketio.AsyncClient) -> None:
+    global _RECONNECTING, _BACKOFF, _LAST_RECONNECT_TIME
+    reconnect_trace_task = None
+    while True:
+        await asyncio.sleep(WATCHDOG_PERIOD)
+
+        # debug_socketio_state(sock, "WATCHDOG")
+        debug_socketio_state_enhanced(sock, "WATCHDOG")
+        if not sock.connected:
+            log_reconnect_timing()
+
+        # Проверка целостности
+        integrity = check_engineio_integrity(sock)
+        logger.info(f"[WATCHDOG] EngineIO integrity: {integrity}")
+
+        if hasattr(sock, "_reconnect_task") and sock._reconnect_task:
+            task = sock._reconnect_task
+
+            # Если это новая задача (не отслеживаемая)
+            if (
+                reconnect_trace_task is None
+                or reconnect_trace_task.done()
+                or id(task) != getattr(reconnect_trace_task, "_tracked_task_id", None)
+            ):
+
+                logger.info(f"[WATCHDOG] New reconnect task detected: {id(task)}")
+                log_reconnect_timing()
+
+                # Запускаем трейсинг этой задачи
+                reconnect_trace_task = asyncio.create_task(
+                    trace_reconnect_execution(sock)
+                )
+                reconnect_trace_task._tracked_task_id = id(task)
+
+        # Error indicators
+        connected = sock.connected  # SocketIO status method
+        # write_task = getattr(sock.eio, "_write_loop_task", True) # True == live
+        write_task = getattr(sock.eio, "_write_loop_task", None)
+        write_task_ok = (
+            write_task is not None
+            and hasattr(write_task, "done")  # проверяем что это Task
+            and not write_task.done()  # и что он не завершен
+        )
+
+        # read_task  = getattr(sock.eio, "_read_loop_task",  True)
+        read_task = getattr(sock.eio, "_read_loop_task", None)
+        read_task_ok = (
+            read_task is not None
+            and hasattr(read_task, "done")
+            and not read_task.done()
+        )
+
+        # last_ping == 0  →   считаем «ещё не измеряли»
+        last_ping = getattr(sock.eio, "last_ping", 0)
+        ping_stale = last_ping and (time.time() - last_ping > MAX_PING_SILENCE)
+        transport_connected = True
+        if hasattr(sock.eio, "transport") and sock.eio.transport:
+            transport_connected = getattr(sock.eio.transport, "connected", True)
+
+        need_reconnect = (
+            not connected
+            or not write_task_ok  # write-loop умер (баг 5.0.3)
+            or not read_task_ok  # read-loop  "
+            or ping_stale  # сервер реально молчит
+            or not transport_connected  # новая проверка
+        )
+        if not need_reconnect:
+            continue
+
+        # --------- 2) защита от гонок --------------------------------------
+        if _RECONNECTING:
+            continue
+        _RECONNECTING = True
+
+        current_time = time.time()
+        since_last_recon = current_time - _LAST_RECONNECT_TIME
+        if since_last_recon < _MIN_RECONNECT_INTERVAL:
+            logger.debug(
+                "[WATCHDOG] Too soon since last reconnect (%.1fs ago), waiting...",
+                since_last_recon,
+            )
+            continue
+
+        _LAST_RECONNECT_TIME = current_time
+
+        try:
+            logger.warning(
+                "[WATCHDOG] triggered: conn=%s write_ok=%s read_ok=%s ping_stale=%s transport=%s",
+                connected,
+                write_task_ok,
+                read_task_ok,
+                ping_stale,
+                transport_connected,
+            )
+            log_reconnect_timing()
+
+            # Отменяем сломанные задачи если есть
+            if (
+                hasattr(sock, "_reconnect_task")
+                and sock._reconnect_task
+                and not sock._reconnect_task.done()
+            ):
+                logger.info("[WATCHDOG] Cancelling broken native reconnect task")
+                sock._reconnect_task.cancel()
+
+                # ДОБАВИТЬ ЗДЕСЬ - после отмены задачи
+                log_reconnect_timing()
+
+            # закрываем только если ещё «подвисшее» connected==True
+            if sock.connected:
+                with contextlib.suppress(Exception):
+                    await sock.disconnect()
+
+            await asyncio.sleep(0.1)  # дать event-loop’у подчиститься
+            logger.info("[WATCHDOG] About to attempt manual reconnect")
+            log_reconnect_timing()
+
+            await sock.connect(
+                SERVER_URL,
+                socketio_path="/socket.io",
+                headers={"X-Controller-SN": controller_sn},
+            )
+            logger.info("[WATCHDOG] reconnect succeeded")
+            log_reconnect_timing()
+            _BACKOFF = 2
+
+        except Exception as exc:
+            logger.error(
+                "[WATCHDOG] reconnect failed: %s (next try in %ds)",
+                exc,
+                _BACKOFF,
+            )
+            await asyncio.sleep(_BACKOFF)
+            _BACKOFF = min(_BACKOFF * 2, 30)
+
+        finally:
+            _RECONNECTING = False
+
+
 for name in ("engineio", "socketio"):
     logging.getLogger(name).setLevel(logging.DEBUG)
+# sio.eio.logger.setLevel(logging.DEBUG)
+# sio.logger.setLevel(logging.DEBUG)
 
 controller_sn: Optional[str] = None
 
@@ -78,6 +215,18 @@ def _emit_async(event: str, data: dict) -> None:
     if not sio.connected:
         logger.warning("[SOCKET.IO] Not connected, skipping emit '%s'", event)
         logger.warning("            Payload: %s", json.dumps(data))
+        return
+
+    if not hasattr(sio, "namespaces") or "/" not in sio.namespaces:
+        logger.warning("[SOCKET.IO] Namespace not ready, skipping emit '%s'", event)
+        return
+
+    # Additional check for version SocketIO 5.0.3 (may delete when upgrade)
+    if hasattr(sio.eio, "_write_loop_task") and sio.eio._write_loop_task is None:
+        logger.warning(
+            "[SOCKET.IO] Write loop task is None, connection unstable - skipping emit '%s'",
+            event,
+        )
         return
 
     logger.info("[SOCKET.IO] Attempting to emit '%s' with payload: %s", event, data)
@@ -215,6 +364,20 @@ class DeviceRegistry:
         Формирует массив `devices` в формате, который ожидает
         Яндекс-Диалоги в ответе /user/devices ( discovery ).
         """
+
+        # Маппинг instance -> unit для properties
+        INSTANCE_UNITS = {
+            "temperature": "unit.temperature.celsius",
+            "humidity": "unit.percent",
+            "pressure": "unit.pressure.mmhg",
+            "illumination": "unit.illumination.lux",
+            "voltage": "unit.voltage.volt",
+            "current": "unit.amperage.ampere",
+            "power": "unit.power.watt",
+            "co2_level": "unit.ppm",
+            "battery_level": "unit.percent",
+        }
+
         devices_out: list[dict] = []
 
         for dev_id, dev in self.devices.items():
@@ -252,12 +415,13 @@ class DeviceRegistry:
                     "retrievable": True,
                     "reportable": True,
                 }
-                # добавим parameters, если знаем instance
+                # Добавляем parameters только если есть instance
                 instance = prop.get("instance")
-                if instance or prop["type"].endswith("float"):
+                if instance:
+                    unit = INSTANCE_UNITS.get(instance, "unit.temperature.celsius")
                     prop_obj["parameters"] = {
-                        "instance": instance or "temperature",
-                        "unit": "unit.temperature.celsius",
+                        "instance": instance,
+                        "unit": unit,
                     }
                 props.append(prop_obj)
             if props:
@@ -316,8 +480,20 @@ class DeviceRegistry:
         self._publish_to_mqtt(cmd_topic, payload)
         logger.info(f"[REG] Published '{payload}' → {cmd_topic}")
 
+    def _debug_capability_lookup(self, device_id: str, key: tuple) -> None:
+        """Отладочная функция для поиска capability в cap_index"""
+        logger.info(f"[DEBUG] Looking for key: {key}")
+        logger.info(f"[DEBUG] Available keys in cap_index for device {device_id}:")
+        for k in self.cap_index.keys():
+            if k[0] == device_id:  # показать только для текущего устройства
+                logger.info(f"[DEBUG]   {k} -> {self.cap_index[k]}")
+
     async def _read_capability_state(self, device_id: str, cap: dict) -> Optional[dict]:
         key = (device_id, cap["type"], cap.get("instance"))
+
+        # Отладка (можно убрать после исправления)
+        self._debug_capability_lookup(device_id, key)
+
         topic = self.cap_index.get(key)
         if not topic:
             logger.debug(f"[REG] No MQTT topic found for capability: {key}")
@@ -342,6 +518,10 @@ class DeviceRegistry:
 
     async def _read_property_state(self, device_id: str, prop: dict) -> Optional[dict]:
         key = (device_id, prop["type"], prop.get("instance"))
+
+        # Отладка (можно убрать после исправления)
+        self._debug_capability_lookup(device_id, key)
+
         topic = self.cap_index.get(key)
         if not topic:
             logger.debug(f"[REG] No MQTT topic found for property: {key}")
@@ -517,14 +697,14 @@ def send_to_yandex_state(
         send_state_to_server(
             device_id,
             "devices.capabilities.on_off",
-            "on",
+            instance,
             value,
         )
     elif cap_type == "devices.properties.float":
         send_state_to_server(
             device_id,
             "devices.properties.float",
-            "temperature",
+            instance,
             value,
         )
     else:
@@ -643,45 +823,157 @@ def write_mqtt_state(mqtt_client: mqtt.Client, topic: str, is_on: bool) -> None:
     logger.debug("[MQTT] Published '%s' to '%s'", payload_str, full_topic)
 
 
-@sio.event
+# @sio.event
 async def connect():
     logger.info("[SUCCESS] Connected to Socket.IO server!")
+
+    log_reconnect_timing()
+    debug_socketio_state_enhanced(sio, "CONNECT")
     await sio.emit("message", {"controller_sn": controller_sn, "status": "online"})
 
 
 # NOTE: argument "reason" not accesable in current client 5.0.3
 #       implemented on version 5.12
-@sio.event
-async def disconnect():
-    logger.info("[DISCONNECT] This client disconnected from server")
+# @sio.event
+async def disconnect(*args, **kwargs):
+    """Срабатывает при любом разрыве соединения."""
+    reason = args[0] if args else kwargs.get("reason")
+    logger.warning(
+        "[DISCONNECT] lost connection; reason=%r  args=%s  kwargs=%s",
+        reason,
+        args,
+        kwargs,
+    )
+    log_reconnect_timing()
+
+    # Маркер багa 5.0.3 — в логе engineio чуть выше будет TypeError.
+    logger.warning(
+        "[BUGCHECK] если выше было "
+        "\"Unexpected error decoding packet: 'int' object is not subscriptable\" "
+        "→ это баг старого клиента ≤5.0.3"
+    )
+
+    # Запустить трейсинг задачи реконнекта
+    if hasattr(sio, "_reconnect_task") and sio._reconnect_task:
+        logger.info("[DISCONNECT] Starting reconnect task monitoring...")
+        asyncio.create_task(trace_reconnect_execution(sio))
+
+    # # ---- одноразовый «ручной» цикл переподключения ----
+    # async def _reconnect():
+    #     delay = 2
+    #     while not sio.connected and SERVER_URL:
+    #         try:
+    #             # вызов без параметра `wait`
+    #             await sio.connect(
+    #                 SERVER_URL,
+    #                 socketio_path="/socket.io",
+    #                 headers={"X-Controller-SN": controller_sn},
+    #             )
+    #             logger.info("[MANUAL] reconnect succeeded")
+    #         except Exception as exc:
+    #             logger.error(
+    #                 "[MANUAL] reconnect failed: %s (next try in %ss)", exc, delay
+    #             )
+    #             await asyncio.sleep(delay)
+    #             delay = min(delay * 2, 30)      # экспоненциально до 30 с
+
+    # # запускаем фоновую задачу ОДИН раз
+    # asyncio.create_task(_reconnect())
 
 
-@sio.event
+# Функция для мониторинга жизненного цикла reconnect задачи
+def debug_reconnect_lifecycle(sio):
+    """
+    Отслеживает полный жизненный цикл задачи реконнекта
+    """
+    if not hasattr(sio, "_reconnect_task") or not sio._reconnect_task:
+        return "No reconnect task"
+
+    task = sio._reconnect_task
+    result = {
+        "task_id": id(task),
+        "done": task.done(),
+        "cancelled": task.cancelled() if hasattr(task, "cancelled") else False,
+    }
+
+    if task.done():
+        try:
+            task_result = task.result()
+            result["result"] = str(task_result)
+            result["success"] = True
+        except Exception as e:
+            result["exception"] = str(e)
+            result["exception_type"] = type(e).__name__
+            result["success"] = False
+
+            # Анализ специфичных ошибок
+            if "different loop" in str(e):
+                result["bug_type"] = "ASYNCIO_LOOP_MISMATCH"
+                result["analysis"] = "Task created in one loop, executed in another"
+            elif "int" in str(e) and "subscriptable" in str(e):
+                result["bug_type"] = "PACKET_DECODE_BUG"
+
+    return result
+
+
+# Функция для понимания где именно падает задача
+async def trace_reconnect_execution(sio):
+    """
+    Пытается понять на каком этапе падает reconnect
+    """
+    if not hasattr(sio, "_reconnect_task") or not sio._reconnect_task:
+        return
+
+    task = sio._reconnect_task
+
+    # Мониторим задачу каждые 100ms
+    check_count = 0
+    while not task.done() and check_count < 50:  # max 5 секунд
+        await asyncio.sleep(0.1)
+        check_count += 1
+
+        # Логируем прогресс
+        logger.debug(f"[RECONNECT_TRACE] Check #{check_count}: task still running")
+
+    # Анализируем результат
+    if task.done():
+        lifecycle = debug_reconnect_lifecycle(sio)
+        logger.info(f"[RECONNECT_TRACE] Task completed: {lifecycle}")
+
+        if not lifecycle.get("success", False):
+            logger.error(f"[RECONNECT_TRACE] Task failed at early stage:")
+            logger.error(f"  - Never reached connection attempt")
+            logger.error(f"  - Failed during: asyncio.sleep() or Event.wait()")
+            logger.error(f"  - Bug type: {lifecycle.get('bug_type', 'unknown')}")
+
+
+# @sio.event
 async def response(data):
     logger.info(f"[INCOME] Server response: {data}")
 
 
-@sio.event
+# @sio.event
 async def error(data):
-    logger.info(f"[ERR] Server error: {data}")
-    logger.info("[ERR] Terminating connection due to server error")
-    await sio.disconnect()
+    logger.info(f"[SOCKETIO] Server error: {data}")
+    # logger.info("[SOCKETIO] Terminating connection due to server error")
+    # await sio.disconnect()
 
 
-@sio.event
+# @sio.event
 async def connect_error(data: dict[str, Any]) -> None:
     """
     Called when initial connection to server fails
     """
     logger.warning("[SOCKET.IO] Connection refused by server: %s", data)
+    log_reconnect_timing()
 
 
-@sio.on("*")
+# @sio.on("*")
 async def any_event(event, sid, data):
     logger.info(f"[Socket.IO/ANY] Not handled event {event}")
 
 
-@sio.on("alice_devices_list")
+# @sio.on("alice_devices_list")
 async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
     """
     Handles a device discovery request from the server
@@ -708,7 +1000,7 @@ async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
     return devices_response
 
 
-@sio.on("alice_devices_query")
+# @sio.on("alice_devices_query")
 async def on_alice_devices_query(data):
     """
     Handles a Yandex request to retrieve the current state of devices.
@@ -780,7 +1072,7 @@ def handle_single_device_action(device: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@sio.on("alice_devices_action")
+# @sio.on("alice_devices_action")
 async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
     """
     Handles a device action request from Yandex (e.g., turn on/off)
@@ -810,7 +1102,7 @@ async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
     return action_response
 
 
-async def connect_controller():
+async def connect_controller(sock: socketio.AsyncClient):
     global controller_sn
 
     config = read_config()
@@ -851,14 +1143,17 @@ async def connect_controller():
         # Жёстко прерываем при отсутствии брокера
         return
 
-    server_url = f"https://{server_address}"
-    logger.info(f"[INFO] Connecting to Socket.IO server: {server_url}")
+    global SERVER_URL
+    SERVER_URL = f"https://{server_address}"
+    logger.info(f"[INFO] Connecting to Socket.IO server: {SERVER_URL}")
 
     try:
         # Connect to server and keep connection active
         # Pass controller_sn via custom header
-        await sio.connect(
-            server_url,
+        # NOTE: argument for custom auth={'token': 'my-token'} not accesable
+        # in current client 5.0.3, this function implemented on version 5.1.0
+        await sock.connect(
+            SERVER_URL,
             socketio_path="/socket.io",
             headers={"X-Controller-SN": controller_sn},
         )
@@ -891,10 +1186,360 @@ def _log_and_stop(sig: signal.Signals) -> None:
         stop_event.set()
 
 
+def debug_socketio_state(sio, label="DEBUG"):
+    """
+    Проверяет состояние SocketIO клиента и задач реконнекта
+    """
+    logger.info(f"[{label}] SocketIO State Check:")
+    logger.info(f"  - sio.connected: {sio.connected}")
+
+    if hasattr(sio, "eio") and sio.eio:
+        eio = sio.eio
+        logger.info(f"  - eio.state: {getattr(eio, 'state', 'unknown')}")
+
+        # Проверяем задачи read/write loop
+        write_task = getattr(eio, "_write_loop_task", None)
+        read_task = getattr(eio, "_read_loop_task", None)
+        logger.info(
+            f"  - write_loop_task: {write_task is not None} ({'alive' if write_task and not write_task.done() else 'dead/None'})"
+        )
+        logger.info(
+            f"  - read_loop_task: {read_task is not None} ({'alive' if read_task and not read_task.done() else 'dead/None'})"
+        )
+
+        # Проверяем ping состояние
+        last_ping = getattr(eio, "last_ping", 0)
+        if last_ping:
+            ping_age = time.time() - last_ping
+            logger.info(f"  - last_ping: {ping_age:.1f}s ago")
+        else:
+            logger.info(f"  - last_ping: never")
+
+    # Проверяем задачи реконнекта на уровне SocketIO
+    if hasattr(sio, "_reconnect_task"):
+        reconnect_task = sio._reconnect_task
+        if reconnect_task:
+            logger.info(
+                f"  - socketio reconnect_task: {'alive' if not reconnect_task.done() else 'done/failed'}"
+            )
+            if reconnect_task.done():
+                try:
+                    result = reconnect_task.result()
+                    logger.info(f"    └─ result: {result}")
+                except Exception as e:
+                    logger.info(f"    └─ exception: {e}")
+        else:
+            logger.info(f"  - socketio reconnect_task: None")
+
+    # Проверяем задачи реконнекта на уровне EngineIO
+    if hasattr(sio, "eio") and sio.eio and hasattr(sio.eio, "_reconnect_task"):
+        eio_reconnect_task = sio.eio._reconnect_task
+        if eio_reconnect_task:
+            logger.info(
+                f"  - engineio reconnect_task: {'alive' if not eio_reconnect_task.done() else 'done/failed'}"
+            )
+        else:
+            logger.info(f"  - engineio reconnect_task: None")
+
+    # Проверяем все активные asyncio задачи связанные с socketio
+    current_tasks = [task for task in asyncio.all_tasks() if not task.done()]
+    socketio_tasks = []
+    for task in current_tasks:
+        task_name = getattr(task, "get_name", lambda: "unnamed")()
+        coro_name = (
+            task.get_coro().__name__
+            if hasattr(task.get_coro(), "__name__")
+            else str(task.get_coro())
+        )
+        if (
+            "socket" in coro_name.lower()
+            or "engine" in coro_name.lower()
+            or "connect" in coro_name.lower()
+        ):
+            socketio_tasks.append(f"{task_name}: {coro_name}")
+
+    if socketio_tasks:
+        logger.info(f"  - related async tasks: {len(socketio_tasks)}")
+        for task_info in socketio_tasks:
+            logger.info(f"    └─ {task_info}")
+    else:
+        logger.info(f"  - related async tasks: none found")
+
+
+def debug_socketio_state_enhanced(sio, label="DEBUG"):
+    """
+    Расширенная диагностика состояния SocketIO с проверкой event loops
+    """
+    logger.info(f"[{label}] SocketIO Enhanced State Check:")
+    logger.info(f"  - sio.connected: {sio.connected}")
+
+    # Получаем текущий event loop
+    try:
+        current_loop = asyncio.get_running_loop()
+        current_loop_id = id(current_loop)
+        logger.info(f"  - current_loop_id: {current_loop_id}")
+    except RuntimeError:
+        current_loop = None
+        current_loop_id = "no_loop"
+        logger.info(f"  - current_loop_id: {current_loop_id}")
+
+    if hasattr(sio, "eio") and sio.eio:
+        eio = sio.eio
+        logger.info(f"  - eio.state: {getattr(eio, 'state', 'unknown')}")
+
+        # Проверяем внутренние атрибуты EngineIO
+        write_task = getattr(eio, "write_loop_task", "missing")
+        read_task = getattr(eio, "read_loop_task", "missing")
+        reconnect_task = getattr(sio, "_reconnect_task", "missing")
+
+        # Расширенная информация о задачах
+        logger.info(f"  - _write_loop_task: {type(write_task).__name__}")
+        if type(write_task) == str:
+            logger.info(f"    └─ write_task: {write_task}")
+        if hasattr(write_task, "get_loop") and write_task is not None:
+            task_loop_id = id(write_task.get_loop())
+            logger.info(f"    └─ task_loop_id: {task_loop_id}")
+            logger.info(f"    └─ same_loop: {task_loop_id == current_loop_id}")
+
+        logger.info(f"  - _read_loop_task: {type(read_task).__name__}")
+        if hasattr(read_task, "get_loop") and read_task is not None:
+            task_loop_id = id(read_task.get_loop())
+            logger.info(f"    └─ task_loop_id: {task_loop_id}")
+            logger.info(f"    └─ same_loop: {task_loop_id == current_loop_id}")
+
+        logger.info(f"  - reconnect_task: {type(reconnect_task).__name__}")
+        if type(reconnect_task) == str:
+            logger.info(f"    └─ reconnect_task: {reconnect_task}")
+        if hasattr(reconnect_task, "get_loop") and reconnect_task is not None:
+            task_loop_id = id(reconnect_task.get_loop())
+            logger.info(f"    └─ task_loop_id: {task_loop_id}")
+            logger.info(f"    └─ same_loop: {task_loop_id == current_loop_id}")
+
+        # Дополнительные атрибуты EngineIO для понимания state
+        for attr in ["transport", "_connect_event", "_reconnect_task"]:
+            if hasattr(eio, attr):
+                val = getattr(eio, attr)
+                logger.info(f"  - eio.{attr}: {type(val).__name__ if val else None}")
+
+        # Проверяем transport и его состояние
+        if hasattr(eio, "transport") and eio.transport:
+            transport = eio.transport
+            logger.info(
+                f"  - transport.connected: {getattr(transport, 'connected', 'unknown')}"
+            )
+            logger.info(
+                f"  - transport.state: {getattr(transport, 'state', 'unknown')}"
+            )
+
+    # Проверяем задачи реконнекта SocketIO
+    reconnect_task = getattr(sio, "_reconnect_task", None)
+    if reconnect_task:
+        logger.info(f"  - socketio._reconnect_task: {type(reconnect_task).__name__}")
+        logger.info(f"    └─ done: {reconnect_task.done()}")
+        if reconnect_task.done():
+            try:
+                result = reconnect_task.result()
+                logger.info(f"    └─ result: {result}")
+            except Exception as e:
+                logger.info(f"    └─ exception: {type(e).__name__}: {e}")
+                # Дополнительная информация об asyncio ошибках
+                if "different loop" in str(e):
+                    logger.error(f"    └─ ASYNCIO LOOP MISMATCH DETECTED!")
+
+        # Проверяем loop задачи реконнекта
+        if hasattr(reconnect_task, "get_loop"):
+            task_loop_id = id(reconnect_task.get_loop())
+            logger.info(f"    └─ task_loop_id: {task_loop_id}")
+            logger.info(f"    └─ same_loop: {task_loop_id == current_loop_id}")
+
+    # Анализ всех активных Socket.IO/Engine.IO задач
+    current_tasks = [task for task in asyncio.all_tasks() if not task.done()]
+    socketio_tasks = []
+
+    for task in current_tasks:
+        coro = task.get_coro()
+        coro_name = getattr(coro, "__name__", str(coro))
+        coro_qualname = getattr(coro, "__qualname__", "unknown")
+
+        # Ищем задачи связанные с socket.io/engine.io
+        search_terms = [
+            "socket",
+            "engine",
+            "read_loop",
+            "write_loop",
+            "_handle",
+            "connect",
+        ]
+        if any(term in coro_name.lower() for term in search_terms):
+            task_loop_id = id(task.get_loop())
+            socketio_tasks.append(
+                {
+                    "name": coro_name,
+                    "qualname": coro_qualname,
+                    "loop_id": task_loop_id,
+                    "same_loop": task_loop_id == current_loop_id,
+                }
+            )
+
+    if socketio_tasks:
+        logger.info(f"  - related async tasks: {len(socketio_tasks)}")
+        for task_info in socketio_tasks:
+            logger.info(
+                f"    └─ {task_info['name']} (loop_match: {task_info['same_loop']})"
+            )
+    else:
+        logger.info(f"  - related async tasks: none found")
+
+    # Дополнительная диагностика MAIN_LOOP
+    global MAIN_LOOP
+    if MAIN_LOOP:
+        main_loop_id = id(MAIN_LOOP)
+        logger.info(f"  - MAIN_LOOP_id: {main_loop_id}")
+        logger.info(f"  - using_main_loop: {main_loop_id == current_loop_id}")
+        logger.info(f"  - main_loop_running: {MAIN_LOOP.is_running()}")
+
+
+# Добавить проверку целостности атрибутов EngineIO
+def check_engineio_integrity(sio):
+    """Проверяет целостность внутренних структур EngineIO"""
+    if not hasattr(sio, "eio") or not sio.eio:
+        return "No EIO object"
+
+    eio = sio.eio
+    issues = []
+
+    # Проверяем ключевые атрибуты
+    critical_attrs = ["_write_loop_task", "_read_loop_task", "transport", "state"]
+    for attr in critical_attrs:
+        if not hasattr(eio, attr):
+            issues.append(f"Missing {attr}")
+        elif attr.endswith("_task"):
+            task = getattr(eio, attr)
+            if task is None:
+                issues.append(f"{attr} is None")
+            elif hasattr(task, "done") and task.done() and not task.cancelled():
+                try:
+                    task.result()
+                except Exception as e:
+                    issues.append(f"{attr} failed: {e}")
+
+    # Проверяем состояние transport
+    if hasattr(eio, "transport") and eio.transport:
+        transport = eio.transport
+        if not getattr(transport, "connected", True):
+            issues.append("Transport not connected")
+
+    return issues if issues else "OK"
+
+
+# Дополнительная функция для понимания timing'а
+def log_reconnect_timing():
+    """
+    Помогает понять timing проблемы с reconnect
+    """
+    logger.info(f"[TIMING] Current time: {time.time()}")
+    logger.info(f"[TIMING] Current loop: {id(asyncio.get_running_loop())}")
+
+    # Проверяем все pending задачи
+    all_tasks = asyncio.all_tasks()
+    pending_tasks = [t for t in all_tasks if not t.done()]
+
+    reconnect_tasks = []
+    for task in pending_tasks:
+        coro_str = str(task.get_coro())
+        if "reconnect" in coro_str.lower() or "handle" in coro_str.lower():
+            reconnect_tasks.append(
+                {"id": id(task), "coro": coro_str[:100], "loop_id": id(task.get_loop())}
+            )
+
+    if reconnect_tasks:
+        logger.info(f"[TIMING] Found {len(reconnect_tasks)} potential reconnect tasks:")
+        for rt in reconnect_tasks:
+            logger.info(f"  - Task {rt['id']}: {rt['coro']}")
+            logger.info(f"    Loop: {rt['loop_id']}")
+
+
+WATCHDOG_PERIOD = 5  # сек. между проверками
+MAX_PING_SILENCE = 30  # сек. молчания от сервера → считаем, что подвисло
+_RECONNECTING = False  # защита от гонок
+_BACKOFF = 2  # экспоненциальный back-off (2 → 4 → … 30)
+
+# Reconnect debouncing
+_LAST_RECONNECT_TIME = 0
+_MIN_RECONNECT_INTERVAL = 5  # секунд между попытками
+
+
+async def analyze_reconnect_timing_issues():
+    """
+    Запускать эту функцию когда хотите детально изучить timing проблемы
+    """
+    logger.info("=== STARTING TIMING ANALYSIS ===")
+
+    for i in range(20):  # 20 проверок каждые 0.5 сек = 10 секунд
+        logger.info(f"[TIMING_ANALYSIS] Check #{i+1}")
+        log_reconnect_timing()
+
+        # Дополнительно проверяем состояние reconnect задачи
+        if hasattr(sio, "_reconnect_task") and sio._reconnect_task:
+            task = sio._reconnect_task
+            logger.info(f"  └─ Reconnect task {id(task)}: done={task.done()}")
+
+            if task.done():
+                lifecycle = debug_reconnect_lifecycle(sio)
+                logger.info(f"  └─ Lifecycle: {lifecycle}")
+
+        await asyncio.sleep(0.5)
+
+    logger.info("=== TIMING ANALYSIS COMPLETE ===")
+
+
+def bind_handlers(sock: socketio.AsyncClient):
+    # NOTE: Unlike decorators we use .on for more safety - this method help
+    #       control all names and objectes in any time and any context
+
+    # @sio.on("*")
+    # async def any_event(event, sid, data):
+    # @sio.on("alice_devices_list")
+    # async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
+    # @sio.on("alice_devices_query")
+    # async def on_alice_devices_query(data):
+    # @sio.on("alice_devices_action")
+    # async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
+
+    sock.on("*", any_event)
+    sock.on("alice_devices_list", on_alice_devices_list)
+    sock.on("alice_devices_query", on_alice_devices_query)
+    sock.on("alice_devices_action", on_alice_devices_action)
+
+    # @sio.event
+    # async def connect():
+    # # NOTE: argument "reason" not accesable in current client 5.0.3
+    # #       implemented on version 5.12
+    # @sio.event
+    # async def disconnect(*args, **kwargs):
+    # @sio.event
+    # async def response(data):
+    # @sio.event
+    # async def error(data):
+
+    # @sio.event
+    # async def connect_error(data: dict[str, Any]) -> None:
+
+    sock.on("connect", connect)
+    sock.on("disconnect", disconnect)
+    sock.on("response", response)
+    sock.on("error", error)
+    sock.on("connect_error", connect_error)
+
+
 async def main() -> None:
+    global sio
     global stop_event
     global MAIN_LOOP
     MAIN_LOOP = asyncio.get_running_loop()
+
+    logger.info("[MAIN] Starting with initial timing check:")
+    log_reconnect_timing()
 
     stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
     MAIN_LOOP.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
@@ -905,9 +1550,52 @@ async def main() -> None:
     logger.info("[MAIN] Starting MQTT client...")
     mqtt_client.start()
 
+    sio = socketio.AsyncClient(
+        logger=True,
+        engineio_logger=True,
+        reconnection=True,  # auto-reconnect ON
+        reconnection_attempts=0,  # 0 = infinite retries
+        reconnection_delay=2,  # first delay 2 s
+        reconnection_delay_max=30,  # cap at 30 s
+        randomization_factor=0.5,  # jitter
+    )
+
+    # sio = socketio.AsyncClient(
+    #     logger=True,
+    #     engineio_logger=True,
+    #     reconnection=False, # TODO: search reason not working correctly
+    # )
+
+    # FIXME: Workaround for SocketIO 5.0.3 reconnection bug
+    # Currently, when a "disconnect" event occurs initiated by unexpected server
+    # shutdown via CTRL+C, but can also happen in other ways:
+    #   - SocketIO fails with error:
+    #     INFO:engineio.client:Unexpected error decoding packet: "'int' object is not subscriptable", aborting
+    #     INFO:engineio.client:Exiting read loop task
+    #     INFO:socketio.client:Connection failed, new attempt in 1.73 seconds
+    #   - If set socketio.AsyncClient(reconnection=True)
+    #     Created new task in "socketio._reconnect_task"
+    #   - In reconnect task get error (socketio._reconnect_task.result())
+    #     exception: RuntimeError: Task <Task pending name='Task-45' coro=<Event.wait() running at /usr/lib/python3.9/asyncio/locks.py:226> cb=[_release_waiter(<Future pendi...events.py:424>)() at /usr/lib/python3.9/asyncio/tasks.py:416] created at /usr/lib/python3.9/asyncio/tasks.py:462> got Future <Future pending> attached to a different loop
+    #   - Result: Breaking reconnection - client doesn't get any reconnection attempts
+    # GitHub has some tickets where maintainers are improving SocketIO code with
+    #   more general type checks in methods.
+    #   The maintainer wrote about this code in this post:
+    #   https://github.com/miguelgrinberg/python-socketio/issues/417#issuecomment-608050583
+    #
+
+    # Явно пропишем loop который используется чтобы избежать ошибки "attached to a different loop" у частей системы
+    sio._loop = asyncio.get_running_loop()
+    bind_handlers(sio)
+
     logger.info("[MAIN] Connecting Socket.IO client...")
-    await connect_controller()
+    await connect_controller(sio)
+    log_reconnect_timing()
     sio_task = asyncio.create_task(sio.wait())
+
+    # ─── сторож за Transport'ом ───
+    # asyncio.create_task(_watchdog_task(sio))
+    # asyncio.create_task(analyze_reconnect_timing_issues())
 
     # Wait for shutdown signal
     await stop_event.wait()
