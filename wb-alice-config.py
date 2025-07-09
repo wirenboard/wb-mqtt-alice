@@ -1,13 +1,13 @@
-import os
 import json
 import uuid
 import logging
 import subprocess
+import requests
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
 
-from models import Room, Capability, Property, Device, RoomChange, Config
+from models import Room, Capability, Property, Device, RoomID, Config
 
 app = FastAPI(
     title="Alice Integration API",
@@ -21,37 +21,82 @@ logging.basicConfig(
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
+
+SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/etc/wb-alice-devices.conf"
 CLIENT_SERVICE_NAME = "wb-alice-client"
+DEFAULT_CONFIG = {
+    "rooms": {
+        "without_rooms": {
+            "name": "Без комнаты",
+            "devices": []
+        }
+    },
+    "devices": {},
+    "link_url": None,
+    "unlink_url": None
+}
+
+
+def get_controller_sn():
+    """Get controller SN from the configuration file"""
+
+    logger.debug(f"Reading controller SN...")
+    try:
+        with open(SHORT_SN_PATH, "r") as file:
+            controller_sn = file.read().strip()
+            logger.debug(f"Сontroller SN: {controller_sn}")
+            return controller_sn
+    except FileNotFoundError:
+        logger.error(f"Controller SN file not found! Check the path: {SHORT_SN_PATH}")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading controller SN: {e}")
+        return None
+
+
+def is_controller_linked(controller_sn: str) -> bool:
+    """Checks if the controller is bound to the service"""
+    
+    url = f"https://voidlib.com:8042/controllers/{controller_sn}/status"
+    logger.debug(f"Сhecking controller binding status...")
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return data.get('registered', False)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error checking controller binding status: {e}")
+        raise
 
 
 def load_config() -> Config:
     """Load configurations from file"""
     
+    logger.debug(f"Reading configuration file...")
+
     try:
-        if not os.path.exists(CONFIG_PATH):
-            config_default = dict({"rooms":
-                                   {"without_rooms": {"name": "Без комнаты","devices": []}},
-                                   "devices": {}
-                                   })
-            config = Config(**config_default)
-            save_config(config)
-            return config
-        
         with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
             config = Config(**json.load(f))
         return config
     except Exception as e:
-        raise
+        config = Config(**DEFAULT_CONFIG)
+        save_config(config)
+        logger.error(f"Error reading configuration file: {e}")
+        return config
 
 
 def save_config(config: Config):
-    """Save configurations to file"""
+    """Save configuration file"""
+
+    logger.debug(f"Saving configuration file...")
     
     try:
         with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(config.dict(), f, ensure_ascii=False, indent=2)
     except Exception as e:
+        logger.error(f"Error saveing configuration file: {e}")
         raise
 
     restart_service(CLIENT_SERVICE_NAME)
@@ -86,10 +131,10 @@ def room_name_exist(name: str, rooms) -> bool:
     return any(room.name == name for room in rooms.values())
 
 
-def room_change(device_id, room_id, config):
-    del_room_id = config.devices[device_id].room_id
-    if room_id != del_room_id:
-        config.rooms[del_room_id].devices.remove(device_id)
+def move_device_to_room(device_id, room_id, config):
+    old_room_id = config.devices[device_id].room_id
+    if room_id != old_room_id:
+        config.rooms[old_room_id].devices.remove(device_id)
         config.rooms[room_id].devices.append(device_id)
     return 
 
@@ -105,6 +150,15 @@ async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
 
     config = load_config()
+
+    if not is_controller_linked(controller_sn):
+        config.link_url = f"https://voidlib.com:8043/link-controller?sn={controller_sn}"
+        config.unlink_url = None
+    else:
+        config.link_url = None
+        config.unlink_url = "https://voidlib.com:8043/"
+    
+    save_config(config)
     return config
 
 
@@ -120,11 +174,7 @@ async def create_room(room_data: Room):
                 detail="Room with this name already exists")
     # Create room
     room_id = generate_id()
-    rooms_dict = config.rooms.copy()
-    without_rooms = rooms_dict.pop("without_rooms")
-    rooms_dict[room_id] = room_data
-    rooms_dict["without_rooms"] = without_rooms
-    config.rooms = rooms_dict
+    config.rooms[room_id] = room_data
     response = room_data.post_response(room_id)
     
     save_config(config)
@@ -220,7 +270,7 @@ async def update_device(device_id: str, device_data: Device):
             detail="There is no room with this ID")
     # Update device
     response = device_data
-    room_change(device_id, device_data.room_id, config)
+    move_device_to_room(device_id, device_data.room_id, config)
     config.devices[device_id] = response
     
     save_config(config)
@@ -247,9 +297,9 @@ async def delete_device(device_id: str):
     return {"message": "Device deleted successfully"}
 
 
-@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomChange, status_code=200)
-async def change_room(device_id: str, device_data: RoomChange):
-    """Change room"""
+@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomID, status_code=200)
+async def change_device_room(device_id: str, device_data: RoomID):
+    """Changes the room for the device"""
     
     config = load_config()
     # Check for the presence of device with given id
@@ -262,14 +312,16 @@ async def change_room(device_id: str, device_data: RoomChange):
         raise HTTPException(
             status_code=404,
             detail="There is no room with this ID")
-    # Change room   
-    room_change(device_id, device_data.room_id, config)
-    config.devices[device_id].rooms_id = device_data.room_id
-    response = RoomChange(room_id=device_data.room_id)
+    # Change device room
+    move_device_to_room(device_id, device_data.room_id, config)
+    config.devices[device_id].room_id = device_data.room_id
+    response = RoomID(room_id=device_data.room_id)
     
     save_config(config)
     return response
 
+controller_sn = get_controller_sn()
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
