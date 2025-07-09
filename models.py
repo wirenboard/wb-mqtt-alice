@@ -55,9 +55,11 @@ class Device(BaseModel):
             }
         }
 
-class RoomChange(BaseModel):
+class RoomID(BaseModel):
     room_id: str
 
 class Config(BaseModel):
     rooms: Dict[str, Room]
     devices: Dict[str, Device]
+    link_url: Optional[str] = None
+    unlink_url: Optional[str] = None
