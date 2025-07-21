@@ -19,7 +19,13 @@ LICENSE text=auto eol=lf
 *.txt text=auto eol=lf
 *.py text=auto eol=lf
 *.conf text=auto eol=lf
+*.sh text=auto eol=lf
+*.service text=auto eol=lf
 
+copyright text=auto eol=lf
+install text=auto eol=lf
 changelog text=auto eol=lf
 control text=auto eol=lf
 rules text=auto eol=lf
+Jenkinsfile text=auto eol=lf
+50wb-alice text=auto eol=lf
