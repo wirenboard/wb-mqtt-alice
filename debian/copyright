@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: wb-cloud-agent
-Upstream-Contact: <preferred name and address to reach the upstream project>
-Source: <https://github.com/wirenboard/wb-alice-client>
+Upstream-Contact: Wiren Board Team <info@wirenboard.com>
+Source: https://github.com/wirenboard/wb-alice-client
 #
 # Please double check copyright with the licensecheck(1) command.
 
@@ -13,8 +13,8 @@ Files:     .gitignore
            wb-alice-client.py
            wb-alice-config.py
            mqtt_topic.py
-Copyright: __NO_COPYRIGHT_NOR_LICENSE__
-License:   __NO_COPYRIGHT_NOR_LICENSE__
+Copyright: 2025, Wiren Board Team <info@wirenboard.com>
+License:   MIT-WB
 
 #----------------------------------------------------------------------------
 # Files marked as NO_LICENSE_TEXT_FOUND may be covered by the following
