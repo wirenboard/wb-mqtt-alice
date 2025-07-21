@@ -1,6 +1,6 @@
 #!/bin/bash
 # Script for configuring nginx to work with ATECCx08 on Wiren Board controller
-set -e
+set -e # Error handling
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
