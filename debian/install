@@ -5,3 +5,4 @@ wb-alice-client.py /usr/lib/wb-mqtt-alice/
 mqtt_topic.py /usr/lib/wb-mqtt-alice/
 wb-alice-config.py /usr/lib/wb-mqtt-alice/
 models.py /usr/lib/wb-mqtt-alice/
+configure-nginx-proxy.sh /usr/lib/wb-mqtt-alice/

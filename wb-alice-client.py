@@ -18,7 +18,6 @@ import signal
 import time
 from typing import Any, Callable, Optional, Tuple
 
-import engineio.packet as _eio_pkt
 import paho.mqtt.client as mqtt
 import paho.mqtt.subscribe as subscribe
 import socketio
@@ -34,7 +33,6 @@ logger.info("socketio module path: %s", socketio.__file__)
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    logger = logging.getLogger(__name__)
     logger.info("python-socketio version: %s", version("python-socketio"))
 except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
@@ -52,7 +50,18 @@ threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
 # Событие, которое «будит» основной цикл и инициирует остановку
 stop_event: Optional[asyncio.Event] = None
 
-sio: Optional[socketio.AsyncClient] = None  # пока заглушка
+sio: Optional[socketio.AsyncClient] = None
+
+
+# TODO: implement certificates work (client + server)
+# Best solution for owr old client (Release 5.0.3 - 2020, 14 Dec)
+# https://github.com/miguelgrinberg/python-socketio/discussions/1040
+
+# Maybe easely do via NGINX (owr nginx/1.18.0 - 2020-05-28)?
+# https://mailman.nginx.org/pipermail/unit/2020-May/000201.html
+# Начиная с 1.7.9 вместо обычного файла можно подставить строку вида
+# engine:<имя-engine>:<id-ключа> — тогда все операции с приватным ключом будут выполнять­ся через OpenSSL-engine (PKCS#11, HSM, secure-element и т. д.)
+# https://nginx.org/en/docs/http/ngx_http_proxy_module.html
 
 
 # This watchdog monitors connection health and handles reconnection manually
@@ -489,7 +498,9 @@ class DeviceRegistry:
                 logger.info(f"[DEBUG]   {k} -> {self.cap_index[k]}")
 
     async def _read_capability_state(self, device_id: str, cap: dict) -> Optional[dict]:
-        key = (device_id, cap["type"], cap.get("instance"))
+        cap_type = cap["type"]
+        instance = cap.get("instance")
+        key = (device_id, cap_type, instance)
 
         # Отладка (можно убрать после исправления)
         self._debug_capability_lookup(device_id, key)
@@ -502,13 +513,13 @@ class DeviceRegistry:
             value = await read_mqtt_state(topic, mqtt_host="localhost")
 
             # Normalize boolean values for on_off capabilities
-            if cap["type"].endswith("on_off"):
+            if cap_type.endswith("on_off"):
                 value = bool(value)
 
             return {
-                "type": cap["type"],
+                "type": cap_type,
                 "state": {
-                    "instance": cap.get("instance", "on"),
+                    "instance": instance,
                     "value": value,
                 },
             }
@@ -517,7 +528,9 @@ class DeviceRegistry:
             return None
 
     async def _read_property_state(self, device_id: str, prop: dict) -> Optional[dict]:
-        key = (device_id, prop["type"], prop.get("instance"))
+        prop_type = prop["type"]
+        instance = prop.get("instance")
+        key = (device_id, prop_type, instance)
 
         # Отладка (можно убрать после исправления)
         self._debug_capability_lookup(device_id, key)
@@ -535,9 +548,9 @@ class DeviceRegistry:
             value = float(raw)  # Currently only float is supported
 
             return {
-                "type": prop["type"],
+                "type": prop_type,
                 "state": {
-                    "instance": prop.get("instance", "temperature"),
+                    "instance": instance,
                     "value": value,
                 },
             }
@@ -832,7 +845,7 @@ async def connect():
     await sio.emit("message", {"controller_sn": controller_sn, "status": "online"})
 
 
-# NOTE: argument "reason" not accesable in current client 5.0.3
+# NOTE: argument "reason" not accesable in current client 5.0.3 (2020, 14 Dec)
 #       implemented on version 5.12
 # @sio.event
 async def disconnect(*args, **kwargs):
@@ -1144,7 +1157,8 @@ async def connect_controller(sock: socketio.AsyncClient):
         return
 
     global SERVER_URL
-    SERVER_URL = f"https://{server_address}"
+    # SERVER_URL = f"https://{server_address}"
+    SERVER_URL = f"http://localhost:8042"
     logger.info(f"[INFO] Connecting to Socket.IO server: {SERVER_URL}")
 
     try:
@@ -1585,7 +1599,7 @@ async def main() -> None:
     #
 
     # Явно пропишем loop который используется чтобы избежать ошибки "attached to a different loop" у частей системы
-    sio._loop = asyncio.get_running_loop()
+    sio._loop = MAIN_LOOP
     bind_handlers(sio)
 
     logger.info("[MAIN] Connecting Socket.IO client...")
