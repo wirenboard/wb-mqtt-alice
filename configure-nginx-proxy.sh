@@ -14,24 +14,18 @@ ENGINE_LINE='ssl_engine ateccx08;'
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
-
 LOG_PREFIX="[${PACKET_NAME}]"
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
 
 log_info() {
-    echo -e "${GREEN}${LOG_PREFIX}${NC} $1"
+    echo -e "${LOG_PREFIX} $1"
 }
 
 log_warn() {
-    echo -e "${YELLOW}${LOG_PREFIX}${NC} $1" >&2
+    echo -e "${LOG_PREFIX} $1" >&2
 }
 
 log_error() {
-    echo -e "${RED}${LOG_PREFIX}${NC} $1" >&2
+    echo -e "${LOG_PREFIX} $1" >&2
 }
 
 print_bundle_part() {
