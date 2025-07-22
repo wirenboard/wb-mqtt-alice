@@ -343,7 +343,7 @@ async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
     
     config = load_config()
-
+    
     try:
         response = fetch_url(
             url=f"https://{server_address}/request-registration",
