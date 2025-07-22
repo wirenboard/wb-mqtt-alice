@@ -11,29 +11,30 @@ TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
 
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
+CONFIG_FILE='/etc/wb-alice-client.conf'
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
 LOG_PREFIX="[${PACKET_NAME}]"
 
 log_info() {
-    echo -e "${LOG_PREFIX} $1"
+    echo -e "${LOG_PREFIX} ${1}"
 }
 
 log_warn() {
-    echo -e "${LOG_PREFIX} $1" >&2
+    echo -e "${LOG_PREFIX} ${1}" >&2
 }
 
 log_error() {
-    echo -e "${LOG_PREFIX} $1" >&2
+    echo -e "${LOG_PREFIX} ${1}" >&2
 }
 
 print_bundle_part() {
-    awk -v "req_part=$1" '/BEGIN CERT/{c++} c == req_part { print }'
+    awk -v "req_part=${1}" '/BEGIN CERT/{c++} c == req_part { print }'
 }
 
 cert_is_valid() {
-    (openssl x509 -in "$1" -noout -subject || true) | grep -q "Production"
+    (openssl x509 -in "${1}" -noout -subject || true) | grep -q "Production"
 }
 
 # Prepare and validate device certificate bundle for ATECCx08 authentication.
@@ -49,7 +50,7 @@ cert_is_valid() {
 prepare_device_cert_bundle() {
     log_info "Preparing device certificate bundle..."
 
-    if [ ! -f "$ORIGINAL_CERT" ]; then
+    if [ ! -f "${ORIGINAL_CERT}" ]; then
         log_error 'Cant find device certificate!'
         exit 1
     fi
@@ -57,15 +58,15 @@ prepare_device_cert_bundle() {
     mkdir -p "/var/lib/${PACKET_NAME}"
 
     # create correct certificate for agent to use
-    if [ ! -f "$TARGET_CERT" ] || ! cert_is_valid "$TARGET_CERT"; then
-        if cert_is_valid "$ORIGINAL_CERT"; then
+    if [ ! -f "${TARGET_CERT}" ] || ! cert_is_valid "${TARGET_CERT}"; then
+        if cert_is_valid "${ORIGINAL_CERT}"; then
             log_info 'Device cert is OK, reusing it'
-            rm -f "$TARGET_CERT"
-            ln -s "$ORIGINAL_CERT" "$TARGET_CERT"
+            rm -f "${TARGET_CERT}"
+            ln -s "${ORIGINAL_CERT}" "${TARGET_CERT}"
         else
             log_info 'Creating fixed bundle certificate'
-            print_bundle_part 2 < "$ORIGINAL_CERT" > "$TARGET_CERT"
-            print_bundle_part 1 < "$ORIGINAL_CERT" >> "$TARGET_CERT"
+            print_bundle_part 2 < "${ORIGINAL_CERT}" > "${TARGET_CERT}"
+            print_bundle_part 1 < "${ORIGINAL_CERT}" >> "${TARGET_CERT}"
         fi
         CHANGES_MADE='true'
     else
@@ -86,7 +87,7 @@ add_ssl_engine_to_nginx() {
     log_info "Configuring ssl_engine in nginx.conf..."
 
     local is_nginx_conf_exists=$([ -f "${NGINX_CONF}" ] && echo 'true' || echo 'false')
-    if [ "$is_nginx_conf_exists" = 'false' ]; then
+    if [ "${is_nginx_conf_exists}" = 'false' ]; then
         log_error "File ${NGINX_CONF} not found!"
         return 1
     fi
@@ -104,7 +105,7 @@ add_ssl_engine_to_nginx() {
     log_info "Created backup file: ${backup_file}"
     
     # Add directive to the beginning of file
-    sed -i "1i $ENGINE_LINE" "${NGINX_CONF}"
+    sed -i "1i ${ENGINE_LINE}" "${NGINX_CONF}"
     log_info "Added ssl_engine directive to ${NGINX_CONF}"
 
     # Verify configuration
@@ -136,20 +137,20 @@ setup_i2c_permissions() {
 
     # Create group if it doesn't exist
     local is_group_exists=$(getent group hardware-crypto > /dev/null 2>&1 && echo 'true' || echo 'false')
-    if [ "$is_group_exists" = 'false' ]; then
+    if [ "${is_group_exists}" = 'false' ]; then
         groupadd hardware-crypto
         CHANGES_MADE='true'
         log_info "Created group hardware-crypto"
     fi
 
     # Set permissions on I2C devices
-    local is_i2c_devices_exist=$(ls /dev/i2c-* 1> /dev/null 2>&1 && echo 'true' || echo 'false')
-    if [ "$is_i2c_devices_exist" = 'false' ]; then
+    local first_i2c_device=$(ls /dev/i2c-* 2>/dev/null | head -1)
+    if [ -z "${first_i2c_device}" ]; then
         log_error "No I2C devices found"
         return 1
     fi
-    local current_group=$(stat -c %G /dev/i2c-0 2>/dev/null || echo "")
-    if [ "$current_group" != "hardware-crypto" ]; then
+    local current_group=$(stat -c %G "${first_i2c_device}" 2>/dev/null || echo "")
+    if [ "${current_group}" != "hardware-crypto" ]; then
         chgrp hardware-crypto /dev/i2c-*
         CHANGES_MADE='true'
         log_info "Set permissions on I2C devices"
@@ -159,7 +160,7 @@ setup_i2c_permissions() {
 
     # Add www-data to group
     local is_user_in_group=$(groups www-data 2>/dev/null | grep -q hardware-crypto && echo 'true' || echo 'false')
-    if [ "$is_user_in_group" = 'false' ]; then
+    if [ "${is_user_in_group}" = 'false' ]; then
         usermod -a -G hardware-crypto www-data
         log_info "Added user www-data to hardware-crypto group"
         log_warn "nginx restart may be required for group changes to take effect"
@@ -181,6 +182,22 @@ setup_i2c_permissions() {
     fi
 }
 
+# Read server address from configuration file
+# Returns server address in format "host:port"
+get_server_address() {
+    if [ ! -f "${CONFIG_FILE}" ]; then
+        log_error "Configuration file not found: ${CONFIG_FILE}"
+        exit 1
+    fi
+    
+    local server_addr=$(jq -r '.server_address' "${CONFIG_FILE}" 2>/dev/null)
+    if [ -z "${server_addr}" ] || [ "${server_addr}" = "null" ]; then
+        log_error "Cannot read server_address from ${CONFIG_FILE}"
+        exit 1
+    fi
+    echo "${server_addr}"
+}
+
 # Create nginx site configuration block for proxying requests
 # to the remote server with client certificate authentication
 # using ATECCx08 hardware security module.
@@ -193,11 +210,22 @@ setup_i2c_permissions() {
 create_site_config() {
     log_info "Creating site configuration..."
 
-    if [[ -f "${SITE_CONFIG}" ]]; then
-        log_info "Site configuration already exists: ${SITE_CONFIG}"
-        return 0
-    fi
+    local server_address=$(get_server_address)
+    local server_host=$(echo "${server_address}" | cut -d':' -f1)
+    local server_url="https://${server_address}"
 
+    # Check - maybe congig changed
+    if [[ -f "${SITE_CONFIG}" ]]; then
+        local current_server=$(grep 'proxy_pass https://' "${SITE_CONFIG}" 2>/dev/null | cut -d'/' -f3 | cut -d';' -f1 || echo "")
+        if [[ "${current_server}" == "${server_address}" ]]; then
+            log_info "Site configuration is up to date"
+            return 0
+        else
+            log_info "Server address changed, updating configuration..."
+            rm "${SITE_CONFIG}"
+        fi
+    fi
+    
     cat > "${SITE_CONFIG}" <<EOF
 server {
     listen 8042;
@@ -207,8 +235,8 @@ server {
 
     location / {
         # Required settings - basic proxy configuration
-        proxy_pass https://voidlib.com:8042;
-        proxy_ssl_name voidlib.com;
+        proxy_pass ${server_url};
+        proxy_ssl_name ${server_host};
         proxy_ssl_certificate /var/lib/${PACKET_NAME}/device_bundle.crt.pem;
         proxy_ssl_certificate_key engine:ateccx08:ATECCx08:00:02:C0:00;
         proxy_ssl_server_name on;
@@ -244,7 +272,7 @@ enable_site() {
     local enabled_site="/etc/nginx/sites-enabled/${SITE_NAME}"
 
     # Check if symlink exists and points to correct target
-    if [[ -L "$enabled_site" ]] && [[ "$(readlink "$enabled_site")" == "${SITE_CONFIG}" ]]; then
+    if [[ -L "${enabled_site}" ]] && [[ "$(readlink "${enabled_site}")" == "${SITE_CONFIG}" ]]; then
         log_info "Site already enabled and pointing to correct config"
         return 0
     fi
@@ -326,4 +354,4 @@ main() {
     log_info "Proxy is available at localhost:8042"
 }
 
-main "$@"
+main "${@}"
