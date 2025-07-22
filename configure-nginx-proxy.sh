@@ -12,6 +12,9 @@ TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
 
+# Global flag to track if any changes were made
+CHANGES_MADE='false'
+
 LOG_PREFIX="[${PACKET_NAME}]"
 # Colors for output
 RED='\033[0;31m'
@@ -39,6 +42,16 @@ cert_is_valid() {
     (openssl x509 -in "$1" -noout -subject || true) | grep -q "Production"
 }
 
+# Prepare and validate device certificate bundle for ATECCx08 authentication.
+# Creates target certificate by either symlinking to original certificate
+# (if valid) or reordering certificate parts for proper chain validation
+#
+# Parameters:
+#   None
+#
+# Returns:
+#   0 - Success (certificate prepared and validated)
+#   exit 1 - Critical failure (original certificate not found)
 prepare_device_cert_bundle() {
     log_info "Preparing device certificate bundle..."
 
@@ -60,6 +73,7 @@ prepare_device_cert_bundle() {
             print_bundle_part 2 < "$ORIGINAL_CERT" > "$TARGET_CERT"
             print_bundle_part 1 < "$ORIGINAL_CERT" >> "$TARGET_CERT"
         fi
+        CHANGES_MADE='true'
     else
         log_info 'Device cert already valid'
     fi
@@ -77,15 +91,15 @@ prepare_device_cert_bundle() {
 add_ssl_engine_to_nginx() {
     log_info "Configuring ssl_engine in nginx.conf..."
 
-    local is_nginx_conf_exists=$([ -f "${NGINX_CONF}" ] && echo "true" || echo "false")
-    if [ "$is_nginx_conf_exists" = "false" ]; then
+    local is_nginx_conf_exists=$([ -f "${NGINX_CONF}" ] && echo 'true' || echo 'false')
+    if [ "$is_nginx_conf_exists" = 'false' ]; then
         log_error "File ${NGINX_CONF} not found!"
         return 1
     fi
     
     # Check if directive already exists
-    local is_directive_exists=$(grep -q "^ssl_engine ateccx08;" "${NGINX_CONF}" && echo "true" || echo "false")
-    if [ "${is_directive_exists}" = "true" ]; then
+    local is_directive_exists=$(grep -q "^ssl_engine ateccx08;" "${NGINX_CONF}" && echo 'true' || echo 'false')
+    if [ "${is_directive_exists}" = 'true' ]; then
         log_info "ssl_engine directive already exists"
         return 0
     fi
@@ -100,8 +114,8 @@ add_ssl_engine_to_nginx() {
     log_info "Added ssl_engine directive to ${NGINX_CONF}"
 
     # Verify configuration
-    local is_config_valid=$(nginx -t 2>/dev/null && echo "true" || echo "false")
-    if [ "${is_config_valid}" = "false" ]; then
+    local is_config_valid=$(nginx -t 2>/dev/null && echo 'true' || echo 'false')
+    if [ "${is_config_valid}" = 'false' ]; then
         # Rollback on error
         log_error "nginx configuration error, rolling back..."
         cp "${backup_file}" "${NGINX_CONF}"
@@ -109,6 +123,7 @@ add_ssl_engine_to_nginx() {
     fi
 
     log_info "ssl_engine directive successfully added"
+    CHANGES_MADE='true'
     return 0
 }
 
@@ -126,35 +141,42 @@ setup_i2c_permissions() {
     log_info "Setting up I2C access permissions..."
 
     # Create group if it doesn't exist
-    local is_group_exists=$(getent group hardware-crypto > /dev/null 2>&1 && echo "true" || echo "false")
-    if [ "$is_group_exists" = "false" ]; then
+    local is_group_exists=$(getent group hardware-crypto > /dev/null 2>&1 && echo 'true' || echo 'false')
+    if [ "$is_group_exists" = 'false' ]; then
         groupadd hardware-crypto
+        CHANGES_MADE='true'
         log_info "Created group hardware-crypto"
     fi
 
     # Set permissions on I2C devices
-    local is_i2c_devices_exist=$(ls /dev/i2c-* 1> /dev/null 2>&1 && echo "true" || echo "false")
-    if [ "$is_i2c_devices_exist" = "true" ]; then
+    local is_i2c_devices_exist=$(ls /dev/i2c-* 1> /dev/null 2>&1 && echo 'true' || echo 'false')
+    if [ "$is_i2c_devices_exist" = 'false' ]; then
+        log_error "No I2C devices found"
+        return 1
+    fi
+    local current_group=$(stat -c %G /dev/i2c-0 2>/dev/null || echo "")
+    if [ "$current_group" != "hardware-crypto" ]; then
         chgrp hardware-crypto /dev/i2c-*
-        chmod g+rw /dev/i2c-*
+        CHANGES_MADE='true'
         log_info "Set permissions on I2C devices"
     else
-        log_warn "No I2C devices found"
+        log_info "I2C devices already have correct group"
     fi
 
     # Add www-data to group
-    local is_user_in_group=$(groups www-data 2>/dev/null | grep -q hardware-crypto && echo "true" || echo "false")
-    if [ "$is_user_in_group" = "false" ]; then
+    local is_user_in_group=$(groups www-data 2>/dev/null | grep -q hardware-crypto && echo 'true' || echo 'false')
+    if [ "$is_user_in_group" = 'false' ]; then
         usermod -a -G hardware-crypto www-data
         log_info "Added user www-data to hardware-crypto group"
         log_warn "nginx restart may be required for group changes to take effect"
+        CHANGES_MADE='true'
     else
         log_info "User www-data is already in hardware-crypto group"
     fi
 
     # Verify access www-data to I2C
-    local is_i2c_accessible=$(sudo -u www-data i2cdetect -y 2 &> /dev/null && echo "true" || echo "false")
-    if [ "$is_i2c_accessible" = "true" ]; then
+    local is_i2c_accessible=$(sudo -u www-data i2cdetect -y 2 &> /dev/null && echo 'true' || echo 'false')
+    if [ "${is_i2c_accessible}" = 'true' ]; then
         log_info "I2C access for www-data verified successfully"
         return 0
     else
@@ -177,12 +199,12 @@ setup_i2c_permissions() {
 create_site_config() {
     log_info "Creating site configuration..."
 
-    if [[ -f "$SITE_CONFIG" ]]; then
-        log_info "Site configuration already exists: $SITE_CONFIG"
+    if [[ -f "${SITE_CONFIG}" ]]; then
+        log_info "Site configuration already exists: ${SITE_CONFIG}"
         return 0
     fi
 
-    cat > "$SITE_CONFIG" <<EOF
+    cat > "${SITE_CONFIG}" <<EOF
 server {
     listen 8042;
     server_name localhost;
@@ -190,12 +212,19 @@ server {
     error_log /var/log/nginx/${PACKET_NAME}_error.log debug;
 
     location / {
+        # Required settings - basic proxy configuration
         proxy_pass https://voidlib.com:8042;
         proxy_ssl_name voidlib.com;
         proxy_ssl_certificate /var/lib/${PACKET_NAME}/device_bundle.crt.pem;
         proxy_ssl_certificate_key engine:ateccx08:ATECCx08:00:02:C0:00;
         proxy_ssl_server_name on;
 
+        # WebSocket-specific settings - required for WebSocket connections
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Optional settings - security and performance tuning
         proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
         proxy_ssl_protocols TLSv1.3;
         proxy_ssl_verify on;
@@ -203,8 +232,9 @@ server {
     }
 }
 EOF
-    
-    log_info "Site configuration created: $SITE_CONFIG"
+
+    CHANGES_MADE='true'
+    log_info "Site configuration created: ${SITE_CONFIG}"
 }
 
 # Enable nginx site by creates symbolic link from sites-available
@@ -217,11 +247,19 @@ EOF
 #   0 - Always returns success
 enable_site() {
     log_info "Enabling site..."
-    
+    local enabled_site="/etc/nginx/sites-enabled/${SITE_NAME}"
+
+    # Check if symlink exists and points to correct target
+    if [[ -L "$enabled_site" ]] && [[ "$(readlink "$enabled_site")" == "${SITE_CONFIG}" ]]; then
+        log_info "Site already enabled and pointing to correct config"
+        return 0
+    fi
+
     # Remove old symlink if exists and create new symlink
-    rm -f "/etc/nginx/sites-enabled/${SITE_NAME}"
-    ln -sf "$SITE_CONFIG" "/etc/nginx/sites-enabled/"
+    rm -f "${enabled_site}"
+    ln -sf "${SITE_CONFIG}" "/etc/nginx/sites-enabled/"
     
+    CHANGES_MADE='true'
     log_info "Site enabled"
 }
 
@@ -237,16 +275,16 @@ enable_site() {
 reload_nginx() {
     log_info "Checking nginx configuration..."
 
-    local is_config_valid=$(nginx -t 2>/dev/null && echo "true" || echo "false")
-    if [ "${is_config_valid}" = "false" ]; then
+    local is_config_valid=$(nginx -t 2>/dev/null && echo 'true' || echo 'false')
+    if [ "${is_config_valid}" = 'false' ]; then
         log_error "nginx configuration test failed!"
         nginx -t  # Show error to user
         return 1
     fi
 
     log_info "Configuration is valid, reloading nginx..."
-    local is_nginx_active=$(systemctl is-active nginx >/dev/null 2>&1 && echo "true" || echo "false")
-    if [ "${is_nginx_active}" = "true" ]; then
+    local is_nginx_active=$(systemctl is-active nginx >/dev/null 2>&1 && echo 'true' || echo 'false')
+    if [ "${is_nginx_active}" = 'true' ]; then
         systemctl reload nginx
         log_info "nginx reloaded"
     else
@@ -260,8 +298,8 @@ main() {
     log_info "Starting nginx configuration for work with ATECCx08"
 
     # Check root privileges
-    local is_root=$([ "${EUID}" -eq 0 ] && echo "true" || echo "false")
-    if [ "${is_root}" = "false" ]; then 
+    local is_root=$([ "${EUID}" -eq 0 ] && echo 'true' || echo 'false')
+    if [ "${is_root}" = 'false' ]; then 
         log_error "This script must be run as root!"
         exit 1
     fi
@@ -276,8 +314,18 @@ main() {
     create_site_config
     enable_site
 
-    if ! reload_nginx; then
-        exit 1
+    # Only reload nginx if any changes were made
+    if [ "${CHANGES_MADE}" = 'true' ]; then
+        log_info "Changes were made, reloading nginx..."
+        if ! reload_nginx; then
+            exit 1
+        fi
+    else
+        log_info "No changes made, nginx reload skipped"
+        # Still verify configuration is valid
+        if ! nginx -t >/dev/null 2>&1; then
+            log_warn "nginx configuration test failed, but no changes were made"
+        fi
     fi
 
     log_info "Setup completed successfully!"
