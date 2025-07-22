@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 
+from fetch_url import fetch_url
 from models import Room, Capability, Property, Device, RoomID, Config
 
 app = FastAPI(
@@ -26,8 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
+BOARD_REVISION_PATH = "/proc/device-tree/wirenboard/board-revision"
 CONFIG_PATH = "/etc/wb-alice-devices.conf"
 SETTING_PATH = "/etc/wb-alice-setting.conf"
+CLIENT_CONFIG_PATH = "/etc/wb-alice-client.conf"
 CLIENT_SERVICE_NAME = "wb-alice-client"
 DEFAULT_CONFIG = {
     "rooms": {
@@ -59,20 +62,35 @@ def get_controller_sn():
         return None
 
 
-def is_controller_linked(controller_sn: str) -> bool:
-    """Checks if the controller is bound to the service"""
-    
-    url = f"https://voidlib.com:8042/controllers/{controller_sn}/status"
-    logger.debug(f"Сhecking controller binding status...")
+def get_board_revision():
+    """Read the controller hardware revision (board-revision) from Device Tree."""
 
+    logger.debug(f"Reading controller hardware revision...")
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        return data.get('registered', False)
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error checking controller binding status: {e}")
-        raise
+        with open(BOARD_REVISION_PATH, "r") as file:
+            board_revision = '.'.join(file.read().rstrip('\x00').split('.')[:2])
+            logger.debug(f"Сontroller hardware revision: {board_revision}")
+            return board_revision
+    except FileNotFoundError:
+        logger.error(f"Controller board revition file not found! Check the path: {BOARD_REVISION_PATH}")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading controller board revition: {e}")
+        return None
+
+
+def get_key_id(controller_version: str) -> str:
+    """Determine the appropriate key ID based on controller version"""
+    min_version = [7, 0]
+    try:
+        version_parts = list(map(int, controller_version.split('.')[:2]))
+        return (
+            "ATECCx08:00:02:C0:00" 
+            if version_parts >= min_version 
+            else "ATECCx08:00:04:C0:00"
+        )
+    except (ValueError, AttributeError) as e:
+        raise ValueError(f"Invalid controller version format: {controller_version}") from e
 
 
 def load_config() -> Config:
@@ -104,6 +122,20 @@ def save_config(config: Config):
         raise
 
     restart_service(CLIENT_SERVICE_NAME)
+
+
+def load_client_config():
+    """Load client configuration file"""
+    
+    logger.debug(f"Reading client configuration file...")
+
+    try:
+        with open(CLIENT_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            client_config = json.load(f)
+        return client_config
+    except Exception as e:
+        logger.error(f"Error reading client configuration file: {e}")
+        raise
 
 
 def load_setting():
@@ -171,10 +203,6 @@ def generate_id(controller_sn):
     timestamp = datetime.now().strftime("%y%m%d%H%M%S")
     unique_id = str(uuid.uuid4())
     return f"{hashSN.lower()}-{timestamp}-{unique_id}"
-
-
-def room_name_exist(name: str, rooms) -> bool:
-    return any(room.name == name for room in rooms.values())
 
 
 def move_device_to_room(device_id, room_id, config):
@@ -316,12 +344,22 @@ async def get_all_rooms_and_devices():
     
     config = load_config()
 
-    if not is_controller_linked(controller_sn):
-        config.link_url = f"https://voidlib.com:8043/link-controller?sn={controller_sn}"
-        config.unlink_url = None
-    else:
+    try:
+        response = fetch_url(
+            url=f"https://{server_address}/request-registration",
+            data={"controller_version": f"{controller_version}"},
+            key_id=key_id,
+            )
+        if response["data"] and "registration_url" in response["data"]:
+            config.link_url = response["data"]["registration_url"]
+            config.unlink_url = None
+        elif response["data"]["detail"]:
+            config.link_url = None
+            config.unlink_url = f"https://{server_address.split(':')[0]}"
+    except Exception as e:
+        logger.error(f"Failed to fetch registration URL: {str(e)}")
         config.link_url = None
-        config.unlink_url = "https://voidlib.com:8043/"
+        config.unlink_url = f"https://{server_address.split(':')[0]}"
     
     save_config(config)
     return config
@@ -489,6 +527,10 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     return response
 
 controller_sn = get_controller_sn()
+controller_version = get_board_revision()
+key_id = get_key_id(controller_version)
+config = load_config()
+server_address = load_client_config()['server_address']
 setting = load_setting()
 translations = setting.get("translations", {})
 
