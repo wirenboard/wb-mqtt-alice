@@ -5,7 +5,7 @@ import uuid
 import logging
 import subprocess
 import requests
-from datetime import datetime, timezone
+from datetime import datetime
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
