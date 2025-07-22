@@ -213,9 +213,9 @@ server {
         proxy_ssl_certificate_key engine:ateccx08:ATECCx08:00:02:C0:00;
         proxy_ssl_server_name on;
 
-        # WebSocket-specific settings - required for WebSocket connections
+        # Specific settings required for WebSocket connections
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
 
         # Optional settings - security and performance tuning
