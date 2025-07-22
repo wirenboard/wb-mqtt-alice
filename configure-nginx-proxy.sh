@@ -326,4 +326,4 @@ main() {
     log_info "Proxy is available at localhost:8042"
 }
 
-main
+main "$@"
