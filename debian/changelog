@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.3.0) stable; urgency=medium
+
+  * Add secure controller binding
+
+ -- Mikhail Burchu <mikhail.burchu@wirenboard.com>  Tue, 22 Jun 2025 17:45:00 +0300
+
 wb-mqtt-alice (0.2.0) stable; urgency=medium
 
   * Add Nginx proxy configuration
