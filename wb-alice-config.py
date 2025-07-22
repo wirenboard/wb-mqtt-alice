@@ -1,9 +1,11 @@
 import re
+import hashlib
 import json
 import uuid
 import logging
 import subprocess
 import requests
+from datetime import datetime, timezone
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -164,8 +166,11 @@ def restart_service(CLIENT_SERVICE_NAME: str):
         return
 
 
-def generate_id():
-    return str(uuid.uuid4())
+def generate_id(controller_sn):
+    hashSN = hashlib.sha256(controller_sn.encode()).hexdigest()[:8]
+    timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+    unique_id = str(uuid.uuid4())
+    return f"{hashSN.lower()}-{timestamp}-{unique_id}"
 
 
 def room_name_exist(name: str, rooms) -> bool:
@@ -333,7 +338,7 @@ async def create_room(request: Request, room_data: Room):
     # Validate room name is unique
     validate_room_name_unique(room_data.name, config.rooms, language)
     # Create room
-    room_id = generate_id()
+    room_id = generate_id(controller_sn)
     config.rooms[room_id] = room_data
     response = room_data.post_response(room_id)
     
@@ -411,7 +416,7 @@ async def create_device(request: Request, device_data: Device):
     # Validate and prepare properties
     validate_properties(device_data.properties, language)
     # Create device
-    device_id = generate_id()
+    device_id = generate_id(controller_sn)
     response = device_data.post_response(device_id)
     config.devices[device_id] = device_data
     config.rooms[device_data.room_id].devices.append(device_id)
