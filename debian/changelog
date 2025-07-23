@@ -1,4 +1,4 @@
-wb-mqtt-alice (0.2.0) stable; urgency=medium
+wb-mqtt-alice (0.3.0) stable; urgency=medium
 
   * Add secure controller binding
   * Add message localization
