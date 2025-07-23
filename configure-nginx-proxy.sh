@@ -214,8 +214,6 @@ get_board_revision() {
         log_error "Cannot read board revision from ${BOARD_REVISION_PATH}"
         exit 1
     fi
-    
-    log_info "Controller hardware revision: ${board_revision}"
     echo "${board_revision}"
 }
 
@@ -232,10 +230,8 @@ get_key_id() {
     # Check if version >= 7.0
     if [ "${major_version}" -gt 7 ] || ([ "${major_version}" -eq 7 ] && [ "${minor_version}" -ge 0 ]); then
         echo "ATECCx08:00:02:C0:00"
-        log_info "Using ATECCx08 key: ATECCx08:00:02:C0:00 (version >= 7.0)"
     else
         echo "ATECCx08:00:04:C0:00"
-        log_info "Using ATECCx08 key: ATECCx08:00:04:C0:00 (version < 7.0)"
     fi
 }
 
