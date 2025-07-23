@@ -202,7 +202,7 @@ class DeviceRegistry:
                 mqtt_topic = MQTTTopic(cap["mqtt"])  # convert once
                 full = mqtt_topic.full  # always full form
                 self.topic2info[full] = (device_id, "capabilities", i)
-                inst = cap.get("instance")
+                inst = cap.get("parameters", {}).get("instance")
 
                 # TODO: Add all correct instance types for each capabilities
                 #       https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
@@ -216,7 +216,13 @@ class DeviceRegistry:
                 mqtt_topic = MQTTTopic(prop["mqtt"])
                 full = mqtt_topic.full
                 self.topic2info[full] = (device_id, "properties", i)
-                self.cap_index[(device_id, prop["type"], prop.get("instance"))] = full
+                self.cap_index[
+                    (
+                        device_id,
+                        prop["type"],
+                        prop.get("parameters", {}).get("instance"),
+                    )
+                ] = full
 
         logger.info(
             f"[REG] Devices loaded: {len(self.devices)}, "
@@ -280,7 +286,7 @@ class DeviceRegistry:
                     "reportable": True,
                 }
                 # Добавляем parameters только если есть instance
-                instance = prop.get("instance")
+                instance = prop.get("parameters", {}).get("instance")
                 if instance:
                     unit = INSTANCE_UNITS.get(instance, "unit.temperature.celsius")
                     prop_obj["parameters"] = {
@@ -304,7 +310,7 @@ class DeviceRegistry:
         blk = self.devices[device_id][section][idx]
 
         cap_type = blk["type"]
-        instance = blk.get("instance")
+        instance = blk.get("parameters", {}).get("instance")
 
         if cap_type.endswith("on_off"):
             value = raw.strip().lower() not in ("0", "false", "off")
@@ -346,7 +352,7 @@ class DeviceRegistry:
 
     async def _read_capability_state(self, device_id: str, cap: dict) -> Optional[dict]:
         cap_type = cap["type"]
-        instance = cap.get("instance")
+        instance = cap.get("parameters", {}).get("instance")
         key = (device_id, cap_type, instance)
 
         topic = self.cap_index.get(key)
@@ -373,7 +379,7 @@ class DeviceRegistry:
 
     async def _read_property_state(self, device_id: str, prop: dict) -> Optional[dict]:
         prop_type = prop["type"]
-        instance = prop.get("instance")
+        instance = prop.get("parameters", {}).get("instance")
         key = (device_id, prop_type, instance)
 
         topic = self.cap_index.get(key)
