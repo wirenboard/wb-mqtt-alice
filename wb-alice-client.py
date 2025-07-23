@@ -21,7 +21,6 @@ from typing import Any, Callable, Optional, Tuple
 import paho.mqtt.client as mqtt
 import paho.mqtt.subscribe as subscribe
 import socketio
-from wb_common.mqtt_client import MQTTClient
 
 from mqtt_topic import MQTTTopic
 
@@ -41,32 +40,31 @@ except PackageNotFoundError:
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/etc/wb-alice-client.conf"
 
-MAIN_LOOP: Optional[asyncio.AbstractEventLoop] = None
-"""
-Global asyncio event loop, used to safely schedule coroutines from non-async
-threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
-"""
 
-stop_event: Optional[asyncio.Event] = None
-"""
-Event that signals the main loop to wake up and initiate shutdown
-"""
+class AppContext:
+    def __init__(self):
+        self.main_loop: Optional[asyncio.AbstractEventLoop] = None
+        """
+        Global asyncio event loop, used to safely schedule coroutines from non-async
+        threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
+        """
 
-sio: Optional[socketio.AsyncClient] = None
-"""
-SocketIO async client instance for handling real-time communication
-"""
+        self.stop_event: Optional[asyncio.Event] = None
+        """
+        Event that signals the main loop to wake up and initiate shutdown
+        """
 
-for name in ("engineio", "socketio"):
-    logging.getLogger(name).setLevel(logging.DEBUG)
+        self.sio: Optional[socketio.AsyncClient] = None
+        """
+        SocketIO async client instance for handling real-time communication
+        """
 
-# logging.getLogger(name).setLevel(logging.DEBUG)
-# logging.getLogger(name).setLevel(logging.DEBUG)
+        self.registry: Optional[DeviceRegistry] = None
+        self.mqtt_client: Optional[mqtt.Client] = None
+        self.controller_sn: Optional[str] = None
 
-# sio.eio.logger.setLevel(logging.DEBUG)
-# sio.logger.setLevel(logging.DEBUG)
 
-controller_sn: Optional[str] = None
+ctx = AppContext()
 
 
 def _emit_async(event: str, data: dict) -> None:
@@ -74,45 +72,48 @@ def _emit_async(event: str, data: dict) -> None:
     Safely schedules a Socket.IO event to be emitted
     from any thread (async or not).
     """
-    logger.info("[SOCKET.IO] Connected status: %s", sio.connected)
-
-    if not sio.connected:
+    if not ctx.sio or not ctx.sio.connected:
         logger.warning("[SOCKET.IO] Not connected, skipping emit '%s'", event)
-        logger.warning("            Payload: %s", json.dumps(data))
+        logger.debug("            Payload: %s", json.dumps(data))
         return
+    logger.debug("[SOCKET.IO] Connected status: %s", ctx.sio.connected)
 
-    if not hasattr(sio, "namespaces") or "/" not in sio.namespaces:
+    if not hasattr(ctx.sio, "namespaces") or "/" not in ctx.sio.namespaces:
         logger.warning("[SOCKET.IO] Namespace not ready, skipping emit '%s'", event)
         return
 
-    # Additional check for version SocketIO 5.0.3 (may delete when upgrade)
-    if hasattr(sio.eio, "_write_loop_task") and sio.eio._write_loop_task is None:
+    # BUG: Additional check for version SocketIO 5.0.3 (may delete when upgrade)
+    if hasattr(ctx.sio.eio, "write_loop_task") and ctx.sio.eio.write_loop_task is None:
         logger.warning(
             "[SOCKET.IO] Write loop task is None, connection unstable - skipping emit '%s'",
             event,
         )
         return
 
-    logger.info("[SOCKET.IO] Attempting to emit '%s' with payload: %s", event, data)
+    logger.debug("[SOCKET.IO] Attempting to emit '%s' with payload: %s", event, data)
 
     try:
         # We're in an asyncio thread – safe to call create_task directly
         asyncio.get_running_loop()
-        asyncio.create_task(sio.emit(event, data))
+        asyncio.create_task(ctx.sio.emit(event, data))
         logger.debug("[SOCKET.IO] Scheduled emit '%s' via asyncio task", event)
 
     except RuntimeError:
-        # No running loop in current thread – fallback to MAIN_LOOP
-        logger.debug("[SOCKET.IO] No running loop in current thread – using MAIN_LOOP")
+        # No running loop in current thread – fallback to ctx.main_loop
+        logger.debug(
+            "[SOCKET.IO] No running loop in current thread – using ctx.main_loop"
+        )
 
-        if MAIN_LOOP is None:
+        if ctx.main_loop is None:
             logger.warning(
-                "[SOCKET.IO] MAIN_LOOP not available – dropping event '%s'", event
+                "[SOCKET.IO] ctx.main_loop not available – dropping event '%s'", event
             )
             return
 
-        if MAIN_LOOP.is_running():
-            fut = asyncio.run_coroutine_threadsafe(sio.emit(event, data), MAIN_LOOP)
+        if ctx.main_loop.is_running():
+            fut = asyncio.run_coroutine_threadsafe(
+                ctx.sio.emit(event, data), ctx.main_loop
+            )
 
             # Log if the future raises an exception
             def log_emit_exception(f: asyncio.Future):
@@ -125,7 +126,7 @@ def _emit_async(event: str, data: dict) -> None:
             fut.add_done_callback(log_emit_exception)
         else:
             logger.error(
-                "[SOCKET.IO] MAIN_LOOP is not running – cannot emit '%s'", event
+                "[SOCKET.IO] ctx.main_loop is not running – cannot emit '%s'", event
             )
 
 
@@ -133,8 +134,8 @@ async def read_topic_once(
     topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0
 ):
     """
-    Читает одно retained-сообщение из MQTT в отдельном потоке.
-    Возвращает paho.mqtt.client.MQTTMessage либо None при тайм-ауте.
+    Reads a single retained MQTT message in a separate thread
+    Returns paho.mqtt.client.MQTTMessage or None on timeout
     """
     logger.debug(
         "[read_topic_once] wait %s message on '%s' (retain=%s, %.1fs)",
@@ -151,7 +152,7 @@ async def read_topic_once(
             ),
             timeout=timeout,
         )
-        logger.info("Current topic '%s' state: '%s'" % (topic, res))
+        logger.debug("Current topic '%s' state: '%s'", topic, res)
         return res
     except asyncio.TimeoutError:
         logger.warning("[read_topic_once] timeout waiting '%s'", topic)
@@ -180,18 +181,30 @@ class DeviceRegistry:
 
     # ---------- config loader ----------
     def _load_config(self, path: str) -> None:
-        """Reads /etc/wb-alice-devices.conf and fills:
-        • self.devices        – полный json-блок устройства
-        • self.topic2info     – full_topic → (device_id, 'capabilities' / 'properties', index)
-        • self.cap_index      – 'capabilities' / 'properties'(device_id, type, instance) → full_topic
+        """
+        Read device configuration file and populate internal structures
+        - self.devices: full json device description
+        - self.topic2info: full_topic → (device_id, 'capabilities' / 'properties', index)
+        - self.cap_index: 'capabilities' / 'properties'(device_id, type, instance) → full_topic
         """
 
         logger.info(f"[REG] Try read config file '{path}'")
-        with open(path, "r") as f:
-            config_data = json.load(f)
-            logger.info(
-                f"[REG] Readed data from config file '{json.dumps(config_data, indent=2, ensure_ascii=False)}'"
-            )
+        try:
+            with open(path, "r") as f:
+                config_data = json.load(f)
+                logger.info(
+                    f"[REG] Config loaded: '{json.dumps(config_data, indent=2, ensure_ascii=False)}'"
+                )
+        except FileNotFoundError:
+            logger.error(f"[REG] Config file not found: {path}")
+            self.devices = {}
+            self.topic2info = {}
+            self.cap_index = {}
+            self.rooms = {}
+            return
+        except json.JSONDecodeError as e:
+            logger.error(f"[REG] Invalid JSON in config: {e}")
+            raise  # Critical error - cannot continue
 
         self.rooms = config_data.get("rooms", {})
         devices_config = config_data.get("devices", {})
@@ -204,13 +217,9 @@ class DeviceRegistry:
                 self.topic2info[full] = (device_id, "capabilities", i)
                 inst = cap.get("parameters", {}).get("instance")
 
-                # TODO: Add all correct instance types for each capabilities
-                #       https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
-                if cap["type"].endswith("on_off") and not inst:
-                    # Для on/off по спецификации Яндекса instance == "on"
-                    self.cap_index[(device_id, cap["type"], "on")] = full
-                else:
-                    self.cap_index[(device_id, cap["type"], inst)] = full
+                # Instance types for each capabilities
+                # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
+                self.cap_index[(device_id, cap["type"], inst)] = full
 
             for i, prop in enumerate(device_data.get("properties", [])):
                 mqtt_topic = MQTTTopic(prop["mqtt"])
@@ -231,11 +240,11 @@ class DeviceRegistry:
 
     def build_yandex_devices_list(self) -> list[dict]:
         """
-        Формирует массив `devices` в формате, который ожидает
-        Яндекс-Диалоги в ответе /user/devices ( discovery ).
+        Build devices list in Yandex Smart Home discovery format
+        Answer on discovery endpoint: /user/devices
         """
 
-        # Маппинг instance -> unit для properties
+        # "Instance" to "unit" mapping for properties
         INSTANCE_UNITS = {
             "temperature": "unit.temperature.celsius",
             "humidity": "unit.percent",
@@ -285,7 +294,7 @@ class DeviceRegistry:
                     "retrievable": True,
                     "reportable": True,
                 }
-                # Добавляем parameters только если есть instance
+                # Add parameters only if instance exists
                 instance = prop.get("parameters", {}).get("instance")
                 if instance:
                     unit = INSTANCE_UNITS.get(instance, "unit.temperature.celsius")
@@ -339,7 +348,7 @@ class DeviceRegistry:
             return
 
         base = self.cap_index[key]  # already full topic
-        # Check what user write topic with or without '\on'
+        # Handle topics with or without '/on' suffix
         cmd_topic = base if base.endswith("/on") else f"{base}/on"
 
         if cap_type.endswith("on_off"):
@@ -348,7 +357,7 @@ class DeviceRegistry:
             payload = str(value)
 
         self._publish_to_mqtt(cmd_topic, payload)
-        logger.info(f"[REG] Published '{payload}' → {cmd_topic}")
+        logger.debug(f"[REG] Published '{payload}' → {cmd_topic}")
 
     async def _read_capability_state(self, device_id: str, cap: dict) -> Optional[dict]:
         cap_type = cap["type"]
@@ -413,10 +422,6 @@ class DeviceRegistry:
             )
             return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
 
-        # TODO: тут очень важно проверить есть ли вообще такой топик
-        #       так же важно понимать retained ли топик или нет.
-        #       очень желательно чтобы все топики были retain
-
         capabilities_output: list[dict] = []
         properties_output: list[dict] = []
 
@@ -432,7 +437,7 @@ class DeviceRegistry:
             if prop_state:
                 properties_output.append(prop_state)
 
-        # ► Если ничего не прочитали – ошибка
+        # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:
             logger.warning(
                 "[REG] %s: no live or retained data — marking DEVICE_UNREACHABLE",
@@ -444,7 +449,7 @@ class DeviceRegistry:
                 "error_message": "MQTT topics unavailable",
             }
 
-        # ► Если хотя бы что-то есть – возвращаем
+        # If at least something was read - return it
         device_output = {"id": device_id}
         if capabilities_output:
             device_output["capabilities"] = capabilities_output
@@ -456,7 +461,18 @@ class DeviceRegistry:
 
 # Helper for publishing from registry
 def publish_to_mqtt(topic: str, payload: str) -> None:
-    mqtt_client.publish(topic, payload)
+    global ctx
+    if ctx.mqtt_client is None:
+        logger.error("[MQTT] Client not initialized")
+        return
+
+    if not ctx.mqtt_client.is_connected():
+        logger.warning("[MQTT] Client not connected, dropping message to %s", topic)
+        return
+    try:
+        ctx.mqtt_client.publish(topic, payload)
+    except Exception as e:
+        logger.error("[MQTT] Failed to publish to %s: %s", topic, e)
 
 
 def to_bool(raw_state: Any) -> bool:
@@ -568,44 +584,65 @@ def send_to_yandex_state(
             value,
         )
     else:
-        logger.info(f"[YANDEX] TODO sender for {cap_type} (instance={instance})")
+        logger.warning(
+            f"[YANDEX] Not implemented sender for {cap_type} (instance={instance})"
+        )
 
 
 def on_connect(client, userdata, flags, rc):
-    logger.info(f"[MQTT] Connected with code: {rc}")
+    if rc != 0:
+        logger.error(f"[MQTT] Connection failed with code: {rc}")
+        return
+
+    # Check if registry is ready
+    if ctx.registry is None or not hasattr(ctx.registry, "topic2info"):
+        logger.error("[MQTT] Registry not ready, no topics to subscribe")
+        return
+
     # subscribe to every topic from registry
-    for t in registry.topic2info.keys():
+    for t in ctx.registry.topic2info.keys():
         client.subscribe(t, qos=0)
         logger.info(f"[MQTT] Subscribed to {t}")
 
 
+def on_disconnect(client, userdata, rc):
+    logger.warning("[MQTT] Disconnected with code %s", rc)
+
+
 def on_message(client, userdata, message):
+    if ctx.registry is None:
+        logger.debug("[MQTT] Registry not available, ignoring message")
+        return
+
     topic_str = message.topic
-    payload_str = message.payload.decode().strip()
-    logger.info(f"[MQTT] Incoming from topic '{topic_str}':")
-    logger.info(f"       - Size   : '{len(message.payload)}'")
-    logger.info(f"       - Message: '{payload_str}'")
+    try:
+        payload_str = message.payload.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        logger.warning("[MQTT] Cannot decode payload in topic '%s'", message.topic)
+        logger.debug("[MQTT] Raw bytes: %s", message.payload)
+        return
+
+    logger.debug(f"[MQTT] Incoming from topic '{topic_str}':")
+    logger.debug(f"       - Size   : '{len(message.payload)}'")
+    logger.debug(f"       - Message: '{payload_str}'")
+
     # delegate parsing to registry
-    registry.handle_mqtt(topic_str, payload_str)
+    ctx.registry.handle_mqtt(topic_str, payload_str)
 
 
-mqtt_client = MQTTClient(
-    client_id_prefix="my_simple_app",
-    broker_url="tcp://localhost:1883",
-    is_threaded=True,
-)
-mqtt_client.on_message = on_message
-mqtt_client.on_connect = on_connect
+def generate_client_id(prefix: str = "wb-alice-client") -> str:
+    """Generate unique MQTT client ID with random suffix"""
+    import random
+    import string
+
+    suffix = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+    return f"{prefix}-{suffix}"
 
 
-# Instantiate registry (after mqtt_client is defined)
-# ------------------------------------------------------------------
-
-registry = DeviceRegistry(
-    "/etc/wb-alice-devices.conf",
-    send_to_yandex=send_to_yandex_state,
-    publish_to_mqtt=publish_to_mqtt,
-)
+ctx.mqtt_client = mqtt.Client(client_id=generate_client_id())
+ctx.mqtt_client.on_connect = on_connect
+ctx.mqtt_client.on_disconnect = on_disconnect
+ctx.mqtt_client.on_message = on_message
 
 
 def get_controller_sn():
@@ -613,15 +650,13 @@ def get_controller_sn():
     try:
         with open(SHORT_SN_PATH, "r") as file:
             controller_sn = file.read().strip()
-            logger.info(f"[INFO] Read controller ID: {controller_sn}")
+            logger.info(f"Read controller ID: {controller_sn}")
             return controller_sn
     except FileNotFoundError:
-        logger.info(
-            f"[ERR] Controller ID file not found! Check the path: {SHORT_SN_PATH}"
-        )
+        logger.error(f"Controller ID file not found! Check the path: {SHORT_SN_PATH}")
         return None
     except Exception as e:
-        logger.info(f"[ERR] Reading controller ID exception: {e}")
+        logger.error(f"Reading controller ID exception: {e}")
         return None
 
 
@@ -629,17 +664,17 @@ def read_config():
     """Read configuration file"""
     try:
         if not os.path.exists(CONFIG_PATH):
-            logger.info(f"[ERR] Configuration file not found at {CONFIG_PATH}")
+            logger.error(f"Configuration file not found at {CONFIG_PATH}")
             return None
 
         with open(CONFIG_PATH, "r") as file:
             config = json.load(file)
             return config
     except json.JSONDecodeError:
-        logger.info("[ERR] Parsing configuration file: Invalid JSON format")
+        logger.error("Parsing configuration file: Invalid JSON format")
         return None
     except Exception as e:
-        logger.info(f"[ERR] Reading configuration exception: {e}")
+        logger.error(f"Reading configuration exception: {e}")
         return None
 
 
@@ -650,7 +685,7 @@ async def read_mqtt_state(
     Reads the value of a topic (0/1, "false"/"true", etc.) and returns a Python bool
     Uses subscribe.simple(...) from paho.mqtt, which BLOCKS for the duration of reading
     """
-    logger.info("[read_mqtt_state] trying to read topic: %s", topic)
+    logger.debug("[read_mqtt_state] trying to read topic: %s", topic)
 
     try:
         msg = await read_topic_once(topic, timeout=timeout)
@@ -669,7 +704,9 @@ async def read_mqtt_state(
     elif payload_str in {"0", "false", "off"}:
         return False
     else:
-        logger.info("[WARN] Unexpected payload in topic '%s': %s", topic, payload_str)
+        logger.warning(
+            "[WARN] Unexpected payload in topic '%s': %s", topic, payload_str
+        )
         return False
 
 
@@ -684,21 +721,18 @@ def write_mqtt_state(mqtt_client: mqtt.Client, topic: str, is_on: bool) -> None:
 
 
 async def connect():
+    global ctx
     logger.info("[SUCCESS] Connected to Socket.IO server!")
-    await sio.emit("message", {"controller_sn": controller_sn, "status": "online"})
-
-
-# NOTE: argument "reason" not accesable in current client 5.0.3 (2020, 14 Dec)
-#       implemented on version 5.12
-async def disconnect(*args, **kwargs):
-    """Срабатывает при любом разрыве соединения."""
-    reason = args[0] if args else kwargs.get("reason")
-    logger.warning(
-        "[DISCONNECT] lost connection; reason=%r  args=%s  kwargs=%s",
-        reason,
-        args,
-        kwargs,
+    await ctx.sio.emit(
+        "message", {"controller_sn": ctx.controller_sn, "status": "online"}
     )
+
+
+# NOTE: argument "reason" not accessible in current client 5.0.3 (Dec 14,2020)
+#       implemented in version 5.12
+async def disconnect():
+    """Triggered when SocketIO connection with server is lost"""
+    logger.warning("[DISCONNECT] Lost connection")
 
 
 async def response(data):
@@ -716,7 +750,10 @@ async def connect_error(data: dict[str, Any]) -> None:
     logger.warning("[SOCKET.IO] Connection refused by server: %s", data)
 
 
-async def any_event(event, sid, data):
+async def any_unprocessed_event(event, sid, data):
+    """
+    Fallback handler for Socket.IO events that don't have specific handlers
+    """
     logger.info(f"[Socket.IO/ANY] Not handled event {event}")
 
 
@@ -727,9 +764,13 @@ async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
     """
     logger.debug("[SOCKET.IO] Received 'alice_devices_list' event:")
     logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
-
     req_id: str = data.get("request_id")
-    devices_list: list[dict[str, Any]] = registry.build_yandex_devices_list()
+
+    if ctx.registry is None:
+        logger.error("[SOCKET.IO] Registry not available for device list")
+        return {"request_id": req_id, "payload": {"devices": []}}
+
+    devices_list: list[dict[str, Any]] = ctx.registry.build_yandex_devices_list()
     if not devices_list:
         logger.warning("[SOCKET.IO] No devices found in configuration")
 
@@ -759,7 +800,7 @@ async def on_alice_devices_query(data):
     for dev in data.get("devices", []):
         device_id = dev.get("id")
         logger.info(f"[SOCKET.IO] Try get data for device: '{device_id}'")
-        devices_response.append(await registry.get_device_current_state(device_id))
+        devices_response.append(await ctx.registry.get_device_current_state(device_id))
 
     query_response = {
         "request_id": request_id,
@@ -790,7 +831,7 @@ def handle_single_device_action(device: dict[str, Any]) -> dict[str, Any]:
         value: Any = cap.get("state", {}).get("value")
 
         try:
-            registry.handle_action(device_id, cap_type, instance, value)
+            ctx.registry.handle_action(device_id, cap_type, instance, value)
             logger.info(
                 "[SOCKET.IO] Action applied to %s: %s = %s", device_id, instance, value
             )
@@ -847,68 +888,55 @@ async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
 
 
 async def connect_controller(sock: socketio.AsyncClient):
-    global controller_sn
+    global ctx
 
     config = read_config()
     if not config:
-        logger.info("[ERR] Cannot proceed without configuration")
+        logger.error("Cannot proceed without configuration")
         return
 
-    # TODO(vg): On this moment this parameter hardcoded - must set after
-    #           register controller on web server automatically
     if not config.get("is_registered", False):
-        logger.info(
-            "[ERR] Controller is not registered. Please register the controller first."
+        logger.error(
+            "Controller is not registered. Please register the controller first"
         )
         return
 
-    controller_sn = get_controller_sn()
-    if not controller_sn:
-        logger.info("[ERR] Cannot proceed without controller ID")
+    ctx.controller_sn = get_controller_sn()
+    if not ctx.controller_sn:
+        logger.error("Cannot proceed without controller ID")
         return
 
-    server_address = config.get("server_address")
+    # ARCHITECTURE NOTE: We always connect to localhost:8042 where Nginx proxy runs.
+    # Nginx forwards requests to the actual server specified in 'server_address'.
+    # This allows for:
+    # - SSL termination at Nginx level
+    # - Certificate-based authentication
+    # See configure-nginx-proxy.sh for Nginx configuration details.
+    LOCAL_PROXY_URL = "http://localhost:8042"
+    server_address = config.get("server_address")  # Used by Nginx proxy
     if not server_address:
-        logger.info("[ERR] 'server_address' not specified in configuration")
+        logger.error("'server_address' not specified in configuration")
         return
-
-    # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
-    local_mqtt_client = mqtt.Client("wb-alice-client")
-    try:
-        local_mqtt_client.connect("localhost", 1883, 60)
-        local_mqtt_client.loop_start()
-        logger.info(
-            # f"[INFO] Connected to local MQTT broker, using topic '{mqtt_topics['light_corridor'].full}'"
-            "[INFO] Connected to local MQTT broker"
-        )
-    except Exception as e:
-        logger.info(f"[ERR] MQTT connect failed: {e}")
-        # Можно прервать работу или продолжить без MQTT
-        # Жёстко прерываем при отсутствии брокера
-        return
-
-    global SERVER_URL
-    # SERVER_URL = f"https://{server_address}"
-    SERVER_URL = f"http://localhost:8042"
-    logger.info(f"[INFO] Connecting to Socket.IO server: {SERVER_URL}")
+    logger.info(f"Target SocketIO server: {server_address}")
+    logger.info(f"Connecting via Nginx proxy: {LOCAL_PROXY_URL}")
 
     try:
-        # Connect to server and keep connection active
+        # Connect to local Nginx proxy which forwards to actual server
         await sock.connect(
-            SERVER_URL,
+            LOCAL_PROXY_URL,
             socketio_path="/socket.io",
-            # controller_sn passed with certificate when Nginx proxyed packet
+            # controller_sn is passed via SSL certificate when Nginx proxies
         )
-        logger.info("[CONNECT_CONTROLLER] Socket.IO connected successfully")
+        logger.info("Socket.IO connected successfully via proxy")
 
     except socketio.exceptions.ConnectionError as e:
-        logger.error(f"[ERR] Socket.IO connection error: {e}")
+        logger.error(f"Socket.IO connection error: {e}")
         # Unable to connect
         # - The controller might have been unregistered
         # - Or Server may have error or offline
         # ACTION - do reconnection
     except Exception as e:
-        logger.exception(f"[ERR] Unexpected exception during connection: {e}")
+        logger.exception(f"Unexpected exception during connection: {e}")
         # ACTION - do reconnection
 
 
@@ -916,16 +944,16 @@ def _log_and_stop(sig: signal.Signals) -> None:
     """
     Generic signal handler:
     1) logs which signal was received;
-    2) sets the global stop_event so the main loop can exit.
+    2) sets the global ctx.stop_event so the main loop can exit.
     Idempotent: repeated signals after the first one do nothing.
     """
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     logger.warning("[SIGNAL] %s received at %s – shutting down…", sig.name, ts)
 
-    # stop_event is created in main() before signal handlers are registered,
+    # ctx.stop_event is created in main() before signal handlers are registered,
     # but we keep the guard just in case.
-    if stop_event is not None and not stop_event.is_set():
-        stop_event.set()
+    if ctx.stop_event is not None and not ctx.stop_event.is_set():
+        ctx.stop_event.set()
 
 
 def bind_handlers(sock: socketio.AsyncClient):
@@ -939,23 +967,39 @@ def bind_handlers(sock: socketio.AsyncClient):
     sock.on("alice_devices_list", on_alice_devices_list)
     sock.on("alice_devices_query", on_alice_devices_query)
     sock.on("alice_devices_action", on_alice_devices_action)
-    sock.on("*", any_event)  # Handle any unprocessed events
+    sock.on("*", any_unprocessed_event)  # Handle any unprocessed events
 
 
 async def main() -> None:
-    global sio
-    global stop_event
-    global MAIN_LOOP
-    MAIN_LOOP = asyncio.get_running_loop()
+    global ctx
+    ctx.main_loop = asyncio.get_running_loop()
 
-    stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
-    MAIN_LOOP.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
-    MAIN_LOOP.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
+    ctx.stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
+    ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
+    ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
 
-    logger.info("Starting MQTT client...")
-    mqtt_client.start()
+    try:
+        ctx.registry = DeviceRegistry(
+            "/etc/wb-alice-devices.conf",
+            send_to_yandex=send_to_yandex_state,
+            publish_to_mqtt=publish_to_mqtt,
+        )
+        logger.info(f"[REG] Registry created with {len(ctx.registry.devices)} devices")
+    except Exception as e:
+        logger.error(f"[REG] Failed to create registry: {e}")
+        logger.info("[REG] Continuing without device configuration")
+        ctx.registry = None
 
-    sio = socketio.AsyncClient(
+    # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
+    try:
+        ctx.mqtt_client.connect("localhost", 1883, 60)
+        ctx.mqtt_client.loop_start()
+        logger.info("Connected to local MQTT broker")
+    except Exception as e:
+        logger.error(f"MQTT connect failed: {e}")
+        return
+
+    ctx.sio = socketio.AsyncClient(
         logger=True,
         engineio_logger=True,
         reconnection=True,  # auto-reconnect ON
@@ -965,21 +1009,21 @@ async def main() -> None:
         randomization_factor=0.5,  # jitter
     )
 
-    # Явно пропишем loop который используется чтобы избежать ошибки "attached to a different loop" у частей системы
-    sio._loop = MAIN_LOOP
-    bind_handlers(sio)
+    # Explicitly set the loop to avoid "attached to a different loop" errors
+    ctx.sio._loop = ctx.main_loop
+    bind_handlers(ctx.sio)
 
     logger.info("Connecting Socket.IO client...")
-    await connect_controller(sio)
-    sio_task = asyncio.create_task(sio.wait())
+    await connect_controller(ctx.sio)
+    sio_task = asyncio.create_task(ctx.sio.wait())
 
     # Wait for shutdown signal
-    await stop_event.wait()
+    await ctx.stop_event.wait()
     logger.info("Shutdown signal received")
 
     logger.info("Stopping Socket.IO client ...")
-    if sio.connected:
-        await sio.disconnect()
+    if ctx.sio.connected:
+        await ctx.sio.disconnect()
     if not sio_task.done():
         sio_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -997,7 +1041,8 @@ async def main() -> None:
         logger.info("[EXIT] %d tasks cancelled", len(pending))
 
     logger.info("Stopping MQTT client")
-    mqtt_client.stop()  # WB func - do inside loop_stop + disconnect
+    ctx.mqtt_client.loop_stop()
+    ctx.mqtt_client.disconnect()
     logger.info("MQTT disconnected")
 
     logger.info("Shutdown complete")
