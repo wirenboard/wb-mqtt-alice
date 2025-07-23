@@ -5,6 +5,7 @@ set -e # Error handling
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
 SITE_CONFIG="/etc/nginx/sites-available/${SITE_NAME}"
+BOARD_REVISION_PATH='/proc/device-tree/wirenboard/board-revision'
 
 ORIGINAL_CERT='/etc/ssl/certs/device_bundle.crt.pem'
 TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
@@ -198,6 +199,46 @@ get_server_address() {
     echo "${server_addr}"
 }
 
+# Read controller hardware revision from Device Tree
+# Returns board revision in format "X.Y" (e.g., "7.4")
+get_board_revision() {
+    if [ ! -f "${BOARD_REVISION_PATH}" ]; then
+        log_error "Board revision file not found: ${BOARD_REVISION_PATH}"
+        exit 1
+    fi
+    
+    # Read file content, remove null bytes, extract first two version parts
+    local board_revision=$(cat "${BOARD_REVISION_PATH}" | tr -d '\0' | cut -d'.' -f1,2)
+    
+    if [ -z "${board_revision}" ]; then
+        log_error "Cannot read board revision from ${BOARD_REVISION_PATH}"
+        exit 1
+    fi
+    
+    log_info "Controller hardware revision: ${board_revision}"
+    echo "${board_revision}"
+}
+
+# Determine the appropriate ATECCx08 key ID based on controller version
+# Parameters:
+#   $1 - controller version in format "X.Y" (e.g., "7.4")
+# Returns:
+#   ATECCx08 key ID string
+get_key_id() {
+    local controller_version="$1"
+    local major_version=$(echo "${controller_version}" | cut -d'.' -f1)
+    local minor_version=$(echo "${controller_version}" | cut -d'.' -f2)
+    
+    # Check if version >= 7.0
+    if [ "${major_version}" -gt 7 ] || ([ "${major_version}" -eq 7 ] && [ "${minor_version}" -ge 0 ]); then
+        echo "ATECCx08:00:02:C0:00"
+        log_info "Using ATECCx08 key: ATECCx08:00:02:C0:00 (version >= 7.0)"
+    else
+        echo "ATECCx08:00:04:C0:00"
+        log_info "Using ATECCx08 key: ATECCx08:00:04:C0:00 (version < 7.0)"
+    fi
+}
+
 # Create nginx site configuration block for proxying requests
 # to the remote server with client certificate authentication
 # using ATECCx08 hardware security module.
@@ -209,6 +250,9 @@ get_server_address() {
 #   0 - Always returns success
 create_site_config() {
     log_info "Creating site configuration..."
+
+    local controller_version=$(get_board_revision)
+    local key_id=$(get_key_id "${controller_version}")
 
     local server_address=$(get_server_address)
     local server_host=$(echo "${server_address}" | cut -d':' -f1)
@@ -238,7 +282,7 @@ server {
         proxy_pass ${server_url};
         proxy_ssl_name ${server_host};
         proxy_ssl_certificate /var/lib/${PACKET_NAME}/device_bundle.crt.pem;
-        proxy_ssl_certificate_key engine:ateccx08:ATECCx08:00:02:C0:00;
+        proxy_ssl_certificate_key engine:ateccx08:${key_id};
         proxy_ssl_server_name on;
 
         # Specific settings required for WebSocket connections
