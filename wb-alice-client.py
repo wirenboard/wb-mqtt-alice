@@ -9,6 +9,8 @@ and "Yandex smart home" platform with Alice
 Usage:
     python3 wb-alice-client.py
 """
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import json
@@ -16,7 +18,7 @@ import logging
 import os
 import signal
 import time
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import paho.mqtt.client as mqtt
 import paho.mqtt.subscribe as subscribe
@@ -160,7 +162,9 @@ async def read_topic_once(
 
 
 class DeviceRegistry:
-    """Parses WB config and routes MQTT ↔ Yandex"""
+    """
+    Parses WB config and routes MQTT to Yandex
+    """
 
     def __init__(
         self,
@@ -310,8 +314,7 @@ class DeviceRegistry:
 
         return devices_out
 
-    # ---------- MQTT → Yandex ----------
-    def handle_mqtt(self, topic: str, raw: str) -> None:
+    def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
         if topic not in self.topic2info:
             return
 
@@ -334,8 +337,7 @@ class DeviceRegistry:
 
         self._send_to_yandex(device_id, cap_type, instance, value)
 
-    # ---------- Yandex → MQTT ----------
-    def handle_action(
+    def forward_yandex_to_mqtt(
         self,
         device_id: str,
         cap_type: str,
@@ -459,8 +461,10 @@ class DeviceRegistry:
         return device_output
 
 
-# Helper for publishing from registry
 def publish_to_mqtt(topic: str, payload: str) -> None:
+    """
+    Helper for publishing from registry
+    """
     global ctx
     if ctx.mqtt_client is None:
         logger.error("[MQTT] Client not initialized")
@@ -475,8 +479,15 @@ def publish_to_mqtt(topic: str, payload: str) -> None:
         logger.error("[MQTT] Failed to publish to %s: %s", topic, e)
 
 
-def to_bool(raw_state: Any) -> bool:
-    """Conversion to bool according to Yandex on_off rules"""
+# ---------------------------------------------------------------------
+# Yandex types handlers
+# ---------------------------------------------------------------------
+
+
+def _to_bool(raw_state: Any) -> bool:
+    """
+    Conversion to bool according to Yandex on_off rules
+    """
     if isinstance(raw_state, bool):
         return raw_state
     elif isinstance(raw_state, (int, float)):
@@ -497,12 +508,46 @@ def to_bool(raw_state: Any) -> bool:
         return False
 
 
-def to_float(raw: Any) -> float:
+def _to_float(raw: Any) -> float:
     try:
         return float(raw)
     except (ValueError, TypeError):
         logger.debug("[to_float] Cannot convert %s to float → 0.0", raw)
         return 0.0
+
+
+def _on_off(device_id: str, instance: Optional[str], value: Any) -> None:
+    send_state_to_server(
+        device_id, "devices.capabilities.on_off", instance, _to_bool(value)
+    )
+
+
+def _float_prop(device_id: str, instance: Optional[str], value: Any) -> None:
+    send_state_to_server(
+        device_id, "devices.properties.float", instance, _to_float(value)
+    )
+
+
+def _not_implemented(cap_type: str) -> Callable[..., None]:
+    def _stub(*_a, **_kw) -> None:
+        raise NotImplementedError(f"Handler for '{cap_type}' is not implemented yet")
+
+    return _stub
+
+
+# Yandex types handler table for select send logic from MQTT to Yandex
+_HANDLERS: Dict[str, Callable[[str, Optional[str], Any], None]] = {
+    # Capabilities
+    "devices.capabilities.on_off": _on_off,
+    "devices.capabilities.color_setting": _not_implemented("cap.color_setting"),
+    "devices.capabilities.video_stream": _not_implemented("cap.video_stream"),
+    "devices.capabilities.mode": _not_implemented("cap.mode"),
+    "devices.capabilities.range": _not_implemented("cap.range"),
+    "devices.capabilities.toggle": _not_implemented("cap.toggle"),
+    # Properties
+    "devices.properties.float": _float_prop,
+    "devices.properties.event": _not_implemented("prop.event"),
+}
 
 
 def _build_state_block(
@@ -538,9 +583,9 @@ def send_state_to_server(
 
     # normalise known value types
     if block_type.endswith("on_off"):
-        value = to_bool(value)
+        value = _to_bool(value)
     elif block_type.endswith("float"):
-        value = to_float(value)
+        value = _to_float(value)
 
     payload = {
         "ts": int(time.time()),
@@ -569,27 +614,30 @@ def send_to_yandex_state(
     """
     Unified sender to Yandex used by registry
     """
-    if cap_type == "devices.capabilities.on_off":
-        send_state_to_server(
-            device_id,
-            "devices.capabilities.on_off",
-            instance,
-            value,
+    handler = _HANDLERS.get(cap_type)
+    if handler is None:
+        logger.error(
+            "[YANDEX] Unknown capability/property '%s'. Supported: %s",
+            cap_type,
+            ", ".join(_HANDLERS.keys()),
         )
-    elif cap_type == "devices.properties.float":
-        send_state_to_server(
-            device_id,
-            "devices.properties.float",
-            instance,
-            value,
-        )
-    else:
-        logger.warning(
-            f"[YANDEX] Not implemented sender for {cap_type} (instance={instance})"
-        )
+        return
+
+    try:
+        handler(device_id, instance, value)
+    except NotImplementedError as err:
+        # Explicit and loud: capability exists in table but lacks implementation
+        logger.error("[YANDEX] %s", err)
+    except Exception as exc:
+        logger.exception("[YANDEX] Handler error for '%s': %s", cap_type, exc)
 
 
-def on_connect(client, userdata, flags, rc):
+# ---------------------------------------------------------------------
+# MQTT callbacks
+# ---------------------------------------------------------------------
+
+
+def mqtt_on_connect(client, userdata, flags, rc):
     if rc != 0:
         logger.error(f"[MQTT] Connection failed with code: {rc}")
         return
@@ -605,11 +653,11 @@ def on_connect(client, userdata, flags, rc):
         logger.info(f"[MQTT] Subscribed to {t}")
 
 
-def on_disconnect(client, userdata, rc):
+def mqtt_on_disconnect(client, userdata, rc):
     logger.warning("[MQTT] Disconnected with code %s", rc)
 
 
-def on_message(client, userdata, message):
+def mqtt_on_message(client, userdata, message):
     if ctx.registry is None:
         logger.debug("[MQTT] Registry not available, ignoring message")
         return
@@ -626,12 +674,13 @@ def on_message(client, userdata, message):
     logger.debug(f"       - Size   : '{len(message.payload)}'")
     logger.debug(f"       - Message: '{payload_str}'")
 
-    # delegate parsing to registry
-    ctx.registry.handle_mqtt(topic_str, payload_str)
+    ctx.registry.forward_mqtt_to_yandex(topic_str, payload_str)
 
 
 def generate_client_id(prefix: str = "wb-alice-client") -> str:
-    """Generate unique MQTT client ID with random suffix"""
+    """
+    Generate unique MQTT client ID with random suffix
+    """
     import random
     import string
 
@@ -640,42 +689,9 @@ def generate_client_id(prefix: str = "wb-alice-client") -> str:
 
 
 ctx.mqtt_client = mqtt.Client(client_id=generate_client_id())
-ctx.mqtt_client.on_connect = on_connect
-ctx.mqtt_client.on_disconnect = on_disconnect
-ctx.mqtt_client.on_message = on_message
-
-
-def get_controller_sn():
-    """Get controller ID from the configuration file"""
-    try:
-        with open(SHORT_SN_PATH, "r") as file:
-            controller_sn = file.read().strip()
-            logger.info(f"Read controller ID: {controller_sn}")
-            return controller_sn
-    except FileNotFoundError:
-        logger.error(f"Controller ID file not found! Check the path: {SHORT_SN_PATH}")
-        return None
-    except Exception as e:
-        logger.error(f"Reading controller ID exception: {e}")
-        return None
-
-
-def read_config():
-    """Read configuration file"""
-    try:
-        if not os.path.exists(CONFIG_PATH):
-            logger.error(f"Configuration file not found at {CONFIG_PATH}")
-            return None
-
-        with open(CONFIG_PATH, "r") as file:
-            config = json.load(file)
-            return config
-    except json.JSONDecodeError:
-        logger.error("Parsing configuration file: Invalid JSON format")
-        return None
-    except Exception as e:
-        logger.error(f"Reading configuration exception: {e}")
-        return None
+ctx.mqtt_client.on_connect = mqtt_on_connect
+ctx.mqtt_client.on_disconnect = mqtt_on_disconnect
+ctx.mqtt_client.on_message = mqtt_on_message
 
 
 async def read_mqtt_state(
@@ -720,6 +736,11 @@ def write_mqtt_state(mqtt_client: mqtt.Client, topic: str, is_on: bool) -> None:
     logger.debug("[MQTT] Published '%s' to '%s'", payload_str, full_topic)
 
 
+# ---------------------------------------------------------------------
+# SocketIO callbacks
+# ---------------------------------------------------------------------
+
+
 async def connect():
     global ctx
     logger.info("[SUCCESS] Connected to Socket.IO server!")
@@ -728,10 +749,13 @@ async def connect():
     )
 
 
-# NOTE: argument "reason" not accessible in current client 5.0.3 (Dec 14,2020)
-#       implemented in version 5.12
 async def disconnect():
-    """Triggered when SocketIO connection with server is lost"""
+    """
+    Triggered when SocketIO connection with server is lost
+
+    NOTE: argument "reason" implemented in version 5.12, but not accessible
+    in current client 5.0.3 (Released in Dec 14,2020)
+    """
     logger.warning("[DISCONNECT] Lost connection")
 
 
@@ -831,7 +855,7 @@ def handle_single_device_action(device: dict[str, Any]) -> dict[str, Any]:
         value: Any = cap.get("state", {}).get("value")
 
         try:
-            ctx.registry.handle_action(device_id, cap_type, instance, value)
+            ctx.registry.forward_yandex_to_mqtt(device_id, cap_type, instance, value)
             logger.info(
                 "[SOCKET.IO] Action applied to %s: %s = %s", device_id, instance, value
             )
@@ -885,6 +909,66 @@ async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
     logger.debug("[SOCKET.IO] Sending action response:")
     logger.debug(json.dumps(action_response, ensure_ascii=False, indent=2))
     return action_response
+
+
+def bind_socketio_handlers(sock: socketio.AsyncClient):
+    """
+    Bind event handlers to the SocketIO client
+
+    Unlike decorators, we use .on() method for better safety - this approach
+    helps control all names and objects at any time and in any context
+    """
+    sock.on("connect", connect)
+    sock.on("disconnect", disconnect)
+    sock.on("response", response)
+    sock.on("error", error)
+    sock.on("connect_error", connect_error)
+    sock.on("alice_devices_list", on_alice_devices_list)
+    sock.on("alice_devices_query", on_alice_devices_query)
+    sock.on("alice_devices_action", on_alice_devices_action)
+    sock.on("*", any_unprocessed_event)  # Handle any unprocessed events
+
+
+# ---------------------------------------------------------------------
+# General helpers
+# ---------------------------------------------------------------------
+
+
+def get_controller_sn():
+    """
+    Get controller ID from the configuration file
+    """
+    try:
+        with open(SHORT_SN_PATH, "r") as file:
+            controller_sn = file.read().strip()
+            logger.info(f"Read controller ID: {controller_sn}")
+            return controller_sn
+    except FileNotFoundError:
+        logger.error(f"Controller ID file not found! Check the path: {SHORT_SN_PATH}")
+        return None
+    except Exception as e:
+        logger.error(f"Reading controller ID exception: {e}")
+        return None
+
+
+def read_config():
+    """
+    Read configuration from file which is generated by WEBUI
+    """
+    try:
+        if not os.path.exists(CONFIG_PATH):
+            logger.error(f"Configuration file not found at {CONFIG_PATH}")
+            return None
+
+        with open(CONFIG_PATH, "r") as file:
+            config = json.load(file)
+            return config
+    except json.JSONDecodeError:
+        logger.error("Parsing configuration file: Invalid JSON format")
+        return None
+    except Exception as e:
+        logger.error(f"Reading configuration exception: {e}")
+        return None
 
 
 async def connect_controller(sock: socketio.AsyncClient):
@@ -956,20 +1040,6 @@ def _log_and_stop(sig: signal.Signals) -> None:
         ctx.stop_event.set()
 
 
-def bind_handlers(sock: socketio.AsyncClient):
-    # NOTE: Unlike decorators, we use .on() for better safety - this method
-    #       helps control all names and objects at any time and in any context
-    sock.on("connect", connect)
-    sock.on("disconnect", disconnect)
-    sock.on("response", response)
-    sock.on("error", error)
-    sock.on("connect_error", connect_error)
-    sock.on("alice_devices_list", on_alice_devices_list)
-    sock.on("alice_devices_query", on_alice_devices_query)
-    sock.on("alice_devices_action", on_alice_devices_action)
-    sock.on("*", any_unprocessed_event)  # Handle any unprocessed events
-
-
 async def main() -> None:
     global ctx
     ctx.main_loop = asyncio.get_running_loop()
@@ -1011,7 +1081,7 @@ async def main() -> None:
 
     # Explicitly set the loop to avoid "attached to a different loop" errors
     ctx.sio._loop = ctx.main_loop
-    bind_handlers(ctx.sio)
+    bind_socketio_handlers(ctx.sio)
 
     logger.info("Connecting Socket.IO client...")
     await connect_controller(ctx.sio)
