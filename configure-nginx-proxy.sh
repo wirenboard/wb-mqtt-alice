@@ -185,7 +185,7 @@ setup_i2c_permissions() {
 
 # Read server address from configuration file
 # Returns server address in format "host:port"
-get_server_address() {
+get_server_address_from_conf() {
     if [ ! -f "${CONFIG_FILE}" ]; then
         log_error "Configuration file not found: ${CONFIG_FILE}"
         exit 1
@@ -194,6 +194,8 @@ get_server_address() {
     local server_addr=$(jq -r '.server_address' "${CONFIG_FILE}" 2>/dev/null)
     if [ -z "${server_addr}" ] || [ "${server_addr}" = "null" ]; then
         log_error "Cannot read server_address from ${CONFIG_FILE}"
+        log_warn "Dumping full content of ${CONFIG_FILE}:"
+        cat "${CONFIG_FILE}" >&2
         exit 1
     fi
     echo "${server_addr}"
@@ -250,7 +252,13 @@ create_site_config() {
     local controller_version=$(get_board_revision)
     local key_id=$(get_key_id "${controller_version}")
 
-    local server_address=$(get_server_address)
+    local server_address=$(get_server_address_from_conf)
+    log_info "Server address resolved: ${server_address}"
+    if [[ -z "$server_address" ]]; then
+        log_error "server_address not set or empty in config" >&2
+        return 1
+    fi
+
     local server_host=$(echo "${server_address}" | cut -d':' -f1)
     local server_url="https://${server_address}"
 
