@@ -1,8 +1,16 @@
 #!/bin/bash
 # postrm script for wb-mqtt-alice
-# This script is called after package removal to cleanup nginx site configuration
+# This script is called after package removal to cleanup
 
 set -e
+
+CONFFILE_CLIENT='/etc/wb-alice-client.conf'
+CONFFILE_DEVICES='/etc/wb-alice-devices.conf'
+
+if [ "$1" = "purge" ]; then
+    rm -f $CONFFILE_CLIENT
+    rm -f $CONFFILE_DEVICES
+fi
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
