@@ -16,7 +16,7 @@ CONFIG_FILE='/etc/wb-alice-client.conf'
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
-LOG_PREFIX="[${PACKET_NAME}]"
+LOG_PREFIX="[${PACKET_NAME} install]"
 
 log_info() {
     echo -e "${LOG_PREFIX} ${1}"
