@@ -7,11 +7,6 @@ set -e
 CONFFILE_CLIENT='/etc/wb-alice-client.conf'
 CONFFILE_DEVICES='/etc/wb-alice-devices.conf'
 
-if [ "$1" = "purge" ]; then
-    rm -f $CONFFILE_CLIENT
-    rm -f $CONFFILE_DEVICES
-fi
-
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
 SITE_CONFIG="/etc/nginx/sites-available/${SITE_NAME}"
@@ -23,27 +18,27 @@ CHANGES_MADE='false'
 LOG_PREFIX="[${PACKET_NAME} cleanup]"
 
 log_info() {
-    echo "${LOG_PREFIX} $1"
+    echo "${LOG_PREFIX} ${1}"
 }
 
 log_warn() {
-    echo "${LOG_PREFIX} WARNING: $1" >&2
+    echo "${LOG_PREFIX} WARNING: ${1}" >&2
 }
 
 cleanup_nginx_site() {
     log_info "Cleaning up nginx site configuration..."
     
     # Remove enabled site symlink
-    if [[ -L "$ENABLED_SITE" ]]; then
-        rm -f "$ENABLED_SITE"
-        log_info "Removed nginx site symlink: $ENABLED_SITE"
+    if [[ -L "${ENABLED_SITE}" ]]; then
+        rm -f "${ENABLED_SITE}"
+        log_info "Removed nginx site symlink: ${ENABLED_SITE}"
         CHANGES_MADE='true'
     fi
     
     # Remove site configuration
-    if [[ -f "$SITE_CONFIG" ]]; then
-        rm -f "$SITE_CONFIG"
-        log_info "Removed nginx site config: $SITE_CONFIG"
+    if [[ -f "${SITE_CONFIG}" ]]; then
+        rm -f "${SITE_CONFIG}"
+        log_info "Removed nginx site config: ${SITE_CONFIG}"
         CHANGES_MADE='true'
     fi
 }
@@ -65,8 +60,15 @@ reload_nginx() {
 }
 
 main() {
-    log_info "Removing wb-mqtt-alice nginx configuration..."
-    
+    log_info "Removing wb-mqtt-alice configuration..."
+
+    if [ "${1}" = "purge" ]; then
+        rm -f ${CONFFILE_CLIENT}
+        log_info "Removed client config: ${CONFFILE_CLIENT}"
+        rm -f ${CONFFILE_DEVICES}
+        log_info "Removed devices config: ${CONFFILE_DEVICES}"
+    fi
+
     cleanup_nginx_site
     
     # Only reload nginx if any changes were made
@@ -80,4 +82,4 @@ main() {
     log_info "Cleanup completed successfully"
 }
 
-main "$@"
+main "${@}"
