@@ -392,6 +392,13 @@ async def get_all_rooms_and_devices():
     return config
 
 
+@app.get("/integrations/alice/available", status_code=200)
+async def get_status():
+    """Get status Alice intagrations"""
+    
+    return True
+
+
 @app.post("/integrations/alice/room", status_code=201)
 async def create_room(request: Request, room_data: Room):
     """Create new room"""
