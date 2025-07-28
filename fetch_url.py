@@ -68,7 +68,7 @@ def fetch_url(
         for key, value in headers.items():
             cmd.extend(["--header", f"{key}: {value}"])
 
-        # Add headers
+        # Add JSON data and target URL
         cmd.extend(["--data", json.dumps(data), url])
 
         # Execute command
