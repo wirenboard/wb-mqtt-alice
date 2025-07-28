@@ -32,6 +32,7 @@ CONFIG_PATH = "/etc/wb-alice-devices.conf"
 SETTING_PATH = "/etc/wb-alice-setting.conf"
 CLIENT_CONFIG_PATH = "/etc/wb-alice-client.conf"
 CLIENT_SERVICE_NAME = "wb-alice-client"
+DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
     "rooms": {
         "without_rooms": {
@@ -156,13 +157,13 @@ def get_language(request: Request) -> str:
     """Get language from request with fallback to default"""
     if hasattr(request.state, "language"):
         return request.state.language
-    return "en"
+    return DEFAULT_LANGUAGE
 
 
 def get_translation(key: str, language: str = None) -> str:
     """Get translation for a key with fallback logic"""
     if not language:
-        language = "en"  # Default language
+        language = DEFAULT_LANGUAGE  # Default language
     
     # Try exact match first (e.g. "ru-RU")
     if language in translations:
@@ -174,7 +175,7 @@ def get_translation(key: str, language: str = None) -> str:
         return translations[primary_lang].get(key, key)
     
     # Fallback to English
-    return translations.get("en", {}).get(key, key)
+    return translations.get(DEFAULT_LANGUAGE, {}).get(key, key)
 
 
 def is_service_active(CLIENT_SERVICE_NAME):
@@ -329,7 +330,7 @@ def validate_properties(properties: list[Property], language: str) -> None:
 
 @app.middleware("http")
 async def language_middleware(request: Request, call_next):
-    accept_language = request.headers.get("accept-language", "en")
+    accept_language = request.headers.get("accept-language", DEFAULT_LANGUAGE)
     primary_language = accept_language.split(",")[0].split("-")[0].lower()
     request.state.language = primary_language
     response = await call_next(request)
