@@ -45,6 +45,32 @@ DEFAULT_CONFIG = {
     "unlink_url": None
 }
 
+# Global variables (will be initialized in init_globals())
+controller_sn = None
+controller_version = None
+key_id = None
+config = None
+server_address = None
+translations = None
+
+
+def init_globals():
+    """Initialize global variables"""
+
+    try:
+        global controller_sn, controller_version, key_id, config, server_address, setting, translations
+        
+        controller_sn = get_controller_sn()
+        controller_version = get_board_revision()
+        key_id = get_key_id(controller_version)
+        config = load_config()
+        server_address = load_client_config()['server_address']
+        setting = load_setting()
+        translations = setting.get("translations", {})
+    except Exception as e:
+        logger.critical(f"Failed to initialize global variables: {e}")
+        raise
+
 
 def get_controller_sn():
     """Get controller SN from the configuration file"""
@@ -527,13 +553,9 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     save_config(config)
     return response
 
-controller_sn = get_controller_sn()
-controller_version = get_board_revision()
-key_id = get_key_id(controller_version)
-config = load_config()
-server_address = load_client_config()['server_address']
-setting = load_setting()
-translations = setting.get("translations", {})
+
+# Initialize global variables at startup
+init_globals()
 
 
 if __name__ == "__main__":
