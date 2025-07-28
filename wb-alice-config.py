@@ -4,6 +4,7 @@ import json
 import uuid
 import logging
 import subprocess
+import asyncio
 import requests
 from datetime import datetime
 
@@ -148,7 +149,7 @@ def save_config(config: Config):
         logger.error(f"Error saveing configuration file: {e}")
         raise
 
-    restart_service(CLIENT_SERVICE_NAME)
+    asyncio.create_task(async_restart_service(CLIENT_SERVICE_NAME))
 
 
 def load_client_config():
@@ -211,17 +212,18 @@ def is_service_active(CLIENT_SERVICE_NAME):
     return result.stdout.strip() == "active"
 
 
-def restart_service(CLIENT_SERVICE_NAME: str):
-    if not is_service_active(CLIENT_SERVICE_NAME):
-        logger.info(f"'{CLIENT_SERVICE_NAME}' service not started")
+async def async_restart_service(service_name: str):
+    if not is_service_active(service_name):
+        logger.info(f"'{service_name}' service not started")
         return
     
     try:
-        subprocess.run(["systemctl", "restart", CLIENT_SERVICE_NAME],
-            check=True)
-        logger.info(f"'{CLIENT_SERVICE_NAME}' service restart...")
+        await asyncio.create_subprocess_exec(
+            "systemctl", "restart", service_name
+        )
+        logger.info(f"'{service_name}' service restart...")
     except subprocess.CalledProcessError as e:
-        logger.info(f"'{CLIENT_SERVICE_NAME}' service restart error")
+        logger.info(f"'{service_name}' service restart error")
         return
 
 
