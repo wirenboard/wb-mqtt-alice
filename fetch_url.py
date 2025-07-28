@@ -64,11 +64,11 @@ def fetch_url(
             "--write-out", "\n%{http_code}",  # Добавляем статус-код в вывод
         ]
 
-        # Добавляем заголовки
+        # Add headers
         for key, value in headers.items():
             cmd.extend(["--header", f"{key}: {value}"])
 
-        # Add headers
+        # Add JSON data and target URL
         cmd.extend(["--data", json.dumps(data), url])
 
         # Execute command

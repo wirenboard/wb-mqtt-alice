@@ -33,6 +33,7 @@ CONFIG_PATH = "/etc/wb-alice-devices.conf"
 SETTING_PATH = "/etc/wb-alice-setting.conf"
 CLIENT_CONFIG_PATH = "/etc/wb-alice-client.conf"
 CLIENT_SERVICE_NAME = "wb-alice-client"
+DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
     "rooms": {
         "without_rooms": {
@@ -44,6 +45,32 @@ DEFAULT_CONFIG = {
     "link_url": None,
     "unlink_url": None
 }
+
+# Global variables (will be initialized in init_globals())
+controller_sn = None
+controller_version = None
+key_id = None
+config = None
+server_address = None
+translations = None
+
+
+def init_globals():
+    """Initialize global variables"""
+
+    try:
+        global controller_sn, controller_version, key_id, config, server_address, setting, translations
+        
+        controller_sn = get_controller_sn()
+        controller_version = get_board_revision()
+        key_id = get_key_id(controller_version)
+        config = load_config()
+        server_address = load_client_config()['server_address']
+        setting = load_setting()
+        translations = setting.get("translations", {})
+    except Exception as e:
+        logger.critical(f"Failed to initialize global variables: {e}")
+        raise
 
 
 def get_controller_sn():
@@ -157,13 +184,13 @@ def get_language(request: Request) -> str:
     """Get language from request with fallback to default"""
     if hasattr(request.state, "language"):
         return request.state.language
-    return "en"
+    return DEFAULT_LANGUAGE
 
 
 def get_translation(key: str, language: str = None) -> str:
     """Get translation for a key with fallback logic"""
     if not language:
-        language = "en"  # Default language
+        language = DEFAULT_LANGUAGE  # Default language
     
     # Try exact match first (e.g. "ru-RU")
     if language in translations:
@@ -175,7 +202,7 @@ def get_translation(key: str, language: str = None) -> str:
         return translations[primary_lang].get(key, key)
     
     # Fallback to English
-    return translations.get("en", {}).get(key, key)
+    return translations.get(DEFAULT_LANGUAGE, {}).get(key, key)
 
 
 def is_service_active(CLIENT_SERVICE_NAME):
@@ -331,7 +358,7 @@ def validate_properties(properties: list[Property], language: str) -> None:
 
 @app.middleware("http")
 async def language_middleware(request: Request, call_next):
-    accept_language = request.headers.get("accept-language", "en")
+    accept_language = request.headers.get("accept-language", DEFAULT_LANGUAGE)
     primary_language = accept_language.split(",")[0].split("-")[0].lower()
     request.state.language = primary_language
     response = await call_next(request)
@@ -535,13 +562,9 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     save_config(config)
     return response
 
-controller_sn = get_controller_sn()
-controller_version = get_board_revision()
-key_id = get_key_id(controller_version)
-config = load_config()
-server_address = load_client_config()['server_address']
-setting = load_setting()
-translations = setting.get("translations", {})
+
+# Initialize global variables at startup
+init_globals()
 
 
 if __name__ == "__main__":
