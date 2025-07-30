@@ -482,7 +482,8 @@ async def create_device(request: Request, device_data: Device):
         device_data.name,
         device_data.room_id,
         config.devices,
-        language)
+        language,
+    )
     # Check if the device has a capability or property
     validate_device_not_empty(device_data, language)
     # Validate and prepare capabilities
