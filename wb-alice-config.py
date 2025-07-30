@@ -182,9 +182,7 @@ def load_setting():
 
 def get_language(request: Request) -> str:
     """Get language from request with fallback to default"""
-    if hasattr(request.state, "language"):
-        return request.state.language
-    return DEFAULT_LANGUAGE
+    return getattr(request.state, "language", DEFAULT_LANGUAGE)
 
 
 def get_translation(key: str, language: str = None) -> str:
