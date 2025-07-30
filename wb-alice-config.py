@@ -230,7 +230,7 @@ async def async_restart_service(service_name: str):
 def generate_id(controller_sn):
     hashSN = hashlib.sha256(controller_sn.encode()).hexdigest()[:8]
     timestamp = datetime.now().strftime("%y%m%d%H%M%S")
-    unique_id = str(uuid.uuid4())
+    unique_id = uuid.uuid4()
     return f"{hashSN.lower()}-{timestamp}-{unique_id}"
 
 
