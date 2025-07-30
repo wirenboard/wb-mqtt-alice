@@ -85,7 +85,7 @@ def fetch_url(
         else:
             response_data, status_code = "", output
 
-        #Parse JSON
+        # Parse JSON
         json_data = None
         if response_data:
             try:
