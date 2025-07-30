@@ -286,7 +286,7 @@ def validate_room_name(name: str, language: str) -> None:
 
 def validate_device_name_unique(name: str, room_id: str, devices: dict, language: str) -> None:
     """Validate that device name is unique"""
-    if any((device.name == name)&(device.room_id == room_id) for device in devices.values()):
+    if any(device.name == name and device.room_id == room_id for device in devices.values()):
         raise HTTPException(
             status_code=409,
             detail=get_translation("device_exists", language))
