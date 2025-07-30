@@ -50,7 +50,7 @@ def fetch_url(
         if headers is None:
             headers = {"Content-Type": "application/json"}
 
-        # Creat a curl command
+        # Create a curl command
         cmd = [
             "curl",
             "-X", "POST",
