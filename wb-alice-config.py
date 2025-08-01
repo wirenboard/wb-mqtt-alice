@@ -8,6 +8,7 @@ import asyncio
 import requests
 from datetime import datetime
 from pathlib import Path
+from http import HTTPStatus
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -237,7 +238,7 @@ def validate_room_name_unique(name: str, rooms: dict, language: str) -> None:
     """Validate that room name is unique"""
     if any(room.name == name for room in rooms.values()):
         raise HTTPException(
-            status_code=409,
+            status_code=HTTPStatus.CONFLICT,
             detail=get_translation("room_exists", language))
 
 
@@ -245,7 +246,7 @@ def validate_room_exists(room_id: str, config: Config, language: str) -> None:
     """Validate that room with given ID exists"""
     if room_id not in config.rooms:
         raise HTTPException(
-            status_code=404,
+            status_code=HTTPStatus.NOT_FOUND,
             detail=get_translation("no_room_id", language))
 
 
@@ -254,22 +255,22 @@ def validate_room_name(name: str, language: str) -> None:
 
     if not re.fullmatch(r'^[а-яА-ЯёЁ0-9]+( [а-яА-ЯёЁ0-9]+)*$', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_invalid_chars", language))
 
     if re.search(r'[а-яА-ЯёЁ][0-9]|[0-9][а-яА-ЯёЁ]', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_missing_spaces", language))
 
     if len(name) > 20:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_too_long", language))
 
     if len(re.sub(r'[^а-яА-ЯёЁ]', '', name)) < 2:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_too_few_letters", language))
 
 
@@ -277,7 +278,7 @@ def validate_device_name_unique(name: str, room_id: str, devices: dict, language
     """Validate that device name is unique"""
     if any(device.name == name and device.room_id == room_id for device in devices.values()):
         raise HTTPException(
-            status_code=409,
+            status_code=HTTPStatus.CONFLICT,
             detail=get_translation("device_exists", language))
 
 
@@ -285,7 +286,7 @@ def validate_device_exists(device_id: str, config: Config, language: str) -> Non
     """Validate that device with given ID exists"""
     if device_id not in config.devices:
         raise HTTPException(
-            status_code=404,
+            status_code=HTTPStatus.NOT_FOUND,
             detail=get_translation("no_device_id", language))
 
 
@@ -294,23 +295,23 @@ def validate_device_name(name: str, language: str) -> None:
 
     if not re.fullmatch(r'^[а-яА-ЯёЁ0-9]+( [а-яА-ЯёЁ0-9]+)*$', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_invalid_chars", language))
 
 
     if re.search(r'[а-яА-ЯёЁ][0-9]|[0-9][а-яА-ЯёЁ]', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_missing_spaces", language))
 
     if len(name) > 25:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_too_long", language))
 
     if len(re.sub(r'[^а-яА-ЯёЁ]', '', name)) < 2:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_too_few_letters", language))
 
 
@@ -318,7 +319,7 @@ def validate_device_not_empty(device_data: Device, language: str) -> None:
     """Validate that device has at least one capability or property"""
     if not device_data.capabilities and not device_data.properties:
         raise HTTPException(
-            status_code=400,
+            status_code=HTTPStatus.BAD_REQUEST,
             detail=get_translation("empty_device", language))
 
 
@@ -327,7 +328,7 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
     for capability in capabilities:
         if capability.mqtt == "":
             raise HTTPException(
-                status_code=422,
+                status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
                 detail=get_translation("empty_mqtt", language))
         
         if capability.type == "devices.capabilities.on_off":
@@ -341,7 +342,7 @@ def validate_properties(properties: list[Property], language: str) -> None:
     for property in properties:
         if property.mqtt == "":
             raise HTTPException(
-                status_code=422,
+                status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
                 detail=get_translation("empty_mqtt", language))
 
 
@@ -356,7 +357,7 @@ async def language_middleware(request: Request, call_next):
 
 # API Endpoints
 
-@app.get("/integrations/alice", response_model=Config, status_code=200)
+@app.get("/integrations/alice", response_model=Config, status_code=HTTPStatus.OK)
 async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
     
@@ -383,14 +384,14 @@ async def get_all_rooms_and_devices():
     return config
 
 
-@app.get("/integrations/alice/available", status_code=200)
+@app.get("/integrations/alice/available", status_code=HTTPStatus.OK)
 async def get_status():
     """Get status Alice intagrations"""
     
     return True
 
 
-@app.post("/integrations/alice/room", status_code=201)
+@app.post("/integrations/alice/room", status_code=HTTPStatus.CREATED)
 async def create_room(request: Request, room_data: Room):
     """Create new room"""
 
@@ -409,7 +410,7 @@ async def create_room(request: Request, room_data: Room):
     return response
 
 
-@app.put("/integrations/alice/room/{room_id}", status_code=200)
+@app.put("/integrations/alice/room/{room_id}", status_code=HTTPStatus.OK)
 async def update_room(request: Request, room_id: str, room_data: Room):
     """Update room"""
 
@@ -432,7 +433,7 @@ async def update_room(request: Request, room_id: str, room_data: Room):
     return response
 
 
-@app.delete("/integrations/alice/room/{room_id}", status_code=200)
+@app.delete("/integrations/alice/room/{room_id}", status_code=HTTPStatus.OK)
 async def delete_room(request: Request, room_id: str):
     """Delete room"""
 
@@ -441,7 +442,7 @@ async def delete_room(request: Request, room_id: str):
     # Don't allow deleting "without_rooms" special room
     if room_id == "without_rooms":
         raise HTTPException(
-            status_code=409,
+            status_code=HTTPStatus.CONFLICT,
             detail=get_translation("special_room", language))
 
     # Validate room exists
@@ -458,7 +459,7 @@ async def delete_room(request: Request, room_id: str):
     return {"message": get_translation("room_deleted", language)}
 
 
-@app.post("/integrations/alice/device", status_code=201)
+@app.post("/integrations/alice/device", status_code=HTTPStatus.CREATED)
 async def create_device(request: Request, device_data: Device):
     """Create new device"""
 
@@ -489,7 +490,7 @@ async def create_device(request: Request, device_data: Device):
     return response
 
 
-@app.put("/integrations/alice/device/{device_id}", status_code=200)
+@app.put("/integrations/alice/device/{device_id}", status_code=HTTPStatus.OK)
 async def update_device(request: Request, device_id: str, device_data: Device):
     """Update device"""
 
@@ -516,7 +517,7 @@ async def update_device(request: Request, device_id: str, device_data: Device):
     return response
 
 
-@app.delete("/integrations/alice/device/{device_id}", status_code=200)
+@app.delete("/integrations/alice/device/{device_id}", status_code=HTTPStatus.OK)
 async def delete_device(request: Request, device_id: str):
     """Delete device"""
 
@@ -534,7 +535,7 @@ async def delete_device(request: Request, device_id: str):
     return {"message": get_translation("device_deleted", language)}
 
 
-@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomID, status_code=200)
+@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomID, status_code=HTTPStatus.OK)
 async def change_device_room(request: Request, device_id: str, device_data: RoomID):
     """Changes the room for the device"""
     
