@@ -45,71 +45,64 @@ def fetch_url(
                 "error": f"Certificate file not found: {cert_path}",
             }
 
+    # Prepare data and headers
+    if data is None:
+        data = {"controller_version": "8.5"}  # Default value
+    if headers is None:
+        headers = {"Content-Type": "application/json"}
+
+    # Create a curl command
+    cmd = [
+        "curl",
+        "-X", "POST",
+        "--cert", cert_path,
+        "--engine", engine,
+        "--key-type", key_type,
+        "--key", key_id,
+        "--tlsv1.3",
+        "--connect-timeout", str(timeout),
+        "--silent",
+        "--write-out", "\n%{http_code}",  # Add a status code to the output
+    ]
+
+    # Add headers
+    for key, value in headers.items():
+        cmd.extend(["--header", f"{key}: {value}"])
+
+    # Add JSON data and target URL
+    cmd.extend(["--data", json.dumps(data), url])
+
     try:
-        # Prepare data and headers
-        if data is None:
-            data = {"controller_version": "8.4"}  # Значение по умолчанию
-        if headers is None:
-            headers = {"Content-Type": "application/json"}
-
-        # Create a curl command
-        cmd = [
-            "curl",
-            "-X", "POST",
-            "--cert", cert_path,
-            "--engine", engine,
-            "--key-type", key_type,
-            "--key", key_id,
-            "--tlsv1.3",
-            "--connect-timeout", str(timeout),
-            "--silent",
-            "--write-out", "\n%{http_code}",  # Добавляем статус-код в вывод
-        ]
-
-        # Add headers
-        for key, value in headers.items():
-            cmd.extend(["--header", f"{key}: {value}"])
-
-        # Add JSON data and target URL
-        cmd.extend(["--data", json.dumps(data), url])
-
         # Execute command
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
         )
-
-        # Split response and status code
-        output = result.stdout.strip()
-        if "\n" in output:
-            response_data, status_code = output.rsplit("\n", 1)
-        else:
-            response_data, status_code = "", output
-
-        # Parse JSON
-        json_data = None
-        if response_data:
-            try:
-                json_data = json.loads(response_data)
-            except json.JSONDecodeError:
-                json_data = response_data
-
-        return {
-            "status_code": int(status_code) if status_code.isdigit() else None,
-            "data": json_data,
-            "error": None,
-        }
-
     except subprocess.CalledProcessError as e:
         return {
             "status_code": None,
             "data": None,
             "error": f"Curl error: {e.stderr.strip() or e.stdout.strip()}",
         }
-    except Exception as e:
+        
+    # Split response and status code
+    output = result.stdout.strip()
+    if "\n" in output:
+        response_data, status_code = output.rsplit("\n", 1)
+    else:
+        response_data, status_code = "", output
+
+    # Parse JSON
+    json_data = None
+    if response_data:
+        try:
+            json_data = json.loads(response_data)
+        except json.JSONDecodeError:
+            json_data = response_data
+
         return {
-            "status_code": None,
-            "data": None,
-            "error": f"Unexpected error: {str(e)}",
+            "status_code": int(status_code) if status_code.isdigit() else None,
+            "data": json_data,
+            "error": None,
         }
