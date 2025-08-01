@@ -1,6 +1,7 @@
 import subprocess
 import json
-import os
+
+from pathlib import Path
 
 BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
 
@@ -34,16 +35,17 @@ def fetch_url(
             "error": str
         }
     """
-
-    try:
-        # Checking for certificate availability
-        if not os.path.exists(cert_path):
-            return {
+        
+    # Checking for certificate availability
+    cert_path = Path(BUNDLE_CRT_PATH)
+    if not cert_path.exists():
+        return {
                 "status_code": None,
                 "data": None,
                 "error": f"Certificate file not found: {cert_path}",
             }
 
+    try:
         # Prepare data and headers
         if data is None:
             data = {"controller_version": "8.4"}  # Значение по умолчанию
