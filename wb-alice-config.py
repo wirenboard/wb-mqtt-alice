@@ -16,11 +16,13 @@ from fastapi import FastAPI, Request, HTTPException
 from fetch_url import fetch_url
 from models import Room, Capability, Property, Device, RoomID, Config
 
+# FastAPI initialization
 app = FastAPI(
     title="Alice Integration API",
     version="1.0.0",
 )
 
+# Setting up the logger
 logging.basicConfig(
     level=logging.INFO,
     format='%(levelname)s: %(message)s',
@@ -28,7 +30,7 @@ logging.basicConfig(
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
-
+# Constants
 SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
 BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
 CONFIG_PATH = Path("/etc/wb-alice-devices.conf")
@@ -127,7 +129,7 @@ def load_config() -> Config:
     logger.debug(f"Reading configuration file...")
     try:
         config = Config(**json.loads(CONFIG_PATH.read_text(encoding='utf-8')))
-        return config
+        return Config(**json.loads(CONFIG_PATH.read_text(encoding='utf-8')))
     except Exception as e:
         config = Config(**DEFAULT_CONFIG)
         save_config(config)
