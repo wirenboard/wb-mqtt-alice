@@ -7,6 +7,7 @@ import subprocess
 import asyncio
 import requests
 from datetime import datetime
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -27,11 +28,11 @@ logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
 
-SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
-BOARD_REVISION_PATH = "/proc/device-tree/wirenboard/board-revision"
-CONFIG_PATH = "/etc/wb-alice-devices.conf"
-SETTING_PATH = "/etc/wb-alice-setting.conf"
-CLIENT_CONFIG_PATH = "/etc/wb-alice-client.conf"
+SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
+BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
+CONFIG_PATH = Path("/etc/wb-alice-devices.conf")
+SETTING_PATH = Path("/etc/wb-alice-setting.conf")
+CLIENT_CONFIG_PATH = Path("/etc/wb-alice-client.conf")
 CLIENT_SERVICE_NAME = "wb-alice-client"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
@@ -78,10 +79,9 @@ def get_controller_sn():
 
     logger.debug(f"Reading controller SN...")
     try:
-        with open(SHORT_SN_PATH, "r") as file:
-            controller_sn = file.read().strip()
-            logger.debug(f"Сontroller SN: {controller_sn}")
-            return controller_sn
+        controller_sn = SHORT_SN_PATH.read_text().strip()
+        logger.debug(f"Сontroller SN: {controller_sn}")
+        return controller_sn
     except FileNotFoundError:
         logger.error(f"Controller SN file not found! Check the path: {SHORT_SN_PATH}")
         return None
@@ -95,10 +95,9 @@ def get_board_revision():
 
     logger.debug(f"Reading controller hardware revision...")
     try:
-        with open(BOARD_REVISION_PATH, "r") as file:
-            board_revision = '.'.join(file.read().rstrip('\x00').split('.')[:2])
-            logger.debug(f"Сontroller hardware revision: {board_revision}")
-            return board_revision
+        board_revision = '.'.join(BOARD_REVISION_PATH.read_text().rstrip('\x00').split('.')[:2])
+        logger.debug(f"Сontroller hardware revision: {board_revision}")
+        return board_revision
     except FileNotFoundError:
         logger.error(f"Controller board revition file not found! Check the path: {BOARD_REVISION_PATH}")
         return None
@@ -125,10 +124,8 @@ def load_config() -> Config:
     """Load configurations from file"""
     
     logger.debug(f"Reading configuration file...")
-
     try:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            config = Config(**json.load(f))
+        config = Config(**json.loads(CONFIG_PATH.read_text(encoding='utf-8')))
         return config
     except Exception as e:
         config = Config(**DEFAULT_CONFIG)
@@ -141,10 +138,8 @@ def save_config(config: Config):
     """Save configuration file"""
 
     logger.debug(f"Saving configuration file...")
-    
     try:
-        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-            json.dump(config.dict(), f, ensure_ascii=False, indent=2)
+        CONFIG_PATH.write_text(json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding='utf-8')
     except Exception as e:
         logger.error(f"Error saveing configuration file: {e}")
         raise
@@ -156,10 +151,8 @@ def load_client_config():
     """Load client configuration file"""
     
     logger.debug(f"Reading client configuration file...")
-
     try:
-        with open(CLIENT_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            client_config = json.load(f)
+        client_config = json.loads(CLIENT_CONFIG_PATH.read_text(encoding='utf-8'))
         return client_config
     except Exception as e:
         logger.error(f"Error reading client configuration file: {e}")
@@ -170,10 +163,8 @@ def load_setting():
     """Load settings from file"""
     
     logger.debug(f"Reading settings file...")
-
     try:
-        with open(SETTING_PATH, 'r', encoding='utf-8') as f:
-            setting = json.load(f)
+        setting = json.loads(SETTING_PATH.read_text(encoding='utf-8'))
         return setting
     except Exception as e:
         logger.error(f"Error reading settings file: {e}")
