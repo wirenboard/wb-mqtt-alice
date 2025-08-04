@@ -7,6 +7,8 @@ import subprocess
 import asyncio
 import requests
 from datetime import datetime
+from pathlib import Path
+from http import HTTPStatus
 
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
@@ -14,11 +16,13 @@ from fastapi import FastAPI, Request, HTTPException
 from fetch_url import fetch_url
 from models import Room, Capability, Property, Device, RoomID, Config
 
+# FastAPI initialization
 app = FastAPI(
     title="Alice Integration API",
     version="1.0.0",
 )
 
+# Setting up the logger
 logging.basicConfig(
     level=logging.INFO,
     format='%(levelname)s: %(message)s',
@@ -26,12 +30,12 @@ logging.basicConfig(
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
-
-SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
-BOARD_REVISION_PATH = "/proc/device-tree/wirenboard/board-revision"
-CONFIG_PATH = "/etc/wb-alice-devices.conf"
-SETTING_PATH = "/etc/wb-alice-setting.conf"
-CLIENT_CONFIG_PATH = "/etc/wb-alice-client.conf"
+# Constants
+SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
+BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
+CONFIG_PATH = Path("/etc/wb-alice-devices.conf")
+SETTING_PATH = Path("/etc/wb-alice-setting.conf")
+CLIENT_CONFIG_PATH = Path("/etc/wb-alice-client.conf")
 CLIENT_SERVICE_NAME = "wb-alice-client"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
@@ -78,10 +82,9 @@ def get_controller_sn():
 
     logger.debug(f"Reading controller SN...")
     try:
-        with open(SHORT_SN_PATH, "r") as file:
-            controller_sn = file.read().strip()
-            logger.debug(f"Сontroller SN: {controller_sn}")
-            return controller_sn
+        controller_sn = SHORT_SN_PATH.read_text().strip()
+        logger.debug(f"Сontroller SN: {controller_sn}")
+        return controller_sn
     except FileNotFoundError:
         logger.error(f"Controller SN file not found! Check the path: {SHORT_SN_PATH}")
         return None
@@ -95,10 +98,9 @@ def get_board_revision():
 
     logger.debug(f"Reading controller hardware revision...")
     try:
-        with open(BOARD_REVISION_PATH, "r") as file:
-            board_revision = '.'.join(file.read().rstrip('\x00').split('.')[:2])
-            logger.debug(f"Сontroller hardware revision: {board_revision}")
-            return board_revision
+        board_revision = '.'.join(BOARD_REVISION_PATH.read_text().rstrip('\x00').split('.')[:2])
+        logger.debug(f"Сontroller hardware revision: {board_revision}")
+        return board_revision
     except FileNotFoundError:
         logger.error(f"Controller board revition file not found! Check the path: {BOARD_REVISION_PATH}")
         return None
@@ -125,11 +127,9 @@ def load_config() -> Config:
     """Load configurations from file"""
     
     logger.debug(f"Reading configuration file...")
-
     try:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            config = Config(**json.load(f))
-        return config
+        config = Config(**json.loads(CONFIG_PATH.read_text(encoding='utf-8')))
+        return Config(**json.loads(CONFIG_PATH.read_text(encoding='utf-8')))
     except Exception as e:
         config = Config(**DEFAULT_CONFIG)
         save_config(config)
@@ -141,10 +141,8 @@ def save_config(config: Config):
     """Save configuration file"""
 
     logger.debug(f"Saving configuration file...")
-    
     try:
-        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-            json.dump(config.dict(), f, ensure_ascii=False, indent=2)
+        CONFIG_PATH.write_text(json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding='utf-8')
     except Exception as e:
         logger.error(f"Error saveing configuration file: {e}")
         raise
@@ -156,10 +154,8 @@ def load_client_config():
     """Load client configuration file"""
     
     logger.debug(f"Reading client configuration file...")
-
     try:
-        with open(CLIENT_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            client_config = json.load(f)
+        client_config = json.loads(CLIENT_CONFIG_PATH.read_text(encoding='utf-8'))
         return client_config
     except Exception as e:
         logger.error(f"Error reading client configuration file: {e}")
@@ -170,10 +166,8 @@ def load_setting():
     """Load settings from file"""
     
     logger.debug(f"Reading settings file...")
-
     try:
-        with open(SETTING_PATH, 'r', encoding='utf-8') as f:
-            setting = json.load(f)
+        setting = json.loads(SETTING_PATH.read_text(encoding='utf-8'))
         return setting
     except Exception as e:
         logger.error(f"Error reading settings file: {e}")
@@ -182,9 +176,7 @@ def load_setting():
 
 def get_language(request: Request) -> str:
     """Get language from request with fallback to default"""
-    if hasattr(request.state, "language"):
-        return request.state.language
-    return DEFAULT_LANGUAGE
+    return getattr(request.state, "language", DEFAULT_LANGUAGE)
 
 
 def get_translation(key: str, language: str = None) -> str:
@@ -230,7 +222,7 @@ async def async_restart_service(service_name: str):
 def generate_id(controller_sn):
     hashSN = hashlib.sha256(controller_sn.encode()).hexdigest()[:8]
     timestamp = datetime.now().strftime("%y%m%d%H%M%S")
-    unique_id = str(uuid.uuid4())
+    unique_id = uuid.uuid4()
     return f"{hashSN.lower()}-{timestamp}-{unique_id}"
 
 
@@ -248,7 +240,7 @@ def validate_room_name_unique(name: str, rooms: dict, language: str) -> None:
     """Validate that room name is unique"""
     if any(room.name == name for room in rooms.values()):
         raise HTTPException(
-            status_code=409,
+            status_code=HTTPStatus.CONFLICT,
             detail=get_translation("room_exists", language))
 
 
@@ -256,7 +248,7 @@ def validate_room_exists(room_id: str, config: Config, language: str) -> None:
     """Validate that room with given ID exists"""
     if room_id not in config.rooms:
         raise HTTPException(
-            status_code=404,
+            status_code=HTTPStatus.NOT_FOUND,
             detail=get_translation("no_room_id", language))
 
 
@@ -265,30 +257,30 @@ def validate_room_name(name: str, language: str) -> None:
 
     if not re.fullmatch(r'^[а-яА-ЯёЁ0-9]+( [а-яА-ЯёЁ0-9]+)*$', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_invalid_chars", language))
 
     if re.search(r'[а-яА-ЯёЁ][0-9]|[0-9][а-яА-ЯёЁ]', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_missing_spaces", language))
 
     if len(name) > 20:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_too_long", language))
 
     if len(re.sub(r'[^а-яА-ЯёЁ]', '', name)) < 2:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("room_name_too_few_letters", language))
 
 
 def validate_device_name_unique(name: str, room_id: str, devices: dict, language: str) -> None:
     """Validate that device name is unique"""
-    if any((device.name == name)&(device.room_id == room_id) for device in devices.values()):
+    if any(device.name == name and device.room_id == room_id for device in devices.values()):
         raise HTTPException(
-            status_code=409,
+            status_code=HTTPStatus.CONFLICT,
             detail=get_translation("device_exists", language))
 
 
@@ -296,7 +288,7 @@ def validate_device_exists(device_id: str, config: Config, language: str) -> Non
     """Validate that device with given ID exists"""
     if device_id not in config.devices:
         raise HTTPException(
-            status_code=404,
+            status_code=HTTPStatus.NOT_FOUND,
             detail=get_translation("no_device_id", language))
 
 
@@ -305,23 +297,23 @@ def validate_device_name(name: str, language: str) -> None:
 
     if not re.fullmatch(r'^[а-яА-ЯёЁ0-9]+( [а-яА-ЯёЁ0-9]+)*$', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_invalid_chars", language))
 
 
     if re.search(r'[а-яА-ЯёЁ][0-9]|[0-9][а-яА-ЯёЁ]', name):
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_missing_spaces", language))
 
     if len(name) > 25:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_too_long", language))
 
     if len(re.sub(r'[^а-яА-ЯёЁ]', '', name)) < 2:
         raise HTTPException(
-            status_code=422,
+            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
             detail=get_translation("device_name_too_few_letters", language))
 
 
@@ -329,7 +321,7 @@ def validate_device_not_empty(device_data: Device, language: str) -> None:
     """Validate that device has at least one capability or property"""
     if not device_data.capabilities and not device_data.properties:
         raise HTTPException(
-            status_code=400,
+            status_code=HTTPStatus.BAD_REQUEST,
             detail=get_translation("empty_device", language))
 
 
@@ -338,7 +330,7 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
     for capability in capabilities:
         if capability.mqtt == "":
             raise HTTPException(
-                status_code=422,
+                status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
                 detail=get_translation("empty_mqtt", language))
         
         if capability.type == "devices.capabilities.on_off":
@@ -352,7 +344,7 @@ def validate_properties(properties: list[Property], language: str) -> None:
     for property in properties:
         if property.mqtt == "":
             raise HTTPException(
-                status_code=422,
+                status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
                 detail=get_translation("empty_mqtt", language))
 
 
@@ -367,7 +359,7 @@ async def language_middleware(request: Request, call_next):
 
 # API Endpoints
 
-@app.get("/integrations/alice", response_model=Config, status_code=200)
+@app.get("/integrations/alice", response_model=Config, status_code=HTTPStatus.OK)
 async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
     
@@ -394,14 +386,14 @@ async def get_all_rooms_and_devices():
     return config
 
 
-@app.get("/integrations/alice/available", status_code=200)
+@app.get("/integrations/alice/available", status_code=HTTPStatus.OK)
 async def get_status():
     """Get status Alice intagrations"""
     
     return True
     
 
-@app.post("/integrations/alice/room", status_code=201)
+@app.post("/integrations/alice/room", status_code=HTTPStatus.CREATED)
 async def create_room(request: Request, room_data: Room):
     """Create new room"""
 
@@ -420,7 +412,7 @@ async def create_room(request: Request, room_data: Room):
     return response
 
 
-@app.put("/integrations/alice/room/{room_id}", status_code=200)
+@app.put("/integrations/alice/room/{room_id}", status_code=HTTPStatus.OK)
 async def update_room(request: Request, room_id: str, room_data: Room):
     """Update room"""
 
@@ -443,7 +435,7 @@ async def update_room(request: Request, room_id: str, room_data: Room):
     return response
 
 
-@app.delete("/integrations/alice/room/{room_id}", status_code=200)
+@app.delete("/integrations/alice/room/{room_id}", status_code=HTTPStatus.OK)
 async def delete_room(request: Request, room_id: str):
     """Delete room"""
 
@@ -452,7 +444,7 @@ async def delete_room(request: Request, room_id: str):
     # Don't allow deleting "without_rooms" special room
     if room_id == "without_rooms":
         raise HTTPException(
-            status_code=409,
+            status_code=HTTPStatus.CONFLICT,
             detail=get_translation("special_room", language))
 
     # Validate room exists
@@ -469,7 +461,7 @@ async def delete_room(request: Request, room_id: str):
     return {"message": get_translation("room_deleted", language)}
 
 
-@app.post("/integrations/alice/device", status_code=201)
+@app.post("/integrations/alice/device", status_code=HTTPStatus.CREATED)
 async def create_device(request: Request, device_data: Device):
     """Create new device"""
 
@@ -482,7 +474,8 @@ async def create_device(request: Request, device_data: Device):
         device_data.name,
         device_data.room_id,
         config.devices,
-        language)
+        language,
+    )
     # Check if the device has a capability or property
     validate_device_not_empty(device_data, language)
     # Validate and prepare capabilities
@@ -499,7 +492,7 @@ async def create_device(request: Request, device_data: Device):
     return response
 
 
-@app.put("/integrations/alice/device/{device_id}", status_code=200)
+@app.put("/integrations/alice/device/{device_id}", status_code=HTTPStatus.OK)
 async def update_device(request: Request, device_id: str, device_data: Device):
     """Update device"""
 
@@ -526,7 +519,7 @@ async def update_device(request: Request, device_id: str, device_data: Device):
     return response
 
 
-@app.delete("/integrations/alice/device/{device_id}", status_code=200)
+@app.delete("/integrations/alice/device/{device_id}", status_code=HTTPStatus.OK)
 async def delete_device(request: Request, device_id: str):
     """Delete device"""
 
@@ -544,7 +537,7 @@ async def delete_device(request: Request, device_id: str):
     return {"message": get_translation("device_deleted", language)}
 
 
-@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomID, status_code=200)
+@app.put("/integrations/alice/device/{device_id}/room", response_model=RoomID, status_code=HTTPStatus.OK)
 async def change_device_room(request: Request, device_id: str, device_data: RoomID):
     """Changes the room for the device"""
     
