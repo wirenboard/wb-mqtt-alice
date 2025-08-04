@@ -6,11 +6,14 @@ set -e
 
 CONFFILE_CLIENT='/etc/wb-alice-client.conf'
 CONFFILE_DEVICES='/etc/wb-alice-devices.conf'
+CONFFILE_NGINX='/etc/wb-mqtt-alice-nginx.conf'
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
 SITE_CONFIG="/etc/nginx/sites-available/${SITE_NAME}"
 ENABLED_SITE="/etc/nginx/sites-enabled/${SITE_NAME}"
+NGINX_INCLUDES_DIR="/usr/share/wb-mqtt-homeui/nginx/includes"
+NGINX_CONF_FILE="${NGINX_INCLUDES_DIR}/${CONFFILE_NGINX}"
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
@@ -39,6 +42,13 @@ cleanup_nginx_site() {
     if [[ -f "${SITE_CONFIG}" ]]; then
         rm -f "${SITE_CONFIG}"
         log_info "Removed nginx site config: ${SITE_CONFIG}"
+        CHANGES_MADE='true'
+    fi
+
+    # Remove nginx include config
+    if [[ -f "${NGINX_CONF_FILE}" ]]; then
+        rm -f "${NGINX_CONF_FILE}"
+        log_info "Removed nginx include config: ${NGINX_CONF_FILE}"
         CHANGES_MADE='true'
     fi
 }
