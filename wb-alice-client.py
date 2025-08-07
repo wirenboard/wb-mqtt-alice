@@ -601,19 +601,13 @@ def read_config() -> Optional[Dict[str, Any]]:
         return None
 
 
-async def connect_controller(sock: socketio.AsyncClient) -> None:
+async def connect_controller(
+    sock: socketio.AsyncClient, config: Dict[str, Any]
+) -> None:
+    """
+    Connect to SocketIO server using provided configuration
+    """
     global ctx
-
-    config = read_config()
-    if not config:
-        logger.error("Cannot proceed without configuration")
-        return
-
-    if not config.get("client_enabled", False):
-        logger.error(
-            "Controller is not registered. Please register the controller first"
-        )
-        return
 
     ctx.controller_sn = get_controller_sn()
     if not ctx.controller_sn:
@@ -678,6 +672,20 @@ async def main() -> None:
     ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
     ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
 
+    config = read_config()
+    if not config:
+        logger.error("Cannot proceed without configuration")
+        return
+
+    if not config.get("client_enabled", False):
+        logger.info(
+            "Client is disabled in configuration. Waiting for shutdown signal..."
+        )
+        logger.info("To enable Alice integration, set 'client_enabled': true in config")
+        # Just wait for shutdown signal without doing anything
+        await ctx.stop_event.wait()
+        return
+
     try:
         ctx.registry = DeviceRegistry(
             "/etc/wb-alice-devices.conf",
@@ -714,7 +722,7 @@ async def main() -> None:
     bind_socketio_handlers(ctx.sio)
 
     logger.info("Connecting Socket.IO client...")
-    await connect_controller(ctx.sio)
+    await connect_controller(ctx.sio, config)
     sio_task = asyncio.create_task(ctx.sio.wait())
 
     # Wait for shutdown signal
