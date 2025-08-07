@@ -18,7 +18,7 @@ import logging
 import os
 import signal
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import paho.mqtt.client as mqtt_client
 import socketio
@@ -67,7 +67,7 @@ class AppContext:
 ctx = AppContext()
 
 
-def _emit_async(event: str, data: dict) -> None:
+def _emit_async(event: str, data: Dict[str, Any]) -> None:
     """
     Safely schedules a Socket.IO event to be emitted
     from any thread (async or not).
@@ -225,7 +225,7 @@ def _build_state_block(
     value: Any,
     *,
     is_property: bool,
-) -> dict:
+) -> Dict[str, Any]:
     """
     Builds either a capability **or** a property state block depending
     on *is_property* flag
@@ -306,7 +306,9 @@ def send_to_yandex_state(
 # ---------------------------------------------------------------------
 
 
-def mqtt_on_connect(client, userdata, flags, rc):
+def mqtt_on_connect(
+    client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int
+) -> None:
     if rc != 0:
         logger.error(f"[MQTT] Connection failed with code: {rc}")
         return
@@ -322,11 +324,13 @@ def mqtt_on_connect(client, userdata, flags, rc):
         logger.info(f"[MQTT] Subscribed to {t}")
 
 
-def mqtt_on_disconnect(client, userdata, rc):
+def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
     logger.warning("[MQTT] Disconnected with code %s", rc)
 
 
-def mqtt_on_message(client, userdata, message):
+def mqtt_on_message(
+    client: mqtt_client.Client, userdata: Any, message: mqtt_client.MQTTMessage
+) -> None:
     if ctx.registry is None:
         logger.debug("[MQTT] Registry not available, ignoring message")
         return
@@ -367,7 +371,7 @@ ctx.mqtt_client.on_message = mqtt_on_message
 # ---------------------------------------------------------------------
 
 
-async def connect():
+async def connect() -> None:
     global ctx
     logger.info("[SUCCESS] Connected to Socket.IO server!")
     await ctx.sio.emit(
@@ -375,7 +379,7 @@ async def connect():
     )
 
 
-async def disconnect():
+async def disconnect() -> None:
     """
     Triggered when SocketIO connection with server is lost
 
@@ -385,29 +389,29 @@ async def disconnect():
     logger.warning("[DISCONNECT] Lost connection")
 
 
-async def response(data):
+async def response(data: Any) -> None:
     logger.info(f"[INCOME] Server response: {data}")
 
 
-async def error(data):
+async def error(data: Any) -> None:
     logger.info(f"[SOCKETIO] Server error: {data}")
 
 
-async def connect_error(data: dict[str, Any]) -> None:
+async def connect_error(data: Dict[str, Any]) -> None:
     """
     Called when initial connection to server fails
     """
     logger.warning("[SOCKET.IO] Connection refused by server: %s", data)
 
 
-async def any_unprocessed_event(event, sid, data):
+async def any_unprocessed_event(event: str, sid: str, data: Any) -> None:
     """
     Fallback handler for Socket.IO events that don't have specific handlers
     """
     logger.info(f"[Socket.IO/ANY] Not handled event {event}")
 
 
-async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
+async def on_alice_devices_list(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handles a device discovery request from the server
     Returns a list of devices defined in the controller config
@@ -420,11 +424,11 @@ async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
         logger.error("[SOCKET.IO] Registry not available for device list")
         return {"request_id": req_id, "payload": {"devices": []}}
 
-    devices_list: list[dict[str, Any]] = ctx.registry.build_yandex_devices_list()
+    devices_list: List[Dict[str, Any]] = ctx.registry.build_yandex_devices_list()
     if not devices_list:
         logger.warning("[SOCKET.IO] No devices found in configuration")
 
-    devices_response: dict[str, Any] = {
+    devices_response: Dict[str, Any] = {
         "request_id": req_id,
         "payload": {
             # "user_id" will be added on the server proxy side
@@ -437,7 +441,7 @@ async def on_alice_devices_list(data: dict[str, Any]) -> dict[str, Any]:
     return devices_response
 
 
-async def on_alice_devices_query(data):
+async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handles a Yandex request to retrieve the current state of devices.
     """
@@ -445,7 +449,7 @@ async def on_alice_devices_query(data):
     logger.info(json.dumps(data, ensure_ascii=False, indent=2))
 
     request_id = data.get("request_id", "unknown")
-    devices_response = []
+    devices_response: List[Dict[str, Any]] = []
 
     for dev in data.get("devices", []):
         device_id = dev.get("id")
@@ -464,7 +468,7 @@ async def on_alice_devices_query(data):
     return query_response
 
 
-def handle_single_device_action(device: dict[str, Any]) -> dict[str, Any]:
+def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
     """
     Processes all capabilities for a single device and returns the result block,
     formatted according to Yandex Smart Home action response spec.
@@ -474,7 +478,7 @@ def handle_single_device_action(device: dict[str, Any]) -> dict[str, Any]:
         logger.warning("[SOCKET.IO] Device block missing 'id': %s", device)
         return {}
 
-    cap_results: list[dict[str, Any]] = []
+    cap_results: List[Dict[str, Any]] = []
     for cap in device.get("capabilities", []):
         cap_type: str = cap.get("type")
         instance: str = cap.get("state", {}).get("instance")
@@ -508,7 +512,7 @@ def handle_single_device_action(device: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
+async def on_alice_devices_action(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handles a device action request from Yandex (e.g., turn on/off)
     Applies the command to the device and returns the result
@@ -519,15 +523,15 @@ async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
     logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
 
     request_id: str = data.get("request_id", "unknown")
-    devices_in: list[dict[str, Any]] = data.get("payload", {}).get("devices", [])
-    devices_info: list[dict[str, Any]] = []
+    devices_in: List[Dict[str, Any]] = data.get("payload", {}).get("devices", [])
+    devices_info: List[Dict[str, Any]] = []
 
     for device in devices_in:
         result = handle_single_device_action(device)
         if result:
             devices_info.append(result)
 
-    action_response: dict[str, Any] = {
+    action_response: Dict[str, Any] = {
         "request_id": request_id,
         "payload": {"devices": devices_info},
     }
@@ -537,7 +541,7 @@ async def on_alice_devices_action(data: dict[str, Any]) -> dict[str, Any]:
     return action_response
 
 
-def bind_socketio_handlers(sock: socketio.AsyncClient):
+def bind_socketio_handlers(sock: socketio.AsyncClient) -> None:
     """
     Bind event handlers to the SocketIO client
 
@@ -560,7 +564,7 @@ def bind_socketio_handlers(sock: socketio.AsyncClient):
 # ---------------------------------------------------------------------
 
 
-def get_controller_sn():
+def get_controller_sn() -> Optional[str]:
     """
     Get controller ID from the configuration file
     """
@@ -577,7 +581,7 @@ def get_controller_sn():
         return None
 
 
-def read_config():
+def read_config() -> Optional[Dict[str, Any]]:
     """
     Read configuration from file which is generated by WEBUI
     """
@@ -597,7 +601,7 @@ def read_config():
         return None
 
 
-async def connect_controller(sock: socketio.AsyncClient):
+async def connect_controller(sock: socketio.AsyncClient) -> None:
     global ctx
 
     config = read_config()

@@ -9,7 +9,7 @@ Handles device configuration, MQTT-Yandex routing
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import paho.mqtt.subscribe as subscribe
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 async def read_topic_once(
     topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0
-):
+) -> Optional[Any]:
     """
     Reads a single retained MQTT message in a separate thread
     Returns paho.mqtt.client.MQTTMessage or None on timeout
@@ -94,10 +94,10 @@ class DeviceRegistry:
         self._send_to_yandex = send_to_yandex
         self._publish_to_mqtt = publish_to_mqtt
 
-        self.devices: dict[str, dict] = {}  # id → full json block
-        self.topic2info: dict[str, Tuple[str, str, int]] = {}
-        self.cap_index: dict[Tuple[str, str, Optional[str]], str] = {}
-        self.rooms: dict[str, dict] = {}  # room_id → block
+        self.devices: Dict[str, Dict[str, Any]] = {}  # id → full json block
+        self.topic2info: Dict[str, Tuple[str, str, int]] = {}
+        self.cap_index: Dict[Tuple[str, str, Optional[str]], str] = {}
+        self.rooms: Dict[str, Dict[str, Any]] = {}  # room_id → block
 
         self._load_config(cfg_path)
 
@@ -160,7 +160,7 @@ class DeviceRegistry:
             f"mqtt topics: {len(self.topic2info)}"
         )
 
-    def build_yandex_devices_list(self) -> list[dict]:
+    def build_yandex_devices_list(self) -> List[Dict[str, Any]]:
         """
         Build devices list in Yandex Smart Home discovery format
         Answer on discovery endpoint: /user/devices
@@ -179,7 +179,7 @@ class DeviceRegistry:
             "battery_level": "unit.percent",
         }
 
-        devices_out: list[dict] = []
+        devices_out: List[Dict[str, Any]] = []
 
         for dev_id, dev in self.devices.items():
             room_name = ""
@@ -187,7 +187,7 @@ class DeviceRegistry:
             if room_id and room_id in self.rooms:
                 room_name = self.rooms[room_id].get("name", "")
 
-            device: dict[str, Any] = {
+            device: Dict[str, Any] = {
                 "id": dev_id,
                 "name": dev.get("name", dev_id),
                 "status_info": dev.get("status_info", {"reportable": False}),
@@ -197,7 +197,7 @@ class DeviceRegistry:
             }
 
             # ---- capabilities ----
-            caps = []
+            caps: List[Dict[str, Any]] = []
             for cap in dev.get("capabilities", []):
                 caps.append(
                     {
@@ -209,7 +209,7 @@ class DeviceRegistry:
                 device["capabilities"] = caps
 
             # ---- properties ----
-            props = []
+            props: List[Dict[str, Any]] = []
             for prop in dev.get("properties", []):
                 prop_obj = {
                     "type": prop["type"],
@@ -279,7 +279,9 @@ class DeviceRegistry:
         self._publish_to_mqtt(cmd_topic, payload)
         logger.debug(f"[REG] Published '{payload}' → {cmd_topic}")
 
-    async def _read_capability_state(self, device_id: str, cap: dict) -> Optional[dict]:
+    async def _read_capability_state(
+        self, device_id: str, cap: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
         key = (device_id, cap_type, instance)
@@ -306,7 +308,9 @@ class DeviceRegistry:
             logger.debug(f"[REG] Failed to read capability topic '{topic}': {e}")
             return None
 
-    async def _read_property_state(self, device_id: str, prop: dict) -> Optional[dict]:
+    async def _read_property_state(
+        self, device_id: str, prop: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
         key = (device_id, prop_type, instance)
@@ -334,7 +338,7 @@ class DeviceRegistry:
             logger.warning(f"[REG] Failed to read property topic '{topic}': {e}")
             return None
 
-    async def get_device_current_state(self, device_id: str) -> dict:
+    async def get_device_current_state(self, device_id: str) -> Dict[str, Any]:
         device = self.devices.get(device_id)
         if not device:
             logger.warning(
@@ -342,8 +346,8 @@ class DeviceRegistry:
             )
             return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
 
-        capabilities_output: list[dict] = []
-        properties_output: list[dict] = []
+        capabilities_output: List[Dict[str, Any]] = []
+        properties_output: List[Dict[str, Any]] = []
 
         for cap in device.get("capabilities", []):
             logger.debug(f"[SOCKET.IO] Reading capability state: '%s'", cap)
@@ -370,7 +374,7 @@ class DeviceRegistry:
             }
 
         # If at least something was read - return it
-        device_output = {"id": device_id}
+        device_output: Dict[str, Any] = {"id": device_id}
         if capabilities_output:
             device_output["capabilities"] = capabilities_output
         if properties_output:
