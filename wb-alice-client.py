@@ -20,7 +20,7 @@ import signal
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
-import paho.mqtt.client as mqtt
+import paho.mqtt.client as mqtt_client
 import paho.mqtt.subscribe as subscribe
 import socketio
 
@@ -62,7 +62,7 @@ class AppContext:
         """
 
         self.registry: Optional[DeviceRegistry] = None
-        self.mqtt_client: Optional[mqtt.Client] = None
+        self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
 
 
@@ -688,7 +688,7 @@ def generate_client_id(prefix: str = "wb-alice-client") -> str:
     return f"{prefix}-{suffix}"
 
 
-ctx.mqtt_client = mqtt.Client(client_id=generate_client_id())
+ctx.mqtt_client = mqtt_client.Client(client_id=generate_client_id())
 ctx.mqtt_client.on_connect = mqtt_on_connect
 ctx.mqtt_client.on_disconnect = mqtt_on_disconnect
 ctx.mqtt_client.on_message = mqtt_on_message
@@ -726,7 +726,7 @@ async def read_mqtt_state(
         return False
 
 
-def write_mqtt_state(mqtt_client: mqtt.Client, topic: str, is_on: bool) -> None:
+def write_mqtt_state(mqtt_client: mqtt_client.Client, topic: str, is_on: bool) -> None:
     """
     Publishes "1" (True) or "0" (False) to the given topic
     """
