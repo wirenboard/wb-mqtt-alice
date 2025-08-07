@@ -69,6 +69,8 @@ main() {
         log_info "Removed devices config: ${CONFFILE_DEVICES}"
     fi
 
+    # Note: we NOT remove SSL directive "ssl_engine ateccx08;" from nginx.conf
+    # We can't guarantee they were added by us or not used elsewhere
     cleanup_nginx_site
     
     # Only reload nginx if any changes were made

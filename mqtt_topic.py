@@ -70,12 +70,13 @@ class MQTTTopic:
             # Short format "device/control"
             try:
                 device, control = topic_str.split("/", 1)
-                self._device = device
-                self._control = control
-                self._is_valid = True
             except ValueError:
                 # Invalid format
                 self._is_valid = False
+                return
+            self._device = device
+            self._control = control
+            self._is_valid = True
         else:
             # Full format "/devices/device/controls/control"
             parts = topic_str.strip("/").split("/")
@@ -83,6 +84,8 @@ class MQTTTopic:
                 self._device = parts[1]
                 self._control = parts[3]
                 self._is_valid = True
+            else:
+                self._is_valid = False
 
     @property
     def original(self):
