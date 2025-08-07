@@ -141,7 +141,10 @@ def send_state_to_server(
         },
     }
     try:
-        _emit_async("device_state", payload)
+        if _emit_callback:
+            _emit_callback("device_state", payload)
+        else:
+            logger.warning("[YANDEX] Emit callback not set, dropping event")
     except Exception:
         logging.exception("Error when processing MQTT message")
 
