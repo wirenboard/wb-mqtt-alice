@@ -6,6 +6,7 @@ wb-alice-setting.conf /etc/
 wb-alice-client.py /usr/lib/wb-mqtt-alice/
 mqtt_topic.py /usr/lib/wb-mqtt-alice/
 device-registry.py /usr/lib/wb-mqtt-alice/
+yandex_handlers.py /usr/lib/wb-mqtt-alice/
 wb-alice-config.py /usr/lib/wb-mqtt-alice/
 models.py /usr/lib/wb-mqtt-alice/
 fetch_url.py /usr/lib/wb-mqtt-alice/
