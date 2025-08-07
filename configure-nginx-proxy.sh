@@ -164,7 +164,7 @@ setup_i2c_permissions() {
     if [ "${is_user_in_group}" = 'false' ]; then
         usermod -a -G hardware-crypto www-data
         log_info "Added user www-data to hardware-crypto group"
-        log_warn "nginx restart may be required for group changes to take effect"
+        log_warn "nginx restart required for user group changes to take effect"
         CHANGES_MADE='true'
     else
         log_info "User www-data is already in hardware-crypto group"
@@ -177,9 +177,7 @@ setup_i2c_permissions() {
         return 0
     else
         log_warn "Failed to verify I2C access for www-data"
-        log_warn "nginx restart may be required for group changes to take effect"
-        # Not a critical error - group membership may require service restart
-        return 0
+        return 1
     fi
 }
 
@@ -245,7 +243,8 @@ get_key_id() {
 #   None
 #
 # Returns:
-#   0 - Always returns success
+#   0 - Success
+#   1 - Error occurred
 create_site_config() {
     log_info "Creating site configuration..."
 
@@ -259,22 +258,19 @@ create_site_config() {
         return 1
     fi
 
+    # Verify certificate exists
+    local cert_path="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
+    if [[ ! -f "$cert_path" ]]; then
+        log_error "Certificate not found: $cert_path" >&2
+        return 1
+    fi
+
     local server_host=$(echo "${server_address}" | cut -d':' -f1)
     local server_url="https://${server_address}"
 
-    # Check - maybe congig changed
-    if [[ -f "${SITE_CONFIG}" ]]; then
-        local current_server=$(grep 'proxy_pass https://' "${SITE_CONFIG}" 2>/dev/null | cut -d'/' -f3 | cut -d';' -f1 || echo "")
-        if [[ "${current_server}" == "${server_address}" ]]; then
-            log_info "Site configuration is up to date"
-            return 0
-        else
-            log_info "Server address changed, updating configuration..."
-            rm "${SITE_CONFIG}"
-        fi
-    fi
-    
-    cat > "${SITE_CONFIG}" <<EOF
+    # Prepare full config content
+    local site_config_content
+    site_config_content=$(cat <<EOF
 server {
     listen 8042;
     server_name localhost;
@@ -285,7 +281,7 @@ server {
         # Required settings - basic proxy configuration
         proxy_pass ${server_url};
         proxy_ssl_name ${server_host};
-        proxy_ssl_certificate /var/lib/${PACKET_NAME}/device_bundle.crt.pem;
+        proxy_ssl_certificate ${cert_path};
         proxy_ssl_certificate_key engine:ateccx08:${key_id};
         proxy_ssl_server_name on;
 
@@ -302,9 +298,35 @@ server {
     }
 }
 EOF
+)
 
-    CHANGES_MADE='true'
-    log_info "Site configuration created: ${SITE_CONFIG}"
+    # If config file does not exist — create it and exit
+    if [[ ! -f "${SITE_CONFIG}" ]]; then
+        echo "${site_config_content}" > "${SITE_CONFIG}"
+        log_info "New site configuration created: ${SITE_CONFIG}"
+        CHANGES_MADE='true'
+        return 0
+    fi
+
+    local tmp_config
+    if ! tmp_config=$(mktemp); then
+        log_error "Failed to create temporary file" >&2
+        return 1
+    fi
+    echo "${site_config_content}" > "${tmp_config}"
+
+    # Compare existing config with generated one
+    # Check - maybe config content (server ip) or syntax changed
+    local is_config_different=$(diff -q "${SITE_CONFIG}" "${tmp_config}" >/dev/null && echo 'false' || echo 'true')
+    if [[ "${is_config_different}" == 'true' ]]; then
+        mv "${tmp_config}" "${SITE_CONFIG}"
+        log_info "Existing site configuration updated: ${SITE_CONFIG}"
+        CHANGES_MADE='true'
+        return 0
+    fi
+    rm -f "${tmp_config}"
+
+    log_info "Site configuration is up to date — do nothing"
 }
 
 # Enable nginx site by creates symbolic link from sites-available
