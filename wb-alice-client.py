@@ -16,7 +16,9 @@ import contextlib
 import json
 import logging
 import os
+import random
 import signal
+import string
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -354,9 +356,6 @@ def generate_client_id(prefix: str = "wb-alice-client") -> str:
     """
     Generate unique MQTT client ID with random suffix
     """
-    import random
-    import string
-
     suffix = "".join(random.choices(string.ascii_letters + string.digits, k=8))
     return f"{prefix}-{suffix}"
 
