@@ -605,7 +605,7 @@ async def connect_controller(sock: socketio.AsyncClient):
         logger.error("Cannot proceed without configuration")
         return
 
-    if not config.get("is_registered", False):
+    if not config.get("client_enabled", False):
         logger.error(
             "Controller is not registered. Please register the controller first"
         )
