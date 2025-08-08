@@ -24,8 +24,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import paho.mqtt.client as mqtt_client
 import socketio
-from device_registry import DeviceRegistry
 
+from device_registry import DeviceRegistry
 from yandex_handlers import send_to_yandex_state, set_emit_callback
 
 logging.basicConfig(level=logging.DEBUG, force=True)
@@ -138,7 +138,6 @@ def publish_to_mqtt(topic: str, payload: str) -> None:
     """
     Helper for publishing from registry
     """
-    global ctx
     if ctx.mqtt_client is None:
         logger.error("[MQTT] Client not initialized")
         return
@@ -220,7 +219,6 @@ ctx.mqtt_client.on_message = mqtt_on_message
 
 
 async def connect() -> None:
-    global ctx
     logger.info("[SUCCESS] Connected to Socket.IO server!")
     await ctx.sio.emit(
         "message", {"controller_sn": ctx.controller_sn, "status": "online"}
@@ -455,8 +453,6 @@ async def connect_controller(
     """
     Connect to SocketIO server using provided configuration
     """
-    global ctx
-
     ctx.controller_sn = get_controller_sn()
     if not ctx.controller_sn:
         logger.error("Cannot proceed without controller ID")
@@ -513,7 +509,6 @@ def _log_and_stop(sig: signal.Signals) -> None:
 
 
 async def main() -> None:
-    global ctx
     ctx.main_loop = asyncio.get_running_loop()
 
     ctx.stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
