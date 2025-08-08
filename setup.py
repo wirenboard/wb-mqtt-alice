@@ -5,7 +5,7 @@ from setuptools import setup
 
 def get_version():
     with open("debian/changelog", "r", encoding="utf-8") as f:
-        return f.readline().split()[1][1:-1]
+        return f.readline().split()[1][1:-1].split("~")[0]
 
 
 setup(
@@ -17,7 +17,7 @@ setup(
     author_email="vitalii.gaponov@wirenboard.com",
     maintainer="Wiren Board Team",
     maintainer_email="info@wirenboard.com",
-    url="https://github.com/wirenboard/wb-alice-client",
+    url="https://github.com/wirenboard/wb-mqtt-alice",
     # Files installed by debian/install file
     # Requirements installed from debian/control file
 )
