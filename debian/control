@@ -8,8 +8,8 @@ Build-Depends: debhelper (>= 11.0.0),
                python3-setuptools
 Standards-Version: 4.5.1
 X-Python3-Version: >= 3.5
-Homepage: https://github.com/wirenboard/wb-alice-client
-Vcs-Git: https://github.com/wirenboard/wb-alice-client
+Homepage: https://github.com/wirenboard/wb-mqtt-alice
+Vcs-Git: https://github.com/wirenboard/wb-mqtt-alice
 Rules-Requires-Root: no
 
 Package: wb-mqtt-alice

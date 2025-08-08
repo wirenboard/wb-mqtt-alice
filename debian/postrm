@@ -51,8 +51,8 @@ reload_nginx() {
         return 1
     fi
 
-    if systemctl is-active nginx >/dev/null 2>&1; then
-        systemctl reload nginx
+    if deb-systemd-invoke is-active nginx >/dev/null 2>&1; then
+        deb-systemd-invoke reload nginx
         log_info "nginx reloaded"
     else
         log_info "nginx not running, skipping reload"
@@ -85,3 +85,5 @@ main() {
 }
 
 main "${@}"
+
+#DEBHELPER#
