@@ -100,7 +100,6 @@ class DeviceRegistry:
 
         self._load_config(cfg_path)
 
-    # ---------- config loader ----------
     def _load_config(self, path: str) -> None:
         """
         Read device configuration file and populate internal structures
