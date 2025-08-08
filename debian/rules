@@ -10,7 +10,7 @@ override_dh_builddeb:
 # File installation will be done only via debian/install
 override_dh_auto_install:
 	dh_auto_install
-	dh_install --fail-missing
+	dh_missing --fail-missing
 
 override_dh_installsystemd:
 	dh_installsystemd --name=wb-mqtt-alice-client
