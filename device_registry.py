@@ -9,6 +9,7 @@ Handles device configuration, MQTT-Yandex routing
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import paho.mqtt.subscribe as subscribe
@@ -26,7 +27,7 @@ async def read_topic_once(
     Returns paho.mqtt.client.MQTTMessage or None on timeout
     """
     logger.debug(
-        "[read_topic_once] wait %s message on '%s' (retain=%s, %.1fs)",
+        "Read topic wait %s message on '%s' (retain=%s, %.1fs)",
         "retained" if retain else "live",
         topic,
         retain,
@@ -43,7 +44,7 @@ async def read_topic_once(
         logger.debug("Current topic '%s' state: '%s'", topic, res)
         return res
     except asyncio.TimeoutError:
-        logger.warning("[read_topic_once] timeout waiting '%s'", topic)
+        logger.warning("Read topic timeout waiting '%s'", topic)
         return None
 
 
@@ -54,15 +55,15 @@ async def read_mqtt_state(
     Reads the value of a topic (0/1, "false"/"true", etc.) and returns a Python bool
     Uses subscribe.simple(...) from paho.mqtt, which BLOCKS for the duration of reading
     """
-    logger.debug("[read_mqtt_state] trying to read topic: %s", topic)
+    logger.debug("Read MQTT state trying to read topic: %s", topic)
 
     try:
         msg = await read_topic_once(topic, timeout=timeout)
         if msg is None:
-            logger.debug("[REG] No retained payload in '%s'", topic)
+            logger.debug("Not find retained payload in '%s'", topic)
             return None
     except Exception as e:
-        logger.warning("[REG] Failed to read topic '%s': %s", topic, e)
+        logger.warning("Failed to read topic '%s': %s", topic, e)
         return None
 
     payload_str = msg.payload.decode().strip().lower()
@@ -73,9 +74,7 @@ async def read_mqtt_state(
     elif payload_str in {"0", "false", "off"}:
         return False
     else:
-        logger.warning(
-            "[WARN] Unexpected payload in topic '%s': %s", topic, payload_str
-        )
+        logger.warning("Unexpected payload in topic '%s': %s", topic, payload_str)
         return False
 
 
@@ -110,22 +109,22 @@ class DeviceRegistry:
         - self.cap_index: 'capabilities' / 'properties'(device_id, type, instance) → full_topic
         """
 
-        logger.info(f"[REG] Try read config file '{path}'")
+        logger.info(f"Try read config file '{path}'")
         try:
-            with open(path, "r") as f:
-                config_data = json.load(f)
-                logger.info(
-                    f"[REG] Config loaded: '{json.dumps(config_data, indent=2, ensure_ascii=False)}'"
-                )
+            config_data = Path(path).read_text(encoding="utf-8")
+            config_data = json.loads(config_data)
+            logger.info(
+                f"Config loaded: '{json.dumps(config_data, indent=2, ensure_ascii=False)}'"
+            )
         except FileNotFoundError:
-            logger.error(f"[REG] Config file not found: {path}")
+            logger.error(f"Config file not found: {path}")
             self.devices = {}
             self.topic2info = {}
             self.cap_index = {}
             self.rooms = {}
             return
         except json.JSONDecodeError as e:
-            logger.error(f"[REG] Invalid JSON in config: {e}")
+            logger.error(f"Invalid JSON in config: {e}")
             raise  # Critical error - cannot continue
 
         self.rooms = config_data.get("rooms", {})
@@ -147,16 +146,15 @@ class DeviceRegistry:
                 mqtt_topic = MQTTTopic(prop["mqtt"])
                 full = mqtt_topic.full
                 self.topic2info[full] = (device_id, "properties", i)
-                self.cap_index[
-                    (
-                        device_id,
-                        prop["type"],
-                        prop.get("parameters", {}).get("instance"),
-                    )
-                ] = full
+                index_key = (
+                    device_id,
+                    prop["type"],
+                    prop.get("parameters", {}).get("instance"),
+                )
+                self.cap_index[index_key] = full
 
         logger.info(
-            f"[REG] Devices loaded: {len(self.devices)}, "
+            f"Devices loaded: {len(self.devices)}, "
             f"mqtt topics: {len(self.topic2info)}"
         )
 
@@ -196,7 +194,6 @@ class DeviceRegistry:
                 "type": dev["type"],
             }
 
-            # ---- capabilities ----
             caps: List[Dict[str, Any]] = []
             for cap in dev.get("capabilities", []):
                 caps.append(
@@ -208,7 +205,6 @@ class DeviceRegistry:
             if caps:
                 device["capabilities"] = caps
 
-            # ---- properties ----
             props: List[Dict[str, Any]] = []
             for prop in dev.get("properties", []):
                 prop_obj = {
@@ -248,7 +244,7 @@ class DeviceRegistry:
             try:
                 value = float(raw)
             except ValueError:
-                logger.warning(f"[REG] Can't convert '{raw}' to float")
+                logger.warning(f"Can't convert '{raw}' to float")
                 return
         else:
             value = raw
@@ -264,7 +260,7 @@ class DeviceRegistry:
     ) -> None:
         key = (device_id, cap_type, instance)
         if key not in self.cap_index:
-            logger.warning(f"[REG] No mapping for {key}")
+            logger.warning(f"No mapping for {key}")
             return
 
         base = self.cap_index[key]  # already full topic
@@ -277,7 +273,7 @@ class DeviceRegistry:
             payload = str(value)
 
         self._publish_to_mqtt(cmd_topic, payload)
-        logger.debug(f"[REG] Published '{payload}' → {cmd_topic}")
+        logger.debug(f"Published '{payload}' → {cmd_topic}")
 
     async def _read_capability_state(
         self, device_id: str, cap: Dict[str, Any]
@@ -288,7 +284,7 @@ class DeviceRegistry:
 
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug(f"[REG] No MQTT topic found for capability: {key}")
+            logger.debug(f"No MQTT topic found for capability: {key}")
             return None
         try:
             value = await read_mqtt_state(topic, mqtt_host="localhost")
@@ -305,7 +301,7 @@ class DeviceRegistry:
                 },
             }
         except Exception as e:
-            logger.debug(f"[REG] Failed to read capability topic '{topic}': {e}")
+            logger.debug(f"Failed to read capability topic '{topic}': {e}")
             return None
 
     async def _read_property_state(
@@ -317,12 +313,12 @@ class DeviceRegistry:
 
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug(f"[REG] No MQTT topic found for property: {key}")
+            logger.debug(f"No MQTT topic found for property: {key}")
             return None
         try:
             msg = await read_topic_once(topic, timeout=1)
             if msg is None:
-                logger.debug(f"[REG] No retained payload in '{topic}'")
+                logger.debug(f"No retained payload in '{topic}'")
                 return None
             raw = msg.payload.decode().strip()
             value = float(raw)  # Currently only float is supported
@@ -335,28 +331,26 @@ class DeviceRegistry:
                 },
             }
         except Exception as e:
-            logger.warning(f"[REG] Failed to read property topic '{topic}': {e}")
+            logger.warning(f"Failed to read property topic '{topic}': {e}")
             return None
 
     async def get_device_current_state(self, device_id: str) -> Dict[str, Any]:
         device = self.devices.get(device_id)
         if not device:
-            logger.warning(
-                f"[REG] get_device_current_state: unknown device_id '{device_id}'"
-            )
+            logger.warning(f"get_device_current_state: unknown device_id '{device_id}'")
             return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
 
         capabilities_output: List[Dict[str, Any]] = []
         properties_output: List[Dict[str, Any]] = []
 
         for cap in device.get("capabilities", []):
-            logger.debug(f"[SOCKET.IO] Reading capability state: '%s'", cap)
+            logger.debug(f"Reading capability state: '%s'", cap)
             cap_state = await self._read_capability_state(device_id, cap)
             if cap_state:
                 capabilities_output.append(cap_state)
 
         for prop in device.get("properties", []):
-            logger.debug(f"[SOCKET.IO] Reading property state: '%s'", prop)
+            logger.debug(f"Reading property state: '%s'", prop)
             prop_state = await self._read_property_state(device_id, prop)
             if prop_state:
                 properties_output.append(prop_state)
@@ -364,7 +358,7 @@ class DeviceRegistry:
         # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:
             logger.warning(
-                "[REG] %s: no live or retained data — marking DEVICE_UNREACHABLE",
+                "%s: no live or retained data — marking DEVICE_UNREACHABLE",
                 device_id,
             )
             return {

@@ -51,18 +51,12 @@ class AppContext:
         """
         Global asyncio event loop, used to safely schedule coroutines from non-async
         threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
-        """
+          - stop_event - Event that signals the main loop to wake up and initiate shutdown
+          - sio - SocketIO async client instance for handling real-time communication
 
+        """
         self.stop_event: Optional[asyncio.Event] = None
-        """
-        Event that signals the main loop to wake up and initiate shutdown
-        """
-
         self.sio: Optional[socketio.AsyncClient] = None
-        """
-        SocketIO async client instance for handling real-time communication
-        """
-
         self.registry: Optional[DeviceRegistry] = None
         self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
