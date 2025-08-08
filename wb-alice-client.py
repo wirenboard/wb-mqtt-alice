@@ -208,10 +208,16 @@ def generate_client_id(prefix: str = "wb-alice-client") -> str:
     return f"{prefix}-{suffix}"
 
 
-ctx.mqtt_client = mqtt_client.Client(client_id=generate_client_id())
-ctx.mqtt_client.on_connect = mqtt_on_connect
-ctx.mqtt_client.on_disconnect = mqtt_on_disconnect
-ctx.mqtt_client.on_message = mqtt_on_message
+def setup_mqtt_client() -> mqtt_client.Client:
+    """
+    Create and configure MQTT client with event handlers
+    """
+    client = mqtt_client.Client(client_id=generate_client_id())
+    client.on_connect = mqtt_on_connect
+    client.on_disconnect = mqtt_on_disconnect
+    client.on_message = mqtt_on_message
+    return client
+
 
 # ---------------------------------------------------------------------
 # SocketIO callbacks
@@ -542,6 +548,7 @@ async def main() -> None:
         ctx.registry = None
 
     # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
+    ctx.mqtt_client = setup_mqtt_client()
     try:
         ctx.mqtt_client.connect("localhost", 1883, 60)
         ctx.mqtt_client.loop_start()
