@@ -50,10 +50,10 @@ class MQTTTopic:
         Args:
             topic_str (str): The MQTT topic string in either short or full format
         """
-        self._original = topic_str
-        self._device = None
-        self._control = None
-        self._is_valid = False
+        self.original = topic_str
+        self.device = None
+        self.control = None
+        self.is_valid = False
 
         self._parse_topic(topic_str)
 
@@ -72,40 +72,20 @@ class MQTTTopic:
                 device, control = topic_str.split("/", 1)
             except ValueError:
                 # Invalid format
-                self._is_valid = False
+                self.is_valid = False
                 return
-            self._device = device
-            self._control = control
-            self._is_valid = True
+            self.device = device
+            self.control = control
+            self.is_valid = True
         else:
             # Full format "/devices/device/controls/control"
             parts = topic_str.strip("/").split("/")
             if len(parts) >= 4 and parts[0] == "devices" and parts[2] == "controls":
-                self._device = parts[1]
-                self._control = parts[3]
-                self._is_valid = True
+                self.device = parts[1]
+                self.control = parts[3]
+                self.is_valid = True
             else:
-                self._is_valid = False
-
-    @property
-    def original(self):
-        """str: The original topic string provided during initialization"""
-        return self._original
-
-    @property
-    def device(self):
-        """str: The device name extracted from the topic, or None if invalid"""
-        return self._device
-
-    @property
-    def control(self):
-        """str: The control name extracted from the topic, or None if invalid"""
-        return self._control
-
-    @property
-    def is_valid(self):
-        """bool: Whether the topic was successfully parsed into device and control"""
-        return self._is_valid
+                self.is_valid = False
 
     @property
     def short(self):
@@ -113,9 +93,9 @@ class MQTTTopic:
 
         Returns the original string if the topic is invalid
         """
-        if not self._is_valid:
-            return self._original
-        return f"{self._device}/{self._control}"
+        if not self.is_valid:
+            return self.original
+        return f"{self.device}/{self.control}"
 
     @property
     def full(self):
@@ -123,9 +103,9 @@ class MQTTTopic:
 
         Returns the original string if the topic is invalid
         """
-        if not self._is_valid:
-            return self._original
-        return f"/devices/{self._device}/controls/{self._control}"
+        if not self.is_valid:
+            return self.original
+        return f"/devices/{self.device}/controls/{self.control}"
 
     def __str__(self):
         """Return the string representation of the topic
@@ -133,8 +113,8 @@ class MQTTTopic:
         Returns:
             str: The short format if valid, otherwise an error message
         """
-        if not self._is_valid:
-            return f"Invalid MQTT Topic: {self._original}"
+        if not self.is_valid:
+            return f"Invalid MQTT Topic: {self.original}"
         return self.short
 
     def __repr__(self):
@@ -143,6 +123,6 @@ class MQTTTopic:
         Returns:
             str: A string that could be used to recreate this object
         """
-        if not self._is_valid:
-            return f"MQTTTopic('{self._original}') [invalid]"
-        return f"MQTTTopic(device='{self._device}', control='{self._control}')"
+        if not self.is_valid:
+            return f"{self.__class__.__name__}('{self.original}') [invalid]"
+        return f"{self.__class__.__name__}(device='{self.device}', control='{self.control}')"
