@@ -12,6 +12,7 @@ Type=simple
 ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-alice-config.py
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=10
 
 # This service starts automatically upon system startup
 [Install]

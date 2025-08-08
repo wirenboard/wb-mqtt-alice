@@ -9,9 +9,11 @@ After=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=/usr/lib/wb-mqtt-alice/configure-nginx-proxy.sh
 ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-alice-client.py
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=10
 
 # This service starts automatically upon system startup
 [Install]
