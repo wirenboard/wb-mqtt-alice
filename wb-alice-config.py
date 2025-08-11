@@ -257,22 +257,22 @@ def validate_room_name(name: str, language: str) -> None:
 
     if not re.fullmatch(r'^[а-яА-ЯёЁ0-9]+( [а-яА-ЯёЁ0-9]+)*$', name):
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("room_name_invalid_chars", language))
 
     if re.search(r'[а-яА-ЯёЁ][0-9]|[0-9][а-яА-ЯёЁ]', name):
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("room_name_missing_spaces", language))
 
     if len(name) > 20:
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("room_name_too_long", language))
 
     if len(re.sub(r'[^а-яА-ЯёЁ]', '', name)) < 2:
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("room_name_too_few_letters", language))
 
 
@@ -297,23 +297,23 @@ def validate_device_name(name: str, language: str) -> None:
 
     if not re.fullmatch(r'^[а-яА-ЯёЁ0-9]+( [а-яА-ЯёЁ0-9]+)*$', name):
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("device_name_invalid_chars", language))
 
 
     if re.search(r'[а-яА-ЯёЁ][0-9]|[0-9][а-яА-ЯёЁ]', name):
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("device_name_missing_spaces", language))
 
     if len(name) > 25:
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("device_name_too_long", language))
 
     if len(re.sub(r'[^а-яА-ЯёЁ]', '', name)) < 2:
         raise HTTPException(
-            status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
             detail=get_translation("device_name_too_few_letters", language))
 
 
@@ -330,7 +330,7 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
     for capability in capabilities:
         if capability.mqtt == "":
             raise HTTPException(
-                status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 detail=get_translation("empty_mqtt", language))
         
         if capability.type == "devices.capabilities.on_off":
@@ -344,7 +344,7 @@ def validate_properties(properties: list[Property], language: str) -> None:
     for property in properties:
         if property.mqtt == "":
             raise HTTPException(
-                status_code=HTTPStatus.UNPROCESSABLE_CONTENT,
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 detail=get_translation("empty_mqtt", language))
 
 
