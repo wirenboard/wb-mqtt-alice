@@ -42,7 +42,7 @@ except PackageNotFoundError:
 
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
-CONFIG_PATH = "/etc/wb-alice-client.conf"
+CONFIG_PATH = "/etc/wb-mqtt-alice-client.conf"
 
 
 class AppContext:
