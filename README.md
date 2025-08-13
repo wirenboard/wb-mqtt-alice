@@ -20,7 +20,7 @@ $ apt install ./wb-mqtt-alice_0.0.1_all.deb
 Заполнить файл настроек для клиента:
 
 ```terminal
-$ nano /etc/wb-alice-client.conf
+$ nano /etc/wb-mqtt-alice-client.conf
 ```
 
 Данные об адресе сервера (server_address) можно получить у администратора
