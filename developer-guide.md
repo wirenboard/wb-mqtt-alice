@@ -8,7 +8,7 @@
 Любые манипуляции нужно начинать с клонирования репозитория:
 
 ```terminal
-$ git clone git@github.com:wirenboard/wb-alice-client.git
+$ git clone git@github.com:wirenboard/wb-mqtt-alice.git
 ```
 
 
@@ -30,11 +30,11 @@ dpkg-buildpackage -us -uc
 
 ## Ручная установка из исходного кода
 
-1. Скопировать конфигурационный файл по пути `/etc/wb-alice-client.conf`
+1. Скопировать конфигурационный файл по пути `/etc/wb-mqtt-alice-client.conf`
 
    ```terminal
    $ cd /путь/к/репозиторию
-   $ cp wb-alice-client.conf /etc/wb-alice-client.conf
+   $ cp wb-mqtt-alice-client.conf /etc/wb-mqtt-alice-client.conf
    ```
 
 2. Отредактировать файл конфигурации:
