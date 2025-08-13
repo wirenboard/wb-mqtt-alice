@@ -1,4 +1,4 @@
-wb-alice-client.conf /etc/
+wb-mqtt-alice-client.conf /etc/
 wb-mqtt-alice-devices.conf /etc/
 wb-mqtt-alice-devices.conf.example /etc/
 wb-alice-setting.conf /etc/
