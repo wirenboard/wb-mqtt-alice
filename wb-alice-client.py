@@ -519,7 +519,7 @@ async def main() -> None:
 
     try:
         ctx.registry = DeviceRegistry(
-            "/etc/wb-alice-devices.conf",
+            "/etc/wb-mqtt-alice-devices.conf",
             send_to_yandex=send_to_yandex_state,
             publish_to_mqtt=publish_to_mqtt,
         )
