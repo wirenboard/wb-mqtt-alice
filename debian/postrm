@@ -5,7 +5,7 @@
 set -e
 
 CONFFILE_CLIENT='/etc/wb-alice-client.conf'
-CONFFILE_DEVICES='/etc/wb-alice-devices.conf'
+CONFFILE_DEVICES='/etc/wb-mqtt-alice-devices.conf'
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
