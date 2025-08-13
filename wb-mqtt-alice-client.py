@@ -7,7 +7,7 @@ This script provides integration between Wiren Board controllers
 and "Yandex smart home" platform with Alice
 
 Usage:
-    python3 wb-alice-client.py
+    python3 wb-mqtt-alice-client.py
 """
 from __future__ import annotations
 
