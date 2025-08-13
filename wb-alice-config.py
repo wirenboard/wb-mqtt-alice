@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Constants
 SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
 BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
-CONFIG_PATH = Path("/etc/wb-alice-devices.conf")
+CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
 SETTING_PATH = Path("/etc/wb-alice-setting.conf")
 CLIENT_CONFIG_PATH = Path("/etc/wb-alice-client.conf")
 CLIENT_SERVICE_NAME = "wb-alice-client"
