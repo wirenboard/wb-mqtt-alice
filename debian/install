@@ -1,7 +1,7 @@
 wb-mqtt-alice-client.conf /etc/
 wb-mqtt-alice-devices.conf /etc/
 wb-mqtt-alice-devices.conf.example /etc/
-wb-alice-setting.conf /etc/
+wb-mqtt-alice-webui.conf /etc/
 50wb-alice /etc/wb-configs.d/
 wb-alice-client.py /usr/lib/wb-mqtt-alice/
 mqtt_topic.py /usr/lib/wb-mqtt-alice/
