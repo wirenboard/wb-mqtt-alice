@@ -12,7 +12,7 @@ TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
 
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
-CONFIG_FILE='/etc/wb-alice-client.conf'
+CONFIG_FILE='/etc/wb-mqtt-alice-client.conf'
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
