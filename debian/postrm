@@ -5,7 +5,11 @@
 set -e
 
 CONFFILE_CLIENT='/etc/wb-mqtt-alice-client.conf'
+CONFFILE_CLIENT_DEFAULT='/etc/wb-mqtt-alice-client.conf.default'
 CONFFILE_DEVICES='/etc/wb-mqtt-alice-devices.conf'
+CONFFILE_DEVICES_DEFAULT='/etc/wb-mqtt-alice-devices.conf.default'
+CONFFILE_DEVICES_EXAMPLE='/etc/wb-mqtt-alice-devices.conf.example'
+CONFFILE_DEVICES_EXAMPLE_DEFAULT='/etc/wb-mqtt-alice-devices.conf.example.default'
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
@@ -65,8 +69,16 @@ main() {
     if [ "${1}" = "purge" ]; then
         rm -f ${CONFFILE_CLIENT}
         log_info "Removed client config: ${CONFFILE_CLIENT}"
+        rm -f ${CONFFILE_CLIENT_DEFAULT}
+        log_info "Removed client config: ${CONFFILE_CLIENT_DEFAULT}"
         rm -f ${CONFFILE_DEVICES}
         log_info "Removed devices config: ${CONFFILE_DEVICES}"
+        rm -f ${CONFFILE_DEVICES_DEFAULT}
+        log_info "Removed default devices config: ${CONFFILE_DEVICES_DEFAULT}"
+        rm -f ${CONFFILE_DEVICES_EXAMPLE}
+        log_info "Removed example devices config: ${CONFFILE_DEVICES_EXAMPLE}"
+        rm -f ${CONFFILE_DEVICES_EXAMPLE_DEFAULT}
+        log_info "Removed example devices config: ${CONFFILE_DEVICES_EXAMPLE_DEFAULT}"
     fi
 
     # Note: we NOT remove SSL directive "ssl_engine ateccx08;" from nginx.conf
