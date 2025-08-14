@@ -13,8 +13,8 @@ override_dh_auto_install:
 	dh_install --fail-missing
 
 override_dh_installsystemd:
-	dh_installsystemd --name=wb-alice-client
-	dh_installsystemd --name=wb-alice-config
+	dh_installsystemd --name=wb-mqtt-alice-client
+	dh_installsystemd --name=wb-mqtt-alice-config
 
 # Installation will be done only via debian/install
 %:
