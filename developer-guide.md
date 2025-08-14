@@ -30,11 +30,11 @@ dpkg-buildpackage -us -uc
 
 ## Ручная установка из исходного кода
 
-1. Скопировать конфигурационный файл по пути `/etc/wb-mqtt-alice-client.conf`
+1. Скопировать конфигурационный файл по пути `/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf`
 
    ```terminal
    $ cd /путь/к/репозиторию
-   $ cp wb-mqtt-alice-client.conf /etc/wb-mqtt-alice-client.conf
+   $ cp wb-mqtt-alice-client.conf /usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf
    ```
 
 2. Отредактировать файл конфигурации:
