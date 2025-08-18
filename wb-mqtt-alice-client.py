@@ -7,7 +7,7 @@ This script provides integration between Wiren Board controllers
 and "Yandex smart home" platform with Alice
 
 Usage:
-    python3 wb-alice-client.py
+    python3 wb-mqtt-alice-client.py
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ except PackageNotFoundError:
 
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
-CONFIG_PATH = "/etc/wb-alice-client.conf"
+CONFIG_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
 
 
 class AppContext:
@@ -519,7 +519,7 @@ async def main() -> None:
 
     try:
         ctx.registry = DeviceRegistry(
-            "/etc/wb-alice-devices.conf",
+            "/etc/wb-mqtt-alice-devices.conf",
             send_to_yandex=send_to_yandex_state,
             publish_to_mqtt=publish_to_mqtt,
         )

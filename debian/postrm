@@ -4,8 +4,8 @@
 
 set -e
 
-CONFFILE_CLIENT='/etc/wb-alice-client.conf'
-CONFFILE_DEVICES='/etc/wb-alice-devices.conf'
+CONFFILE_DEVICES='/etc/wb-mqtt-alice-devices.conf'
+CONFFILE_DEVICES_DEFAULT='/etc/wb-mqtt-alice-devices.conf.default'
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
@@ -63,10 +63,10 @@ main() {
     log_info "Removing wb-mqtt-alice configuration..."
 
     if [ "${1}" = "purge" ]; then
-        rm -f ${CONFFILE_CLIENT}
-        log_info "Removed client config: ${CONFFILE_CLIENT}"
         rm -f ${CONFFILE_DEVICES}
         log_info "Removed devices config: ${CONFFILE_DEVICES}"
+        rm -f ${CONFFILE_DEVICES_DEFAULT}
+        log_info "Removed default devices config: ${CONFFILE_DEVICES_DEFAULT}"
     fi
 
     # Note: we NOT remove SSL directive "ssl_engine ateccx08;" from nginx.conf

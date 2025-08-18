@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 # Constants
 SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
 BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
-CONFIG_PATH = Path("/etc/wb-alice-devices.conf")
-SETTING_PATH = Path("/etc/wb-alice-setting.conf")
-CLIENT_CONFIG_PATH = Path("/etc/wb-alice-client.conf")
+CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
+SETTING_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-webui.conf")
+CLIENT_CONFIG_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf")
 CLIENT_SERVICE_NAME = "wb-alice-client"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
@@ -143,6 +143,13 @@ def save_config(config: Config):
     logger.debug(f"Saving configuration file...")
     try:
         CONFIG_PATH.write_text(json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding='utf-8')
+
+        client_config = load_client_config()
+        new_status = should_enable_client(config)
+        if client_config.get('client_enabled') != new_status:
+            client_config['client_enabled'] = new_status
+            CLIENT_CONFIG_PATH.write_text(json.dumps(client_config, ensure_ascii=False, indent=2), encoding='utf-8')
+            
     except Exception as e:
         logger.error(f"Error saveing configuration file: {e}")
         raise
@@ -232,6 +239,11 @@ def move_device_to_room(device_id, room_id, config):
         config.rooms[old_room_id].devices.remove(device_id)
         config.rooms[room_id].devices.append(device_id)
     return 
+
+
+def should_enable_client(config: Config) -> bool:
+    """Check the minimum conditions for enabling the client"""
+    return bool(config.devices) and bool(config.unlink_url)
 
 
 # Data validation functions

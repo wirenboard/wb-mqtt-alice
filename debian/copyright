@@ -10,8 +10,8 @@ Files:     .gitignore
            README.md
            requirements.txt
            setup.py
-           wb-alice-client.py
-           wb-alice-config.py
+           wb-mqtt-alice-client.py
+           wb-mqtt-alice-config.py
            mqtt_topic.py
 Copyright: 2025, Wiren Board Team <info@wirenboard.com>
 License:   MIT-WB

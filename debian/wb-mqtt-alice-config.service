@@ -9,7 +9,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-alice-config.py
+ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-mqtt-alice-config.py
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10

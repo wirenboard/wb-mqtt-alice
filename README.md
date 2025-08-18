@@ -20,7 +20,7 @@ $ apt install ./wb-mqtt-alice_0.0.1_all.deb
 Заполнить файл настроек для клиента:
 
 ```terminal
-$ nano /etc/wb-alice-client.conf
+$ nano /usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf
 ```
 
 Данные об адресе сервера (server_address) можно получить у администратора
@@ -29,7 +29,7 @@ $ nano /etc/wb-alice-client.conf
 Перезапустить сервис wb-alice-client, для применения изменений настроек
 
 ```terminal
-$ sudo systemctl restart wb-alice-client.service
+$ sudo systemctl restart wb-mqtt-alice-client.service
 ```
 
 После применения этих настроек сервис клиента будет автоматически запускаться
@@ -38,5 +38,5 @@ $ sudo systemctl restart wb-alice-client.service
 Для просмотра логов сервиса удобно использовать `journalctl`:
 
 ```terminal
-$ journalctl -u wb-alice-client.service -f
+$ journalctl -u wb-mqtt-alice-client.service -f
 ```

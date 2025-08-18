@@ -8,7 +8,7 @@
 Любые манипуляции нужно начинать с клонирования репозитория:
 
 ```terminal
-$ git clone git@github.com:wirenboard/wb-alice-client.git
+$ git clone git@github.com:wirenboard/wb-mqtt-alice.git
 ```
 
 
@@ -30,11 +30,11 @@ dpkg-buildpackage -us -uc
 
 ## Ручная установка из исходного кода
 
-1. Скопировать конфигурационный файл по пути `/etc/wb-alice-client.conf`
+1. Скопировать конфигурационный файл по пути `/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf`
 
    ```terminal
    $ cd /путь/к/репозиторию
-   $ cp wb-alice-client.conf /etc/wb-alice-client.conf
+   $ cp wb-mqtt-alice-client.conf /usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf
    ```
 
 2. Отредактировать файл конфигурации:
@@ -68,13 +68,13 @@ dpkg-buildpackage -us -uc
 
    ```terminal
    $ cd /путь/к/репозиторию
-   $ python3 wb-alice-client.py
+   $ python3 wb-mqtt-alice-client.py
    ```
 
    В случае успеха мы получим следующий текст в консоли:
 
    ```terminal
-   $ python3 wb-alice-client.py
+   $ python3 wb-mqtt-alice-client.py
    [INFO] Readed controller ID: 00000000
    [INFO] Connecting to server: https://example.com:8000
    [SUCCESS] Connected to Socket.IO server!

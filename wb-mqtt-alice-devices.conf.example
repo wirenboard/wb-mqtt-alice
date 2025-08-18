@@ -1,0 +1,77 @@
+{
+  "rooms": {
+    "without_rooms": {
+      "name": "Без комнаты",
+      "devices": []
+    },
+    "ae5ab746-250813053245-1a1082b2-0ed6-4c68-9e6c-7d6569adc591": {
+      "name": "Коридор",
+      "devices": [
+        "ae5ab746-250813053445-d1ad22e8-c568-4c43-ab8f-7f6ff2d638a5"
+      ]
+    },
+    "ae5ab746-250813053251-cdf3d607-fcda-4809-81da-65a239d4f28e": {
+      "name": "Спальня",
+      "devices": [
+        "ae5ab746-250813053546-b3f35bf7-6fcb-4fd9-97c5-9957bd03fa94",
+        "ae5ab746-250813053658-d12cb2d1-b427-47ab-aa71-3efcc1cc5b10"
+      ]
+    }
+  },
+  "devices": {
+    "ae5ab746-250813053445-d1ad22e8-c568-4c43-ab8f-7f6ff2d638a5": {
+      "name": "Свет",
+      "status_info": null,
+      "description": null,
+      "room_id": "ae5ab746-250813053245-1a1082b2-0ed6-4c68-9e6c-7d6569adc591",
+      "type": "devices.types.light",
+      "capabilities": [
+        {
+          "type": "devices.capabilities.on_off",
+          "mqtt": "wb-mr6cv3_1/K1",
+          "parameters": {
+            "instance": "on"
+          }
+        }
+      ],
+      "properties": []
+    },
+    "ae5ab746-250813053546-b3f35bf7-6fcb-4fd9-97c5-9957bd03fa94": {
+      "name": "Свет",
+      "status_info": null,
+      "description": null,
+      "room_id": "ae5ab746-250813053251-cdf3d607-fcda-4809-81da-65a239d4f28e",
+      "type": "devices.types.light",
+      "capabilities": [
+        {
+          "type": "devices.capabilities.on_off",
+          "mqtt": "wb-mr6cv3_1/K2",
+          "parameters": {
+            "instance": "on"
+          }
+        }
+      ],
+      "properties": []
+    },
+    "ae5ab746-250813053658-d12cb2d1-b427-47ab-aa71-3efcc1cc5b10": {
+      "name": "Температура",
+      "status_info": null,
+      "description": null,
+      "room_id": "ae5ab746-250813053251-cdf3d607-fcda-4809-81da-65a239d4f28e",
+      "type": "devices.types.sensor.climate",
+      "capabilities": [],
+      "properties": [
+        {
+          "type": "devices.properties.float",
+          "mqtt": "wb-msw-v4_2/Temperature",
+          "parameters": {
+            "instance": "temperature",
+            "unit": "°C"
+          }
+        }
+      ]
+    }
+  },
+  "link_url": null,
+  "unlink_url": null
+}
