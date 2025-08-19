@@ -282,12 +282,12 @@ server {
     resolver 127.0.0.53 valid=2s;
 
     # Use a variable to prevent NGINX from checking DNS on startup
-    set $alice_host "${server_host}";
+    set \$alice_host "${server_host}";
     
     location / {
         # Required settings - basic proxy configuration
-        proxy_pass https://$alice_host:${server_port};
-        proxy_ssl_name $alice_host;
+        proxy_pass https://\$alice_host:${server_port};
+        proxy_ssl_name \$alice_host;
         proxy_ssl_certificate ${cert_path};
         proxy_ssl_certificate_key engine:ateccx08:${key_id};
         proxy_ssl_server_name on;
