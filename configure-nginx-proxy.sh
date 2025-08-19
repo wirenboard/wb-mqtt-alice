@@ -266,7 +266,7 @@ create_site_config() {
     fi
 
     local server_host=$(echo "${server_address}" | cut -d':' -f1)
-    local server_url="https://${server_address}"
+    local server_port=$(echo "${server_address}" | cut -d':' -f2)
 
     # Prepare full config content
     local site_config_content
@@ -277,10 +277,17 @@ server {
     access_log /var/log/nginx/${PACKET_NAME}_access.log;
     error_log /var/log/nginx/${PACKET_NAME}_error.log debug;
 
+    # Explicit DNS resolver to avoid system DNS timeouts
+    # when internet connection is unavailable
+    resolver 127.0.0.53 valid=2s;
+
+    # Use a variable to prevent NGINX from checking DNS on startup
+    set \$alice_host "${server_host}";
+    
     location / {
         # Required settings - basic proxy configuration
-        proxy_pass ${server_url};
-        proxy_ssl_name ${server_host};
+        proxy_pass https://\$alice_host:${server_port};
+        proxy_ssl_name \$alice_host;
         proxy_ssl_certificate ${cert_path};
         proxy_ssl_certificate_key engine:ateccx08:${key_id};
         proxy_ssl_server_name on;
@@ -295,6 +302,11 @@ server {
         proxy_ssl_protocols TLSv1.3;
         proxy_ssl_verify on;
         proxy_ssl_session_reuse off;
+
+        # Timeouts and error handling
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+        proxy_next_upstream error timeout invalid_header;
     }
 }
 EOF
