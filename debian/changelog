@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.3.5) stable; urgency=medium
+
+  * Fix error when restarting nginx
+
+ -- Mikhail Burchu <mikhail.burchu@wirenboard.com>  Tue, 19 Aug 2025 15:00:00 +0300
+
 wb-mqtt-alice (0.3.4) stable; urgency=medium
 
   * Fix client-does-not-restart
