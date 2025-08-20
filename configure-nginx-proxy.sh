@@ -279,7 +279,7 @@ server {
 
     # Explicit DNS resolver to avoid system DNS timeouts
     # when internet connection is unavailable
-    resolver 77.88.8.8 valid=30s;
+    resolver 77.88.8.8;
 
     # Use a variable to prevent NGINX from checking DNS on startup
     set \$alice_host "${server_host}";
