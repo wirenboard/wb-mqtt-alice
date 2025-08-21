@@ -266,7 +266,7 @@ create_site_config() {
     fi
 
     local server_host=$(echo "${server_address}" | cut -d':' -f1)
-    local server_url="https://${server_address}"
+    local server_port=$(echo "${server_address}" | cut -d':' -f2)
 
     # Prepare full config content
     local site_config_content
@@ -278,9 +278,16 @@ server {
     error_log /var/log/nginx/${PACKET_NAME}_error.log debug;
 
     location / {
+        # Use external DNS to be independent of system settings
+        # and prevent problems when there is no internet connection
+        resolver 77.88.8.8;
+
+        # Use a variable to prevent NGINX from checking DNS on startup
+        set \$alice_host "${server_host}";
+        
         # Required settings - basic proxy configuration
-        proxy_pass ${server_url};
-        proxy_ssl_name ${server_host};
+        proxy_pass https://\$alice_host:${server_port};
+        proxy_ssl_name \$alice_host;
         proxy_ssl_certificate ${cert_path};
         proxy_ssl_certificate_key engine:ateccx08:${key_id};
         proxy_ssl_server_name on;
