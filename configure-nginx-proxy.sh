@@ -277,14 +277,14 @@ server {
     access_log /var/log/nginx/${PACKET_NAME}_access.log;
     error_log /var/log/nginx/${PACKET_NAME}_error.log debug;
 
-    # Explicit DNS resolver to avoid system DNS timeouts
-    # when internet connection is unavailable
-    resolver 77.88.8.8;
-
-    # Use a variable to prevent NGINX from checking DNS on startup
-    set \$alice_host "${server_host}";
-    
     location / {
+        # Use external DNS to be independent of system settings
+        # and prevent problems when there is no internet connection
+        resolver 77.88.8.8;
+
+        # Use a variable to prevent NGINX from checking DNS on startup
+        set \$alice_host "${server_host}";
+        
         # Required settings - basic proxy configuration
         proxy_pass https://\$alice_host:${server_port};
         proxy_ssl_name \$alice_host;
@@ -302,11 +302,6 @@ server {
         proxy_ssl_protocols TLSv1.3;
         proxy_ssl_verify on;
         proxy_ssl_session_reuse off;
-
-        # Timeouts and error handling
-        proxy_connect_timeout 3s;
-        proxy_read_timeout 10s;
-        proxy_next_upstream error timeout invalid_header;
     }
 }
 EOF
