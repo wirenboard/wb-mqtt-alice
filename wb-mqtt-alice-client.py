@@ -28,15 +28,18 @@ import socketio
 from device_registry import DeviceRegistry
 from yandex_handlers import send_to_yandex_state, set_emit_callback
 
-logging.basicConfig(level=logging.DEBUG, force=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s',
+    force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
-logger.info("socketio module path: %s", socketio.__file__)
+logger.debug("socketio module path: %s", socketio.__file__)
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    logger.info("python-socketio version: %s", version("python-socketio"))
+    logger.debug("python-socketio version: %s", version("python-socketio"))
 except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
 
@@ -157,7 +160,7 @@ def mqtt_on_connect(
     # subscribe to every topic from registry
     for t in ctx.registry.topic2info.keys():
         client.subscribe(t, qos=0)
-        logger.info(f"MQTT Subscribed to {t}")
+        logger.debug(f"MQTT Subscribed to {t}")
 
 
 def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
@@ -228,11 +231,11 @@ async def disconnect() -> None:
 
 
 async def response(data: Any) -> None:
-    logger.info(f"SocketIO server response: {data}")
+    logger.debug(f"SocketIO server response: {data}")
 
 
 async def error(data: Any) -> None:
-    logger.info(f"SocketIO server error: {data}")
+    logger.debug(f"SocketIO server error: {data}")
 
 
 async def connect_error(data: Dict[str, Any]) -> None:
@@ -246,7 +249,7 @@ async def any_unprocessed_event(event: str, sid: str, data: Any) -> None:
     """
     Fallback handler for Socket.IO events that don't have specific handlers
     """
-    logger.info(f"SocketIO not handled event {event}")
+    logger.debug(f"SocketIO not handled event {event}")
 
 
 async def on_alice_devices_list(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -283,15 +286,15 @@ async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handles a Yandex request to retrieve the current state of devices.
     """
-    logger.info("alice_devices_query event:")
-    logger.info(json.dumps(data, ensure_ascii=False, indent=2))
+    logger.debug("alice_devices_query event:")
+    logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
 
     request_id = data.get("request_id", "unknown")
     devices_response: List[Dict[str, Any]] = []
 
     for dev in data.get("devices", []):
         device_id = dev.get("id")
-        logger.info(f"Try get data for device: '{device_id}'")
+        logger.debug(f"Try get data for device: '{device_id}'")
         devices_response.append(await ctx.registry.get_device_current_state(device_id))
 
     query_response = {
@@ -301,8 +304,8 @@ async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
 
-    logger.info("answer devices query to Yandex:")
-    logger.info(json.dumps(query_response, ensure_ascii=False, indent=2))
+    logger.debug("answer devices query to Yandex:")
+    logger.debug(json.dumps(query_response, ensure_ascii=False, indent=2))
     return query_response
 
 
@@ -324,7 +327,7 @@ def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
             ctx.registry.forward_yandex_to_mqtt(device_id, cap_type, instance, value)
-            logger.info("Action applied to %s: %s = %s", device_id, instance, value)
+            logger.debug("Action applied to %s: %s = %s", device_id, instance, value)
             status = "DONE"
         except Exception as e:
             logger.exception("Failed to apply action for device '%s'", device_id)
@@ -405,7 +408,7 @@ def get_controller_sn() -> Optional[str]:
     try:
         with open(SHORT_SN_PATH, "r") as file:
             controller_sn = file.read().strip()
-            logger.info(f"Read controller ID: {controller_sn}")
+            logger.debug(f"Read controller ID: {controller_sn}")
             return controller_sn
     except FileNotFoundError:
         logger.error(f"Controller ID file not found! Check the path: {SHORT_SN_PATH}")
@@ -523,7 +526,7 @@ async def main() -> None:
             send_to_yandex=send_to_yandex_state,
             publish_to_mqtt=publish_to_mqtt,
         )
-        logger.info(f"Registry created with {len(ctx.registry.devices)} devices")
+        logger.debug(f"Registry created with {len(ctx.registry.devices)} devices")
     except Exception as e:
         logger.error(f"Failed to create registry: {e}")
         logger.info("Continuing without device configuration")
