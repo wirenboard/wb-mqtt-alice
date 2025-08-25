@@ -29,9 +29,6 @@ from device_registry import DeviceRegistry
 from yandex_handlers import send_to_yandex_state, set_emit_callback
 
 logging.basicConfig(
-    # For enable full debug
-    # - set level=logging.DEBUG,
-    # - enable log bellow in 'socketio.AsyncClient()'
     level=logging.INFO,
     format='%(levelname)s: %(message)s',
     force=True)
@@ -545,9 +542,10 @@ async def main() -> None:
         logger.error(f"MQTT connect failed: {e}")
         return
 
+    is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
     ctx.sio = socketio.AsyncClient(
-        # logger=True,
-        # engineio_logger=True,
+        logger=is_debug_log_enabled,
+        engineio_logger=is_debug_log_enabled,
         reconnection=True,  # auto-reconnect ON
         reconnection_attempts=0,  # 0 = infinite retries
         reconnection_delay=2,  # first delay 2 s
