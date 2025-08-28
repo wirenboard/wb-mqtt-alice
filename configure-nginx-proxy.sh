@@ -170,14 +170,37 @@ setup_i2c_permissions() {
         log_info "User www-data is already in hardware-crypto group"
     fi
 
+    # Determine I2C bus number based on controller version
+    local controller_version=$(get_board_revision)
+    local i2c_bus_number=$(get_i2c_bus_number "${controller_version}")
+    log_info "Using I2C bus number: ${i2c_bus_number} for controller version ${controller_version}"
+
     # Verify access www-data to I2C
-    local is_i2c_accessible=$(sudo -u www-data i2cdetect -y 2 &> /dev/null && echo 'true' || echo 'false')
+    local is_i2c_accessible=$(sudo -u www-data i2cdetect -y ${i2c_bus_number} &> /dev/null && echo 'true' || echo 'false')
     if [ "${is_i2c_accessible}" = 'true' ]; then
         log_info "I2C access for www-data verified successfully"
         return 0
     else
         log_warn "Failed to verify I2C access for www-data"
         return 1
+    fi
+}
+
+# Determine the appropriate I2C bus number based on controller version
+# Parameters:
+#   $1 - controller version in format "X.Y" (e.g., "7.4")
+# Returns:
+#   I2C bus number (2 or 4)
+get_i2c_bus_number() {
+    local controller_version="$1"
+    local major_version=$(echo "${controller_version}" | cut -d'.' -f1)
+    local minor_version=$(echo "${controller_version}" | cut -d'.' -f2)
+    
+    # Check if version >= 7.0
+    if [ "${major_version}" -gt 7 ] || ([ "${major_version}" -eq 7 ] && [ "${minor_version}" -ge 0 ]); then
+        echo "2"
+    else
+        echo "4"
     fi
 }
 
