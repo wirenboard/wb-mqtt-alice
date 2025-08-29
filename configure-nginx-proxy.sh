@@ -176,8 +176,7 @@ setup_i2c_permissions() {
     log_info "Using I2C bus number: ${i2c_bus_number} for controller version ${controller_version}"
 
     # Verify access www-data to I2C
-    local is_i2c_accessible=$(sudo -u www-data i2cdetect -y ${i2c_bus_number} &> /dev/null && echo 'true' || echo 'false')
-    if [ "${is_i2c_accessible}" = 'true' ]; then
+    if sudo -u www-data i2cdetect -y ${i2c_bus_number} &>/dev/null; then
         log_info "I2C access for www-data verified successfully"
         return 0
     else
@@ -193,11 +192,11 @@ setup_i2c_permissions() {
 #   I2C bus number (2 or 4)
 get_i2c_bus_number() {
     local controller_version="$1"
-    local major_version=$(echo "${controller_version}" | cut -d'.' -f1)
-    local minor_version=$(echo "${controller_version}" | cut -d'.' -f2)
+    local major minor
+    IFS=. read -r major minor <<< "${controller_version}"
     
     # Check if version >= 7.0
-    if [ "${major_version}" -gt 7 ] || ([ "${major_version}" -eq 7 ] && [ "${minor_version}" -ge 0 ]); then
+    if (( major > 7 || (major == 7 && minor >= 0) )); then
         echo "2"
     else
         echo "4"
