@@ -192,7 +192,7 @@ get_i2c_bus_number() {
     . /usr/lib/wb-utils/wb_env.sh
     wb_source of
     
-    # Check if version >= 7.0
+    # Check if version < 7.0
     if of_machine_match "contactless,imx6ul-wirenboard60"; then
       echo "4"
     else
