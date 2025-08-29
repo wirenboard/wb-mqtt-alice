@@ -191,15 +191,15 @@ setup_i2c_permissions() {
 # Returns:
 #   I2C bus number (2 or 4)
 get_i2c_bus_number() {
-    local controller_version="$1"
-    local major minor
-    IFS=. read -r major minor <<< "${controller_version}"
+    # use ATECC path according to device version
+    . /usr/lib/wb-utils/wb_env.sh
+    wb_source of
     
     # Check if version >= 7.0
-    if (( major > 7 || (major == 7 && minor >= 0) )); then
-        echo "2"
+    if of_machine_match "contactless,imx6ul-wirenboard60"; then
+      echo "4"
     else
-        echo "4"
+      echo "2"
     fi
 }
 
