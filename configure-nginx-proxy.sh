@@ -171,8 +171,7 @@ setup_i2c_permissions() {
     fi
 
     # Determine I2C bus number based on controller version
-    local controller_version=$(get_board_revision)
-    local i2c_bus_number=$(get_i2c_bus_number "${controller_version}")
+    local i2c_bus_number=$(get_i2c_bus_number)
     log_info "Using I2C bus number: ${i2c_bus_number} for controller version ${controller_version}"
 
     # Verify access www-data to I2C
@@ -186,8 +185,6 @@ setup_i2c_permissions() {
 }
 
 # Determine the appropriate I2C bus number based on controller version
-# Parameters:
-#   $1 - controller version in format "X.Y" (e.g., "7.4")
 # Returns:
 #   I2C bus number (2 or 4)
 get_i2c_bus_number() {
