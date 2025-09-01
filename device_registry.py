@@ -163,6 +163,8 @@ class DeviceRegistry:
         Answer on discovery endpoint: /user/devices
         """
 
+        logger.info(f"Building device list from {len(self.devices)} devices")
+
         # "Instance" to "unit" mapping for properties
         INSTANCE_UNITS = {
             "temperature": "unit.temperature.celsius",
@@ -179,6 +181,7 @@ class DeviceRegistry:
         devices_out: List[Dict[str, Any]] = []
 
         for dev_id, dev in self.devices.items():
+            logger.debug(f"Processing device: {dev_id} - {dev.get('name', 'No name')}")
             room_name = ""
             room_id = dev.get("room_id")
             if room_id and room_id in self.rooms:
@@ -195,12 +198,55 @@ class DeviceRegistry:
 
             caps: List[Dict[str, Any]] = []
             for cap in dev.get("capabilities", []):
-                caps.append(
-                    {
-                        "type": cap["type"],
-                        "retrievable": True,
-                    }
-                )
+                cap_dict = {
+                    "type": cap["type"],
+                    "retrievable": True,
+                }
+
+                # Add "parameters" if they exist
+                if "parameters" in cap and cap["parameters"]:
+                    params = cap["parameters"].copy()
+
+                    # Specific processing for color_setting with temperature_k
+                    if cap["type"] == "devices.capabilities.color_setting":
+                        # Process color settings sub-parameters
+                        color_settings = params.pop("_colorSettings", {})
+
+                        # Add enabled parameters to the capability
+                        if color_settings.get("colorModel", {}).get("enabled"):
+                            params["color_model"] = color_settings["colorModel"][
+                                "model"
+                            ]
+
+                        if color_settings.get("temperature", {}).get("enabled"):
+                            temp_settings = color_settings["temperature"]
+                            params["temperature_k"] = {
+                                "min": temp_settings["min"],
+                                "max": temp_settings["max"],
+                            }
+
+                        if color_settings.get("scenes", {}).get("enabled"):
+                            scene_ids = color_settings["scenes"]["sceneIds"].split(",")
+                            params["color_scene"] = {
+                                "scenes": [
+                                    {"id": sid.strip()}
+                                    for sid in scene_ids
+                                    if sid.strip()
+                                ]
+                            }
+
+                        # Remove instance as it's not needed in Yandex format
+                        params.pop("instance", None)
+
+                    cap_dict["parameters"] = params
+                    logger.debug(
+                        f"Added parameters for capability {cap['type']}: {params}"
+                    )
+                else:
+                    logger.debug(f"No parameters for capability {cap['type']}")
+
+                caps.append(cap_dict)
+
             if caps:
                 device["capabilities"] = caps
 
@@ -224,6 +270,10 @@ class DeviceRegistry:
                 device["properties"] = props
 
             devices_out.append(device)
+
+        logger.info(f"Final device list contains {len(devices_out)} devices:")
+        for i, device in enumerate(devices_out):
+            logger.info(f"  {i+1}. {device['id']} - {device['name']}")
 
         return devices_out
 
