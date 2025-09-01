@@ -169,9 +169,9 @@ class DeviceRegistry:
             "humidity": "unit.percent",
             "pressure": "unit.pressure.mmhg",
             "illumination": "unit.illumination.lux",
-            "voltage": "unit.voltage.volt",
-            "current": "unit.amperage.ampere",
-            "power": "unit.power.watt",
+            "voltage": "unit.volt",
+            "amperage": "unit.ampere",
+            "power": "unit.watt",
             "co2_level": "unit.ppm",
             "battery_level": "unit.percent",
         }
