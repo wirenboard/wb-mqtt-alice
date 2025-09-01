@@ -197,55 +197,56 @@ class DeviceRegistry:
             }
 
             caps: List[Dict[str, Any]] = []
+            color_params: Dict[str, Any] = {}  # merge holder for color_setting
+
             for cap in dev.get("capabilities", []):
-                cap_dict = {
-                    "type": cap["type"],
-                    "retrievable": True,
-                }
+                cap_type = cap["type"]
 
-                # Add "parameters" if they exist
+                # Merge all color_setting sub-parameters into one capability
+                if cap_type == "devices.capabilities.color_setting":
+                    params = dict(cap.get("parameters", {}))
+                    # Do not include 'instance' in discovery parameters
+                    params.pop("instance", None)
+
+                    # color_model: "rgb" | "hsv"
+                    if "color_model" in params:
+                        cm = params["color_model"]
+                        if isinstance(cm, str):
+                            color_params["color_model"] = cm
+
+                    # temperature_k: {min, max}
+                    if "temperature_k" in params:
+                        tk = params["temperature_k"]
+                        if isinstance(tk, dict):
+                            color_params["temperature_k"] = {
+                                "min": tk.get("min"),
+                                "max": tk.get("max"),
+                            }
+
+                    # color_scene: { scenes: [...] } → normalize to [{'id': ...}]
+                    if "color_scene" in params:
+                        scenes = params["color_scene"].get("scenes", [])
+                        norm = [
+                            {"id": s} if isinstance(s, str) else s for s in scenes if s
+                        ]
+                        color_params["color_scene"] = {"scenes": norm}
+                    continue  # skip adding separate color_setting capability
+
+                # Non-color capabilities: pass through as-is
+                cap_dict = {"type": cap_type, "retrievable": True}
                 if "parameters" in cap and cap["parameters"]:
-                    params = cap["parameters"].copy()
-
-                    # Specific processing for color_setting with temperature_k
-                    if cap["type"] == "devices.capabilities.color_setting":
-                        # Process color settings sub-parameters
-                        color_settings = params.pop("_colorSettings", {})
-
-                        # Add enabled parameters to the capability
-                        if color_settings.get("colorModel", {}).get("enabled"):
-                            params["color_model"] = color_settings["colorModel"][
-                                "model"
-                            ]
-
-                        if color_settings.get("temperature", {}).get("enabled"):
-                            temp_settings = color_settings["temperature"]
-                            params["temperature_k"] = {
-                                "min": temp_settings["min"],
-                                "max": temp_settings["max"],
-                            }
-
-                        if color_settings.get("scenes", {}).get("enabled"):
-                            scene_ids = color_settings["scenes"]["sceneIds"].split(",")
-                            params["color_scene"] = {
-                                "scenes": [
-                                    {"id": sid.strip()}
-                                    for sid in scene_ids
-                                    if sid.strip()
-                                ]
-                            }
-
-                        # Remove instance as it's not needed in Yandex format
-                        params.pop("instance", None)
-
-                    cap_dict["parameters"] = params
-                    logger.debug(
-                        f"Added parameters for capability {cap['type']}: {params}"
-                    )
-                else:
-                    logger.debug(f"No parameters for capability {cap['type']}")
-
+                    cap_dict["parameters"] = cap["parameters"].copy()
                 caps.append(cap_dict)
+
+            # Append merged color_setting (if any sub-params were found)
+            if color_params:
+                caps.append(
+                    {
+                        "type": "devices.capabilities.color_setting",
+                        "retrievable": True,
+                        "parameters": color_params,
+                    }
+                )
 
             if caps:
                 device["capabilities"] = caps
