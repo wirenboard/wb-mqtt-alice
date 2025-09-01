@@ -593,6 +593,64 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     return response
 
 
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Single, compact JSON-only error handler.
+    - Logs the error with a correlation error_id
+    - Puts a human-friendly text into detail - this frontend show like error msg:
+        hint (if matched) -> short cause -> generic fallback,
+      and appends (error_id=...) for fast diagnostics
+
+    How to add new cases:
+      - Edit the HINTS list below: append tuples (compiled_regex, "human hint")
+      - Keep it short and actionable — это попадёт в detail
+    """
+    # Known patterns -> human hints (add new tuples here)
+    HINTS = [
+        # This error when frontend send not correct config with
+        (
+            re.compile(r"\b(color_model|temperature_k|color_scene)\b", re.IGNORECASE),
+            "Check color_setting params: use either "
+            "{color_model:{instance:'rgb'|'hsv'}, instance:'rgb'|'hsv'} OR "
+            "{temperature_k:{min,max}, instance:'temperature_k'} OR "
+            "{color_scene:{scenes:[...]}, instance:'scene'}.",
+        ),
+        # This error when frontend send not correct config with mqtt field empty in capability root
+        (
+            re.compile(r"\bempty_mqtt\b|\bmqtt\b.*\b(empty|missing)\b", re.IGNORECASE),
+            "Each capability must have a non-empty root 'mqtt' field.",
+        ),
+    ]
+
+    error_id = str(uuid.uuid4())
+    logger.exception(
+        f"[{error_id}] Unhandled error on {request.method} {request.url.path}: {exc}"
+    )
+
+    # Try to find a hint, otherwise show a short cause
+    exc_text = f"{type(exc).__name__}: {exc}"
+    hint = None
+    for pattern, msg in HINTS:
+        if pattern.search(exc_text):
+            hint = msg
+            break
+
+    core = hint or exc_text or "Internal server error"
+    detail = f"{core} (error_id={error_id})"
+
+    # Always return JSON for frontend
+    return JSONResponse(
+        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+        content={
+            "detail": detail,
+            "message": "Internal server error. See controller logs.",
+            "path": str(request.url.path),
+            "error_id": error_id,
+        },
+    )
+
+
 # Initialize global variables at startup
 init_globals()
 
