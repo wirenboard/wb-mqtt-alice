@@ -366,10 +366,46 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                 detail=get_translation("empty_mqtt", language),
             )
 
+        # Normalize/ensure "instance" per capability type
         if capability.type == "devices.capabilities.on_off":
             capability.parameters["instance"] = "on"
+
         elif capability.type == "devices.capabilities.color_setting":
-            capability.parameters["instance"] = capability.parameters["color_model"]
+            params = capability.parameters or {}
+
+            has_color_model = isinstance(params.get("color_model"), str)
+            has_temp = isinstance(params.get("temperature_k"), dict)
+            has_scene = isinstance(params.get("color_scene"), dict)
+
+            # For current implementation we must get only one instance
+            if (has_color_model + has_temp + has_scene) != 1:
+                raise HTTPException(
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    detail=get_translation("invalid_color_setting", language),
+                )
+
+            if has_color_model:
+                cm = params["color_model"].lower()
+                if cm not in ("rgb", "hsv"):
+                    raise HTTPException(
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                        detail=get_translation("invalid_color_setting", language),
+                    )
+                params["instance"] = cm
+
+            elif has_temp:
+                params["instance"] = "temperature_k"
+
+            else:  # has_scene
+                scenes = params["color_scene"].get("scenes")
+                if not isinstance(scenes, list):
+                    raise HTTPException(
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                        detail=get_translation("invalid_color_setting", language),
+                    )
+                params["instance"] = "scene"
+
+            capability.parameters = params
 
 
 def validate_properties(properties: list[Property], language: str) -> None:
@@ -611,10 +647,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         # This error when frontend send not correct config with
         (
             re.compile(r"\b(color_model|temperature_k|color_scene)\b", re.IGNORECASE),
-            "Check color_setting params: use either "
-            "{color_model:{instance:'rgb'|'hsv'}, instance:'rgb'|'hsv'} OR "
-            "{temperature_k:{min,max}, instance:'temperature_k'} OR "
-            "{color_scene:{scenes:[...]}, instance:'scene'}.",
+            "Check color_setting: {color_model:'rgb'|'hsv', instance:'rgb'|'hsv'} "
+            "OR {temperature_k:{min,max}, instance:'temperature_k'} "
+            "OR {color_scene:{scenes:[...]}, instance:'scene'}.",
         ),
         # This error when frontend send not correct config with mqtt field empty in capability root
         (
