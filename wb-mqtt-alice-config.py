@@ -44,6 +44,16 @@ DEFAULT_CONFIG = {
     "unlink_url": None,
 }
 
+# Units for range capability (used during normalization if unit is missing)
+RANGE_UNITS = {
+    "brightness": "unit.percent",
+    "humidity": "unit.percent",
+    "open": "unit.percent",
+    "volume": "unit.percent",
+    "temperature": "unit.temperature.celsius",
+    "channel": "unit.channel",
+}
+
 # Global variables (will be initialized in init_globals())
 controller_sn = None
 controller_version = None
@@ -404,6 +414,35 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                         detail=get_translation("invalid_color_setting", language),
                     )
                 params["instance"] = "scene"
+
+            capability.parameters = params
+
+        elif capability.type == "devices.capabilities.range":
+            params = capability.parameters or {}
+            inst = params.get("instance")
+            rng = params.get("range")
+
+            # Basic shape check (instance + range object are required)
+            if not inst or not isinstance(rng, dict):
+                raise HTTPException(
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    detail=get_translation("invalid_range", language),
+                )
+
+            # range must contain min/max/precision (follow spec strictly)
+            for k in ("min", "max", "precision"):
+                if k not in rng:
+                    raise HTTPException(
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                        detail=get_translation("invalid_range", language),
+                    )
+
+            # Inject unit if missing (depends on instance)
+            if "unit" not in params and inst in RANGE_UNITS:
+                params["unit"] = RANGE_UNITS[inst]
+
+            # By default allow direct value set unless explicitly given
+            params.setdefault("random_access", True)
 
             capability.parameters = params
 
