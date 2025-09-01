@@ -172,7 +172,7 @@ setup_i2c_permissions() {
 
     # Determine I2C bus number based on controller version
     local i2c_bus_number=$(get_i2c_bus_number)
-    log_info "Using I2C bus number: ${i2c_bus_number} for controller version ${controller_version}"
+    log_info "Using I2C bus number: ${i2c_bus_number}"
 
     # Verify access www-data to I2C
     if sudo -u www-data i2cdetect -y ${i2c_bus_number} &>/dev/null; then
