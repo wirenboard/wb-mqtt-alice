@@ -170,14 +170,33 @@ setup_i2c_permissions() {
         log_info "User www-data is already in hardware-crypto group"
     fi
 
+    # Determine I2C bus number based on controller version
+    local i2c_bus_number=$(get_i2c_bus_number)
+    log_info "Using I2C bus number: ${i2c_bus_number}"
+
     # Verify access www-data to I2C
-    local is_i2c_accessible=$(sudo -u www-data i2cdetect -y 2 &> /dev/null && echo 'true' || echo 'false')
-    if [ "${is_i2c_accessible}" = 'true' ]; then
+    if sudo -u www-data i2cdetect -y ${i2c_bus_number} &>/dev/null; then
         log_info "I2C access for www-data verified successfully"
         return 0
     else
         log_warn "Failed to verify I2C access for www-data"
         return 1
+    fi
+}
+
+# Determine the appropriate I2C bus number based on controller version
+# Returns:
+#   I2C bus number (2 or 4)
+get_i2c_bus_number() {
+    # use ATECC path according to device version
+    . /usr/lib/wb-utils/wb_env.sh
+    wb_source of
+    
+    # Check if version < 7.0
+    if of_machine_match "contactless,imx6ul-wirenboard60"; then
+      echo "4"
+    else
+      echo "2"
     fi
 }
 
