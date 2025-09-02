@@ -376,11 +376,9 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                 detail=get_translation("empty_mqtt", language),
             )
 
-        # Normalize/ensure "instance" per capability type
-        if capability.type == "devices.capabilities.on_off":
-            capability.parameters["instance"] = "on"
-
-        elif capability.type == "devices.capabilities.color_setting":
+        # Validate only specific "instance" whithh user can setup from frontend
+        # Other structure frontend MUST send correctly
+        if capability.type == "devices.capabilities.color_setting":
             params = capability.parameters or {}
 
             has_color_model = isinstance(params.get("color_model"), str)
@@ -393,58 +391,6 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                     status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                     detail=get_translation("invalid_color_setting", language),
                 )
-
-            if has_color_model:
-                cm = params["color_model"].lower()
-                if cm not in ("rgb", "hsv"):
-                    raise HTTPException(
-                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-                        detail=get_translation("invalid_color_setting", language),
-                    )
-                params["instance"] = cm
-
-            elif has_temp:
-                params["instance"] = "temperature_k"
-
-            else:  # has_scene
-                scenes = params["color_scene"].get("scenes")
-                if not isinstance(scenes, list):
-                    raise HTTPException(
-                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-                        detail=get_translation("invalid_color_setting", language),
-                    )
-                params["instance"] = "scene"
-
-            capability.parameters = params
-
-        elif capability.type == "devices.capabilities.range":
-            params = capability.parameters or {}
-            inst = params.get("instance")
-            rng = params.get("range")
-
-            # Basic shape check (instance + range object are required)
-            if not inst or not isinstance(rng, dict):
-                raise HTTPException(
-                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-                    detail=get_translation("invalid_range", language),
-                )
-
-            # range must contain min/max/precision (follow spec strictly)
-            for k in ("min", "max", "precision"):
-                if k not in rng:
-                    raise HTTPException(
-                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-                        detail=get_translation("invalid_range", language),
-                    )
-
-            # Inject unit if missing (depends on instance)
-            if "unit" not in params and inst in RANGE_UNITS:
-                params["unit"] = RANGE_UNITS[inst]
-
-            # By default allow direct value set unless explicitly given
-            params.setdefault("random_access", True)
-
-            capability.parameters = params
 
 
 def validate_properties(properties: list[Property], language: str) -> None:
@@ -685,10 +631,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     HINTS = [
         # This error when frontend send not correct config with
         (
-            re.compile(r"\b(color_model|temperature_k|color_scene)\b", re.IGNORECASE),
-            "Check color_setting: {color_model:'rgb'|'hsv', instance:'rgb'|'hsv'} "
-            "OR {temperature_k:{min,max}, instance:'temperature_k'} "
-            "OR {color_scene:{scenes:[...]}, instance:'scene'}.",
+            re.compile(
+                r"\b(color_model|temperature_k|color_scene|instance)\b", re.IGNORECASE
+            ),
+            "Frontend must send instance explicitly: "
+            "{color_model:'rgb'|'hsv', instance:'rgb'|'hsv'} OR "
+            "{temperature_k:{min,max}, instance:'temperature_k'} OR "
+            "{color_scene:{scenes:[...]}, instance:'scene'}.",
         ),
         # This error when frontend send not correct config with mqtt field empty in capability root
         (
