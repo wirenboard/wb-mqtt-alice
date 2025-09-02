@@ -165,19 +165,6 @@ class DeviceRegistry:
 
         logger.info(f"Building device list from {len(self.devices)} devices")
 
-        # "Instance" to "unit" mapping for properties
-        INSTANCE_UNITS = {
-            "temperature": "unit.temperature.celsius",
-            "humidity": "unit.percent",
-            "pressure": "unit.pressure.mmhg",
-            "illumination": "unit.illumination.lux",
-            "voltage": "unit.volt",
-            "amperage": "unit.ampere",
-            "power": "unit.watt",
-            "co2_level": "unit.ppm",
-            "battery_level": "unit.percent",
-        }
-
         devices_out: List[Dict[str, Any]] = []
 
         for dev_id, dev in self.devices.items():
@@ -258,14 +245,24 @@ class DeviceRegistry:
                     "retrievable": True,
                     "reportable": True,
                 }
-                # Add parameters only if instance exists
-                instance = prop.get("parameters", {}).get("instance")
+                # Always send "instance", but "unit" only if present in config
+                params = prop.get("parameters", {}) or {}
+                instance = params.get("instance")
                 if instance:
-                    unit = INSTANCE_UNITS.get(instance, "unit.temperature.celsius")
-                    prop_obj["parameters"] = {
-                        "instance": instance,
-                        "unit": unit,
-                    }
+                    prop_params: Dict[str, Any] = {"instance": instance}
+                    unit_cfg = params.get("unit")
+                    if isinstance(unit_cfg, str) and unit_cfg.strip():
+                        prop_params["unit"] = unit_cfg.strip()
+                    else:
+                        # If unit not present - not send this fields
+                        pass
+                    prop_obj["parameters"] = prop_params
+                else:
+                    logger.warning(
+                        "Property '%s' on device '%s' has no 'instance' in parameters",
+                        prop.get("type"),
+                        dev_id,
+                    )
                 props.append(prop_obj)
             if props:
                 device["properties"] = props
