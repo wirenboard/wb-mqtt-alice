@@ -44,16 +44,6 @@ DEFAULT_CONFIG = {
     "unlink_url": None,
 }
 
-# Units for range capability (used during normalization if unit is missing)
-RANGE_UNITS = {
-    "brightness": "unit.percent",
-    "humidity": "unit.percent",
-    "open": "unit.percent",
-    "volume": "unit.percent",
-    "temperature": "unit.temperature.celsius",
-    "channel": "unit.channel",
-}
-
 # Global variables (will be initialized in init_globals())
 controller_sn = None
 controller_version = None
