@@ -15,6 +15,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import paho.mqtt.subscribe as subscribe
 
 from mqtt_topic import MQTTTopic
+from yandex_handlers import (
+    _int_to_rgb_wb_format,
+    _parse_rgb_payload,
+    send_to_yandex_state,
+    set_emit_callback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +47,12 @@ async def read_topic_once(
             ),
             timeout=timeout,
         )
-        logger.debug("Current topic '%s' state: '%s'", topic, res)
+        if res:
+            payload = res.payload.decode().strip()
+            logger.debug("Current topic '%s' state payload: '%s'", topic, payload)
+        else:
+            logger.debug("Current topic '%s' state: None", topic)
+
         return res
     except asyncio.TimeoutError:
         logger.warning("Read topic timeout waiting '%s'", topic)
@@ -58,7 +69,7 @@ async def read_mqtt_state(
     logger.debug("Read MQTT state trying to read topic: %s", topic)
 
     try:
-        msg = await read_topic_once(topic, timeout=timeout)
+        msg = await read_topic_once(topic, host=mqtt_host, timeout=timeout)
         if msg is None:
             logger.debug("Not find retained payload in '%s'", topic)
             return None
@@ -276,6 +287,13 @@ class DeviceRegistry:
         return devices_out
 
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
+        """
+        Forwards MQTT message to Yandex Smart Home.
+
+        Args:
+            topic: MQTT topic in full format (/devices/device/controls/control)
+            raw: Raw payload string from MQTT message
+        """
         if topic not in self.topic2info:
             return
 
@@ -287,15 +305,35 @@ class DeviceRegistry:
 
         if cap_type.endswith("on_off"):
             value = raw.strip().lower() not in ("0", "false", "off")
-        elif cap_type.endswith("float"):
+        elif cap_type.endswith("float") or cap_type.endswith("range"):
             try:
                 value = float(raw)
             except ValueError:
                 logger.warning(f"Can't convert '{raw}' to float")
                 return
+        elif cap_type.endswith("color_setting"):
+            if instance == "rgb":
+                from yandex_handlers import _parse_rgb_payload
+
+                rgb_int = _parse_rgb_payload(raw)
+                if rgb_int is None:
+                    logger.warning("RGB payload can't be parsed: %r", raw)
+                    return
+                value = rgb_int
+            elif instance == "temperature_k":
+                try:
+                    value = int(float(raw))
+                except ValueError:
+                    logger.warning(f"Can't convert '{raw}' to temperature_k")
+                    return
+            else:
+                # for other color_setting
+                value = raw
         else:
+            # for any other
             value = raw
 
+        # Send color_setting instances for Yandex send "as it"
         self._send_to_yandex(device_id, cap_type, instance, value)
 
     def forward_yandex_to_mqtt(
@@ -306,16 +344,29 @@ class DeviceRegistry:
         value: Any,
     ) -> None:
         key = (device_id, cap_type, instance)
+
         if key not in self.cap_index:
             logger.warning(f"No mapping for {key}")
             return
 
         base = self.cap_index[key]  # already full topic
-        # Handle topics with or without '/on' suffix
-        cmd_topic = base if base.endswith("/on") else f"{base}/on"
+        cmd_topic = f"{base}/on"
 
         if cap_type.endswith("on_off"):
+            # Handle topics with or without '/on' suffix
             payload = "1" if value else "0"
+        elif cap_type.endswith("color_setting"):
+            cmd_topic = f"{base}"
+            if instance == "rgb":
+                # Yandex sends int, convert to WB format "R;G;B"
+                try:
+                    v_int = int(value)
+                except Exception:
+                    logger.warning("Unexpected rgb value from Yandex: %r", value)
+                    return
+                payload = _int_to_rgb_wb_format(v_int)
+            elif instance == "temperature_k":
+                payload = str(int(float(value)))
         else:
             payload = str(value)
 
@@ -333,12 +384,47 @@ class DeviceRegistry:
         if not topic:
             logger.debug(f"No MQTT topic found for capability: {key}")
             return None
-        try:
-            value = await read_mqtt_state(topic, mqtt_host="localhost")
 
-            # Normalize boolean values for on_off capabilities
+        try:
             if cap_type.endswith("on_off"):
+                # read like bool
+                value = await read_mqtt_state(topic, mqtt_host="localhost")
+                if value is None:
+                    # topic not found
+                    return None
                 value = bool(value)
+            elif cap_type.endswith("range"):
+                # Read range value as float
+                msg = await read_topic_once(topic, timeout=1)
+                if msg is None:
+                    return None
+                value = float(msg.payload.decode().strip())
+            elif cap_type.endswith("color_setting"):
+                # Read color value and normalize instance
+                msg = await read_topic_once(topic, timeout=1)
+                if msg is None:
+                    return None
+                raw = msg.payload.decode().strip()
+                if instance == "rgb":
+                    parsed = _parse_rgb_payload(raw)
+                    if parsed is None:
+                        return None
+                    logger.debug(f"Successfully parsed RGB: {raw} -> {parsed}")
+                    value = parsed
+                elif instance == "temperature_k":
+                    # Convert to integer for temperature
+                    try:
+                        value = int(float(raw))
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid temperature_k value: {raw}")
+                        return None
+                else:
+                    value = raw
+            else:
+                msg = await read_topic_once(topic, timeout=1)
+                if msg is None:
+                    return None
+                value = msg.payload.decode().strip()
 
             return {
                 "type": cap_type,
@@ -382,6 +468,8 @@ class DeviceRegistry:
             return None
 
     async def get_device_current_state(self, device_id: str) -> Dict[str, Any]:
+        logger.debug(f"Reading current state for device: {device_id}")
+
         device = self.devices.get(device_id)
         if not device:
             logger.warning(f"get_device_current_state: unknown device_id '{device_id}'")
@@ -393,6 +481,7 @@ class DeviceRegistry:
         for cap in device.get("capabilities", []):
             logger.debug(f"Reading capability state: '%s'", cap)
             cap_state = await self._read_capability_state(device_id, cap)
+            logger.debug(f"Capability result: {cap_state}")
             if cap_state:
                 capabilities_output.append(cap_state)
 

@@ -28,7 +28,9 @@ import socketio
 from device_registry import DeviceRegistry
 from yandex_handlers import send_to_yandex_state, set_emit_callback
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
+logging.basicConfig(
+    level=logging.DEBUG, format="%(levelname)s: %(message)s", force=True
+)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
