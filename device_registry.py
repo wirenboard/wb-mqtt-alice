@@ -16,10 +16,8 @@ import paho.mqtt.subscribe as subscribe
 
 from mqtt_topic import MQTTTopic
 from yandex_handlers import (
-    _int_to_rgb_wb_format,
-    _parse_rgb_payload,
-    send_to_yandex_state,
-    set_emit_callback,
+    int_to_rgb_wb_format,
+    parse_rgb_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,10 +102,10 @@ class DeviceRegistry:
         self._send_to_yandex = send_to_yandex
         self._publish_to_mqtt = publish_to_mqtt
 
-        self.devices: Dict[str, Dict[str, Any]] = {}  # id → full json block
+        self.devices: Dict[str, Dict[str, Any]] = {}  # "id" to full json block
         self.topic2info: Dict[str, Tuple[str, str, int]] = {}
         self.cap_index: Dict[Tuple[str, str, Optional[str]], str] = {}
-        self.rooms: Dict[str, Dict[str, Any]] = {}  # room_id → block
+        self.rooms: Dict[str, Dict[str, Any]] = {}  # "room_id" to block
 
         self._load_config(cfg_path)
 
@@ -313,9 +311,7 @@ class DeviceRegistry:
                 return
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
-                from yandex_handlers import _parse_rgb_payload
-
-                rgb_int = _parse_rgb_payload(raw)
+                rgb_int = parse_rgb_payload(raw)
                 if rgb_int is None:
                     logger.warning("RGB payload can't be parsed: %r", raw)
                     return
@@ -364,7 +360,7 @@ class DeviceRegistry:
                 except Exception:
                     logger.warning("Unexpected rgb value from Yandex: %r", value)
                     return
-                payload = _int_to_rgb_wb_format(v_int)
+                payload = int_to_rgb_wb_format(v_int)
             elif instance == "temperature_k":
                 payload = str(int(float(value)))
         else:
@@ -406,7 +402,7 @@ class DeviceRegistry:
                     return None
                 raw = msg.payload.decode().strip()
                 if instance == "rgb":
-                    parsed = _parse_rgb_payload(raw)
+                    parsed = parse_rgb_payload(raw)
                     if parsed is None:
                         return None
                     logger.debug(f"Successfully parsed RGB: {raw} -> {parsed}")

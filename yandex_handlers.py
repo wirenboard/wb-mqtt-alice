@@ -81,7 +81,7 @@ def _rgb_to_int(r: int, g: int, b: int) -> int:
     return (r << 16) | (g << 8) | b
 
 
-def _int_to_rgb_wb_format(val: int) -> str:
+def int_to_rgb_wb_format(val: int) -> str:
     v = int(val) & 0xFFFFFF
     r = (v >> 16) & 0xFF
     g = (v >> 8) & 0xFF
@@ -89,16 +89,16 @@ def _int_to_rgb_wb_format(val: int) -> str:
     return f"{r};{g};{b}"
 
 
-def _parse_rgb_payload(raw: str) -> Optional[int]:
+def parse_rgb_payload(raw: str) -> Optional[int]:
     """
-    Can processing any types RGB from MQTT:
+    Parse RGB payload from various MQTT formats:
       - JSON {"r":..,"g":..,"b":..}
       - int number 0..16777215
-      - string '#RRGGBB' или '0xRRGGBB'
+      - string '#RRGGBB' or '0xRRGGBB'
       - 'R,G,B' (0..255) - comma separated
       - 'R;G;B' (0..255) - semicolon separated (WirenBoard format)
-      - dec
-    Return always:
+      - decimal
+    Return converted:
       - int 0..16777215
     """
     s = (raw or "").strip()
@@ -224,7 +224,7 @@ def send_state_to_server(
 
     is_prop = block_type.startswith("devices.properties")
 
-    # normalise known value types
+    # Normalize known value types
     if block_type.endswith("on_off"):
         value = _to_bool(value)
     elif block_type.endswith("float"):

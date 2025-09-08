@@ -28,6 +28,18 @@ import socketio
 from device_registry import DeviceRegistry
 from yandex_handlers import send_to_yandex_state, set_emit_callback
 
+# Configuration constants
+MQTT_HOST = "localhost"
+MQTT_PORT = 1883
+MQTT_KEEPALIVE = 60
+LOCAL_PROXY_URL = "http://localhost:8042"
+SOCKETIO_PATH = "/socket.io"
+
+# Timeouts
+READ_TOPIC_TIMEOUT = 1.0
+RECONNECT_DELAY_INITIAL = 2
+RECONNECT_DELAY_MAX = 30
+
 logging.basicConfig(
     level=logging.DEBUG, format="%(levelname)s: %(message)s", force=True
 )
@@ -454,7 +466,6 @@ async def connect_controller(
     # - SSL termination at Nginx level
     # - Certificate-based authentication
     # See configure-nginx-proxy.sh for Nginx configuration details.
-    LOCAL_PROXY_URL = "http://localhost:8042"
     server_address = config.get("server_address")  # Used by Nginx proxy
     if not server_address:
         logger.error("'server_address' not specified in configuration")
@@ -466,7 +477,7 @@ async def connect_controller(
         # Connect to local Nginx proxy which forwards to actual server
         await sock.connect(
             LOCAL_PROXY_URL,
-            socketio_path="/socket.io",
+            socketio_path=SOCKETIO_PATH,
             # controller_sn is passed via SSL certificate when Nginx proxies
         )
         logger.info("Socket.IO connected successfully via proxy")
@@ -534,7 +545,7 @@ async def main() -> None:
     # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
     ctx.mqtt_client = setup_mqtt_client()
     try:
-        ctx.mqtt_client.connect("localhost", 1883, 60)
+        ctx.mqtt_client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
         ctx.mqtt_client.loop_start()
         logger.info("Connected to local MQTT broker")
     except Exception as e:
