@@ -223,8 +223,7 @@ class DeviceRegistry:
 
                     # Normalize color_scene data:
                     # - WB frontend write data to config in format:
-                    #   color_scene: { scenes: ["ocean", "sunset"] }
-                    #   scenes: ["ocean", "sunset", "party"]
+                    #   "color_scene": {"scenes": [ "ocean", "sunset"]}
                     # - Yandex API expects format:
                     #   color_scene: { scenes: [{"id": "ocean"}, {"id": "sunset"}] }
                     if "color_scene" in params:
