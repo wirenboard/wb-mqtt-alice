@@ -39,10 +39,10 @@ def _to_bool(raw_state: Any) -> bool:
         elif raw_state.isdigit():
             return int(raw_state) != 0
         else:
-            logger.debug("[to_bool] Unknown string %s → False", raw_state)
+            logger.debug("[to_bool] Unknown string %r → False", raw_state)
             return False
     else:
-        logger.debug("[to_bool] Unknown value type %s → False", type(raw_state))
+        logger.debug("[to_bool] Unknown value type %r → False", type(raw_state))
         return False
 
 
@@ -50,7 +50,7 @@ def _to_float(raw: Any) -> float:
     try:
         return float(raw)
     except (ValueError, TypeError):
-        logger.debug("[to_float] Cannot convert %s to float → 0.0", raw)
+        logger.debug("[to_float] Cannot convert %r to float → 0.0", raw)
         return 0.0
 
 
@@ -150,7 +150,7 @@ def parse_rgb_payload(raw: str = "") -> Optional[int]:
         return _rgb_to_int(red, green, blue)
 
     except Exception as parse_error:
-        logger.warning("Failed to parse RGB payload %r: %s", raw, parse_error)
+        logger.warning("Failed to parse RGB payload %r: %r", raw, parse_error)
         return None
 
 
@@ -172,7 +172,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
         else:
             rgb_int = parse_rgb_payload(str(value))
             if rgb_int is None:
-                logger.warning("Failed to parse RGB value: %s", value)
+                logger.warning("Failed to parse RGB value: %r", value)
                 return None
         send_state_to_server(
             device_id, "devices.capabilities.color_setting", "rgb", rgb_int
@@ -185,7 +185,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
             int(float(value)),
         )
     else:
-        logger.debug("Unsupported instance %s — dropped", instance)
+        logger.debug("Unsupported instance %r — dropped", instance)
     # HSV and color scene add there in future
 
 
@@ -241,7 +241,7 @@ def send_state_to_server(
     state update to the cloud proxy via Socket.IO
     """
     logger.debug(
-        "[YANDEX] Sending state: device=%s, type=%s, instance=%s, value=%s",
+        "[YANDEX] Sending state: device=%r, type=%r, instance=%r, value=%r",
         device_id,
         block_type,
         instance,
@@ -289,7 +289,7 @@ def send_to_yandex_state(
     handler = _HANDLERS.get(cap_type)
     if handler is None:
         logger.error(
-            "[YANDEX] Unknown capability/property '%s'. Supported: %s",
+            "[YANDEX] Unknown capability/property %r. Supported: %r",
             cap_type,
             ", ".join(_HANDLERS.keys()),
         )
@@ -299,6 +299,6 @@ def send_to_yandex_state(
         handler(device_id, instance, value)
     except NotImplementedError as err:
         # Explicit and loud: capability exists in table but lacks implementation
-        logger.error("[YANDEX] %s", err)
+        logger.error("[YANDEX] %r", err)
     except Exception as exc:
-        logger.exception("[YANDEX] Handler error for '%s': %s", cap_type, exc)
+        logger.exception("[YANDEX] Handler error for %r: %r", cap_type, exc)

@@ -46,11 +46,11 @@ logging.basicConfig(
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
-logger.debug("socketio module path: %s", socketio.__file__)
+logger.debug("socketio module path: %r", socketio.__file__)
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    logger.debug("python-socketio version: %s", version("python-socketio"))
+    logger.debug("python-socketio version: %r", version("python-socketio"))
 except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
 
@@ -85,37 +85,37 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
     from any thread (async or not).
     """
     if not ctx.sio or not ctx.sio.connected:
-        logger.warning("Not connected, skipping emit '%s'", event)
-        logger.debug("            Payload: %s", json.dumps(data))
+        logger.warning("Not connected, skipping emit %r", event)
+        logger.debug("            Payload: %r", json.dumps(data))
         return None
-    logger.debug("Connected status: %s", ctx.sio.connected)
+    logger.debug("Connected status: %r", ctx.sio.connected)
 
     if not hasattr(ctx.sio, "namespaces") or "/" not in ctx.sio.namespaces:
-        logger.warning("Namespace not ready, skipping emit '%s'", event)
+        logger.warning("Namespace not ready, skipping emit %r", event)
         return None
 
     # BUG: Additional check for version SocketIO 5.0.3 (may delete when upgrade)
     if hasattr(ctx.sio.eio, "write_loop_task") and ctx.sio.eio.write_loop_task is None:
         logger.warning(
-            "Write loop task is None, connection unstable - skipping emit '%s'",
+            "Write loop task is None, connection unstable - skipping emit %r",
             event,
         )
         return None
 
-    logger.debug("Attempting to emit '%s' with payload: %s", event, data)
+    logger.debug("Attempting to emit %r with payload: %r", event, data)
 
     try:
         # We're in an asyncio thread – safe to call create_task directly
         asyncio.get_running_loop()
         asyncio.create_task(ctx.sio.emit(event, data))
-        logger.debug("Scheduled emit '%s' via asyncio task", event)
+        logger.debug("Scheduled emit %r via asyncio task", event)
 
     except RuntimeError:
         # No running loop in current thread – fallback to ctx.main_loop
         logger.debug("No running loop in current thread – using ctx.main_loop")
 
         if ctx.main_loop is None:
-            logger.warning("ctx.main_loop not available – dropping event '%s'", event)
+            logger.warning("ctx.main_loop not available – dropping event %r", event)
             return None
 
         if ctx.main_loop.is_running():
@@ -127,11 +127,11 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
             def log_emit_exception(f: asyncio.Future):
                 exc = f.exception()
                 if exc:
-                    logger.error("Emit '%s' failed: %s", event, exc, exc_info=True)
+                    logger.error("Emit %r failed: %r", event, exc, exc_info=True)
 
             fut.add_done_callback(log_emit_exception)
         else:
-            logger.error("ctx.main_loop is not running – cannot emit '%s'", event)
+            logger.error("ctx.main_loop is not running – cannot emit %r", event)
 
 
 def publish_to_mqtt(topic: str, payload: str) -> None:
@@ -143,12 +143,12 @@ def publish_to_mqtt(topic: str, payload: str) -> None:
         return None
 
     if not ctx.mqtt_client.is_connected():
-        logger.warning("MQTT Client not connected, dropping message to %s", topic)
+        logger.warning("MQTT Client not connected, dropping message to %r", topic)
         return None
     try:
         ctx.mqtt_client.publish(topic, payload)
     except Exception as e:
-        logger.error("MQTT Failed to publish to %s: %s", topic, e)
+        logger.error("MQTT Failed to publish to %r: %r", topic, e)
 
 
 # ---------------------------------------------------------------------
@@ -175,7 +175,7 @@ def mqtt_on_connect(
 
 
 def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
-    logger.warning("MQTT Disconnected with code %s", rc)
+    logger.warning("MQTT Disconnected with code %r", rc)
 
 
 def mqtt_on_message(
@@ -189,8 +189,8 @@ def mqtt_on_message(
     try:
         payload_str = message.payload.decode("utf-8").strip()
     except UnicodeDecodeError:
-        logger.warning("MQTT Cannot decode payload in topic '%s'", message.topic)
-        logger.debug("MQTT Raw bytes: %s", message.payload)
+        logger.warning("MQTT Cannot decode payload in topic %r", message.topic)
+        logger.debug("MQTT Raw bytes: %r", message.payload)
         return None
 
     logger.debug(f"MQTT Incoming from topic '{topic_str}':")
@@ -253,7 +253,7 @@ async def connect_error(data: Dict[str, Any]) -> None:
     """
     Called when initial connection to server fails
     """
-    logger.warning("Connection refused by server: %s", data)
+    logger.warning("Connection refused by server: %r", data)
 
 
 async def any_unprocessed_event(event: str, sid: str, data: Any) -> None:
@@ -327,7 +327,7 @@ def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
     """
     device_id: str = device.get("id", "")
     if not device_id:
-        logger.warning("Device block missing 'id': %s", device)
+        logger.warning("Device block missing 'id': %r", device)
         return {}
 
     cap_results: List[Dict[str, Any]] = []
@@ -338,10 +338,10 @@ def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
             ctx.registry.forward_yandex_to_mqtt(device_id, cap_type, instance, value)
-            logger.debug("Action applied to %s: %s = %s", device_id, instance, value)
+            logger.debug("Action applied to %r: %r = %r", device_id, instance, value)
             status = "DONE"
         except Exception as e:
-            logger.exception("Failed to apply action for device '%s'", device_id)
+            logger.exception("Failed to apply action for device %r", device_id)
             status = "ERROR"
 
         cap_results.append(
@@ -501,7 +501,7 @@ def _log_and_stop(sig: signal.Signals) -> None:
     Idempotent: repeated signals after the first one do nothing.
     """
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    logger.warning("Signal %s received at %s – shutting down…", sig.name, ts)
+    logger.warning("Signal %r received at %r – shutting down…", sig.name, ts)
 
     # ctx.stop_event is created in main() before signal handlers are registered,
     # but we keep the guard just in case.
@@ -611,8 +611,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.warning("Interrupted by user (Ctrl+C)")
     except SystemExit as e:
-        logger.warning("System exit with code %s", e.code)
+        logger.warning("System exit with code %r", e.code)
     except Exception as e:
-        logger.exception("Unhandled exception: %s", e)
+        logger.exception("Unhandled exception: %r", e)
     finally:
         logger.info("wb-alice-client stopped")

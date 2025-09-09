@@ -31,7 +31,7 @@ async def read_topic_once(
     Returns paho.mqtt.client.MQTTMessage or None on timeout
     """
     logger.debug(
-        "Read topic wait %s message on '%s' (retain=%s, %.1fs)",
+        "Read topic wait %r message on %r (retain=%r, %.1fs)",
         "retained" if retain else "live",
         topic,
         retain,
@@ -47,13 +47,13 @@ async def read_topic_once(
         )
         if res:
             payload = res.payload.decode().strip()
-            logger.debug("Current topic '%s' state payload: '%s'", topic, payload)
+            logger.debug("Current topic %r state payload: %r", topic, payload)
         else:
-            logger.debug("Current topic '%s' state: None", topic)
+            logger.debug("Current topic %r state: None", topic)
 
         return res
     except asyncio.TimeoutError:
-        logger.warning("Read topic timeout waiting '%s'", topic)
+        logger.warning("Read topic timeout waiting %r", topic)
         return None
 
 
@@ -64,15 +64,15 @@ async def read_mqtt_state(
     Reads the value of a topic (0/1, "false"/"true", etc.) and returns a Python bool
     Uses subscribe.simple(...) from paho.mqtt, which BLOCKS for the duration of reading
     """
-    logger.debug("Read MQTT state trying to read topic: %s", topic)
+    logger.debug("Read MQTT state trying to read topic: %r", topic)
 
     try:
         msg = await read_topic_once(topic, host=mqtt_host, timeout=timeout)
         if msg is None:
-            logger.debug("Not find retained payload in '%s'", topic)
+            logger.debug("Not find retained payload in %r", topic)
             return None
     except Exception as e:
-        logger.warning("Failed to read topic '%s': %s", topic, e)
+        logger.warning("Failed to read topic %r: %r", topic, e)
         return None
 
     payload_str = msg.payload.decode().strip().lower()
@@ -83,7 +83,7 @@ async def read_mqtt_state(
     elif payload_str in {"0", "false", "off"}:
         return False
     else:
-        logger.warning("Unexpected payload in topic '%s': %s", topic, payload_str)
+        logger.warning("Unexpected payload in topic %r: %r", topic, payload_str)
         return False
 
 
@@ -273,7 +273,7 @@ class DeviceRegistry:
                     prop_obj["parameters"] = prop_params
                 else:
                     logger.warning(
-                        "Property '%s' on device '%s' has no 'instance' in parameters",
+                        "Property %r on device %r has no 'instance' in parameters",
                         prop.get("type"),
                         dev_id,
                     )
@@ -480,14 +480,14 @@ class DeviceRegistry:
         properties_output: List[Dict[str, Any]] = []
 
         for cap in device.get("capabilities", []):
-            logger.debug(f"Reading capability state: '%s'", cap)
+            logger.debug(f"Reading capability state: %r", cap)
             cap_state = await self._read_capability_state(device_id, cap)
             logger.debug(f"Capability result: {cap_state}")
             if cap_state:
                 capabilities_output.append(cap_state)
 
         for prop in device.get("properties", []):
-            logger.debug(f"Reading property state: '%s'", prop)
+            logger.debug(f"Reading property state: %r", prop)
             prop_state = await self._read_property_state(device_id, prop)
             if prop_state:
                 properties_output.append(prop_state)
@@ -495,7 +495,7 @@ class DeviceRegistry:
         # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:
             logger.warning(
-                "%s: no live or retained data — marking DEVICE_UNREACHABLE",
+                "%r: no live or retained data — marking DEVICE_UNREACHABLE",
                 device_id,
             )
             return {
