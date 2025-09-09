@@ -66,14 +66,6 @@ def _float_prop(device_id: str, instance: Optional[str], value: Any) -> None:
     )
 
 
-def _to_int(raw: Any) -> int:
-    try:
-        return int(float(raw))
-    except (ValueError, TypeError):
-        logger.debug("[to_int] Cannot convert %s to int: return 0", raw)
-        return 0
-
-
 def _rgb_to_int(red: int, green: int, blue: int) -> int:
     """
     Convert RGB components to a single integer value
@@ -190,7 +182,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
             device_id,
             "devices.capabilities.color_setting",
             "temperature_k",
-            _to_int(value),
+            int(float(value)),
         )
     else:
         logger.debug("Unsupported instance %s — dropped", instance)

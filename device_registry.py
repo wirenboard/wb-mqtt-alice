@@ -219,13 +219,21 @@ class DeviceRegistry:
                                 "max": tk.get("max"),
                             }
 
-                    # color_scene: { scenes: [...] } → normalize to [{'id': ...}]
+                    # Normalize color_scene data:
+                    # - WB frontend write data to config in format:
+                    #   color_scene: { scenes: ["ocean", "sunset"] }
+                    #   scenes: ["ocean", "sunset", "party"]
+                    # - Yandex API expects format:
+                    #   color_scene: { scenes: [{"id": "ocean"}, {"id": "sunset"}] }
                     if "color_scene" in params:
-                        scenes = params["color_scene"].get("scenes", [])
-                        norm = [
-                            {"id": s} if isinstance(s, str) else s for s in scenes if s
-                        ]
-                        color_params["color_scene"] = {"scenes": norm}
+                        scenes_list = params["color_scene"].get("scenes", [])
+                        normalized_scenes = []
+                        for scene in scenes_list:
+                            if scene and isinstance(scene, str):
+                                normalized_scenes.append({"id": scene})
+                            else:
+                                logger.warning(f"Unexpected scene type in color_scene: {type(scene).__name__} - {scene}")
+                        color_params["color_scene"] = {"scenes": normalized_scenes}
                     continue  # skip adding separate color_setting capability
 
                 # Non-color capabilities: pass through as-is
@@ -262,9 +270,6 @@ class DeviceRegistry:
                     unit_cfg = params.get("unit")
                     if isinstance(unit_cfg, str) and unit_cfg.strip():
                         prop_params["unit"] = unit_cfg.strip()
-                    else:
-                        # If unit not present - not send this fields
-                        pass
                     prop_obj["parameters"] = prop_params
                 else:
                     logger.warning(
