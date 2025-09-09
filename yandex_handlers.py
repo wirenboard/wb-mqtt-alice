@@ -147,7 +147,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
             rgb_int = _parse_rgb_payload(str(value))
             if rgb_int is None:
                 logger.warning("Failed to parse RGB value: %s", value)
-                return
+                return None
         send_state_to_server(
             device_id, "devices.capabilities.color_setting", "rgb", rgb_int
         )
@@ -267,7 +267,7 @@ def send_to_yandex_state(
             cap_type,
             ", ".join(_HANDLERS.keys()),
         )
-        return
+        return None
 
     try:
         handler(device_id, instance, value)

@@ -130,7 +130,7 @@ class DeviceRegistry:
             self.topic2info = {}
             self.cap_index = {}
             self.rooms = {}
-            return
+            return None
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in config: {e}")
             raise  # Critical error - cannot continue
@@ -293,7 +293,7 @@ class DeviceRegistry:
             raw: Raw payload string from MQTT message
         """
         if topic not in self.topic2info:
-            return
+            return None
 
         device_id, section, idx = self.topic2info[topic]
         blk = self.devices[device_id][section][idx]
@@ -308,20 +308,20 @@ class DeviceRegistry:
                 value = float(raw)
             except ValueError:
                 logger.warning(f"Can't convert '{raw}' to float")
-                return
+                return None
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
                 rgb_int = parse_rgb_payload(raw)
                 if rgb_int is None:
                     logger.warning("RGB payload can't be parsed: %r", raw)
-                    return
+                    return None
                 value = rgb_int
             elif instance == "temperature_k":
                 try:
                     value = int(float(raw))
                 except ValueError:
                     logger.warning(f"Can't convert '{raw}' to temperature_k")
-                    return
+                    return None
             else:
                 # for other color_setting
                 value = raw
@@ -343,7 +343,7 @@ class DeviceRegistry:
 
         if key not in self.cap_index:
             logger.warning(f"No mapping for {key}")
-            return
+            return None
 
         base = self.cap_index[key]  # already full topic
         cmd_topic = f"{base}/on"
@@ -359,7 +359,7 @@ class DeviceRegistry:
                     v_int = int(value)
                 except Exception:
                     logger.warning("Unexpected rgb value from Yandex: %r", value)
-                    return
+                    return None
                 payload = int_to_rgb_wb_format(v_int)
             elif instance == "temperature_k":
                 payload = str(int(float(value)))

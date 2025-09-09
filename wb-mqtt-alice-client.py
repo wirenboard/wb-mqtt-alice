@@ -87,12 +87,12 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
     if not ctx.sio or not ctx.sio.connected:
         logger.warning("Not connected, skipping emit '%s'", event)
         logger.debug("            Payload: %s", json.dumps(data))
-        return
+        return None
     logger.debug("Connected status: %s", ctx.sio.connected)
 
     if not hasattr(ctx.sio, "namespaces") or "/" not in ctx.sio.namespaces:
         logger.warning("Namespace not ready, skipping emit '%s'", event)
-        return
+        return None
 
     # BUG: Additional check for version SocketIO 5.0.3 (may delete when upgrade)
     if hasattr(ctx.sio.eio, "write_loop_task") and ctx.sio.eio.write_loop_task is None:
@@ -100,7 +100,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
             "Write loop task is None, connection unstable - skipping emit '%s'",
             event,
         )
-        return
+        return None
 
     logger.debug("Attempting to emit '%s' with payload: %s", event, data)
 
@@ -116,7 +116,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
 
         if ctx.main_loop is None:
             logger.warning("ctx.main_loop not available – dropping event '%s'", event)
-            return
+            return None
 
         if ctx.main_loop.is_running():
             fut = asyncio.run_coroutine_threadsafe(
@@ -140,11 +140,11 @@ def publish_to_mqtt(topic: str, payload: str) -> None:
     """
     if ctx.mqtt_client is None:
         logger.error("MQTT Client not initialized")
-        return
+        return None
 
     if not ctx.mqtt_client.is_connected():
         logger.warning("MQTT Client not connected, dropping message to %s", topic)
-        return
+        return None
     try:
         ctx.mqtt_client.publish(topic, payload)
     except Exception as e:
@@ -161,12 +161,12 @@ def mqtt_on_connect(
 ) -> None:
     if rc != 0:
         logger.error(f"MQTT Connection failed with code: {rc}")
-        return
+        return None
 
     # Check if registry is ready
     if ctx.registry is None or not hasattr(ctx.registry, "topic2info"):
         logger.error("MQTT Registry not ready, no topics to subscribe")
-        return
+        return None
 
     # subscribe to every topic from registry
     for t in ctx.registry.topic2info.keys():
@@ -183,7 +183,7 @@ def mqtt_on_message(
 ) -> None:
     if ctx.registry is None:
         logger.debug("MQTT Registry not available, ignoring message")
-        return
+        return None
 
     topic_str = message.topic
     try:
@@ -191,7 +191,7 @@ def mqtt_on_message(
     except UnicodeDecodeError:
         logger.warning("MQTT Cannot decode payload in topic '%s'", message.topic)
         logger.debug("MQTT Raw bytes: %s", message.payload)
-        return
+        return None
 
     logger.debug(f"MQTT Incoming from topic '{topic_str}':")
     logger.debug(f"       - Size   : '{len(message.payload)}'")
@@ -458,7 +458,7 @@ async def connect_controller(
     ctx.controller_sn = get_controller_sn()
     if not ctx.controller_sn:
         logger.error("Cannot proceed without controller ID")
-        return
+        return None
 
     # ARCHITECTURE NOTE: We always connect to localhost:8042 where Nginx proxy runs.
     # Nginx forwards requests to the actual server specified in 'server_address'.
@@ -469,7 +469,7 @@ async def connect_controller(
     server_address = config.get("server_address")  # Used by Nginx proxy
     if not server_address:
         logger.error("'server_address' not specified in configuration")
-        return
+        return None
     logger.info(f"Target SocketIO server: {server_address}")
     logger.info(f"Connecting via Nginx proxy: {LOCAL_PROXY_URL}")
 
@@ -519,7 +519,7 @@ async def main() -> None:
     config = read_config()
     if not config:
         logger.error("Cannot proceed without configuration")
-        return
+        return None
 
     if not config.get("client_enabled", False):
         logger.info(
@@ -528,7 +528,7 @@ async def main() -> None:
         logger.info("To enable Alice integration, set 'client_enabled': true in config")
         # Just wait for shutdown signal without doing anything
         await ctx.stop_event.wait()
-        return
+        return None
 
     try:
         ctx.registry = DeviceRegistry(
@@ -550,7 +550,7 @@ async def main() -> None:
         logger.info("Connected to local MQTT broker")
     except Exception as e:
         logger.error(f"MQTT connect failed: {e}")
-        return
+        return None
 
     is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
     ctx.sio = socketio.AsyncClient(

@@ -219,14 +219,14 @@ def is_service_active(CLIENT_SERVICE_NAME):
 async def async_restart_service(service_name: str):
     if not is_service_active(service_name):
         logger.info(f"'{service_name}' service not started")
-        return
+        return None
 
     try:
         await asyncio.create_subprocess_exec("systemctl", "restart", service_name)
         logger.info(f"'{service_name}' service restart...")
     except subprocess.CalledProcessError as e:
         logger.info(f"'{service_name}' service restart error")
-        return
+        return None
 
 
 def generate_id(controller_sn):
@@ -241,7 +241,7 @@ def move_device_to_room(device_id, room_id, config):
     if room_id != old_room_id:
         config.rooms[old_room_id].devices.remove(device_id)
         config.rooms[room_id].devices.append(device_id)
-    return
+    return None
 
 
 def should_enable_client(config: Config) -> bool:
