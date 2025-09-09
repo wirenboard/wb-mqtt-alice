@@ -117,22 +117,22 @@ class DeviceRegistry:
         - self.cap_index: 'capabilities' / 'properties'(device_id, type, instance) → full_topic
         """
 
-        logger.info(f"Try read config file '{path}'")
+        logger.info("Try read config file %r", path)
         try:
             config_data = Path(path).read_text(encoding="utf-8")
             config_data = json.loads(config_data)
             logger.info(
-                f"Config loaded: '{json.dumps(config_data, indent=2, ensure_ascii=False)}'"
+                "Config loaded: %r", json.dumps(config_data, indent=2, ensure_ascii=False)
             )
         except FileNotFoundError:
-            logger.error(f"Config file not found: {path}")
+            logger.error("Config file not found: %r", path)
             self.devices = {}
             self.topic2info = {}
             self.cap_index = {}
             self.rooms = {}
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in config: {e}")
+            logger.error("Invalid JSON in config: %r", e)
             raise  # Critical error - cannot continue
 
         self.rooms = config_data.get("rooms", {})
@@ -162,8 +162,9 @@ class DeviceRegistry:
                 self.cap_index[index_key] = full
 
         logger.info(
-            f"Devices loaded: {len(self.devices)}, "
-            f"mqtt topics: {len(self.topic2info)}"
+            "Devices loaded: %r, mqtt topics: %r",
+            len(self.devices),
+            len(self.topic2info)
         )
 
     def build_yandex_devices_list(self) -> List[Dict[str, Any]]:
@@ -172,12 +173,12 @@ class DeviceRegistry:
         Answer on discovery endpoint: /user/devices
         """
 
-        logger.info(f"Building device list from {len(self.devices)} devices")
+        logger.info("Building device list from %r devices", len(self.devices))
 
         devices_out: List[Dict[str, Any]] = []
 
         for dev_id, dev in self.devices.items():
-            logger.debug(f"Processing device: {dev_id} - {dev.get('name', 'No name')}")
+            logger.debug("Processing device: %r - %r", dev_id, dev.get('name', 'No name'))
             room_name = ""
             room_id = dev.get("room_id")
             if room_id and room_id in self.rooms:
@@ -232,7 +233,7 @@ class DeviceRegistry:
                             if scene and isinstance(scene, str):
                                 normalized_scenes.append({"id": scene})
                             else:
-                                logger.warning(f"Unexpected scene type in color_scene: {type(scene).__name__} - {scene}")
+                                logger.warning("Unexpected scene type in color_scene: %s - %r", type(scene).__name__, scene)
                         color_params["color_scene"] = {"scenes": normalized_scenes}
                     continue  # skip adding separate color_setting capability
 
@@ -283,9 +284,9 @@ class DeviceRegistry:
 
             devices_out.append(device)
 
-        logger.info(f"Final device list contains {len(devices_out)} devices:")
+        logger.info("Final device list contains %r devices:", len(devices_out))
         for i, device in enumerate(devices_out):
-            logger.info(f"  {i+1}. {device['id']} - {device['name']}")
+            logger.info("  %r. %r - %r", i+1, device['id'], device['name'])
 
         return devices_out
 
@@ -312,7 +313,7 @@ class DeviceRegistry:
             try:
                 value = float(raw)
             except ValueError:
-                logger.warning(f"Can't convert '{raw}' to float")
+                logger.warning("Can't convert %r to float", raw)
                 return None
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
@@ -325,7 +326,7 @@ class DeviceRegistry:
                 try:
                     value = int(float(raw))
                 except ValueError:
-                    logger.warning(f"Can't convert '{raw}' to temperature_k")
+                    logger.warning("Can't convert %r to temperature_k", raw)
                     return None
             else:
                 # for other color_setting
@@ -347,7 +348,7 @@ class DeviceRegistry:
         key = (device_id, cap_type, instance)
 
         if key not in self.cap_index:
-            logger.warning(f"No mapping for {key}")
+            logger.warning("No mapping for %r", key)
             return None
 
         base = self.cap_index[key]  # already full topic
@@ -372,7 +373,7 @@ class DeviceRegistry:
             payload = str(value)
 
         self._publish_to_mqtt(cmd_topic, payload)
-        logger.debug(f"Published '{payload}' → {cmd_topic}")
+        logger.debug("Published %r → %r", payload, cmd_topic)
 
     async def _read_capability_state(
         self, device_id: str, cap: Dict[str, Any]
@@ -383,7 +384,7 @@ class DeviceRegistry:
 
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug(f"No MQTT topic found for capability: {key}")
+            logger.debug("No MQTT topic found for capability: %r", key)
             return None
 
         try:
@@ -410,14 +411,14 @@ class DeviceRegistry:
                     parsed = parse_rgb_payload(raw)
                     if parsed is None:
                         return None
-                    logger.debug(f"Successfully parsed RGB: {raw} -> {parsed}")
+                    logger.debug("Successfully parsed RGB: %r to %r", raw, parsed)
                     value = parsed
                 elif instance == "temperature_k":
                     # Convert to integer for temperature
                     try:
                         value = int(float(raw))
                     except (ValueError, TypeError):
-                        logger.warning(f"Invalid temperature_k value: {raw}")
+                        logger.warning("Invalid temperature_k value: %r", raw)
                         return None
                 else:
                     value = raw
@@ -435,7 +436,7 @@ class DeviceRegistry:
                 },
             }
         except Exception as e:
-            logger.debug(f"Failed to read capability topic '{topic}': {e}")
+            logger.debug("Failed to read capability topic %r: %r", topic, e)
             return None
 
     async def _read_property_state(
@@ -447,12 +448,12 @@ class DeviceRegistry:
 
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug(f"No MQTT topic found for property: {key}")
+            logger.debug("No MQTT topic found for property: %r", key)
             return None
         try:
             msg = await read_topic_once(topic, timeout=1)
             if msg is None:
-                logger.debug(f"No retained payload in '{topic}'")
+                logger.debug("No retained payload in %r", topic)
                 return None
             raw = msg.payload.decode().strip()
             value = float(raw)  # Currently only float is supported
@@ -465,29 +466,29 @@ class DeviceRegistry:
                 },
             }
         except Exception as e:
-            logger.warning(f"Failed to read property topic '{topic}': {e}")
+            logger.warning("Failed to read property topic %r: %r", topic, e)
             return None
 
     async def get_device_current_state(self, device_id: str) -> Dict[str, Any]:
-        logger.debug(f"Reading current state for device: {device_id}")
+        logger.debug("Reading current state for device: %r", device_id)
 
         device = self.devices.get(device_id)
         if not device:
-            logger.warning(f"get_device_current_state: unknown device_id '{device_id}'")
+            logger.warning("get_device_current_state: unknown device_id %r", device_id)
             return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
 
         capabilities_output: List[Dict[str, Any]] = []
         properties_output: List[Dict[str, Any]] = []
 
         for cap in device.get("capabilities", []):
-            logger.debug(f"Reading capability state: %r", cap)
+            logger.debug("Reading capability state: %r", cap)
             cap_state = await self._read_capability_state(device_id, cap)
-            logger.debug(f"Capability result: {cap_state}")
+            logger.debug("Capability result: %r", cap_state)
             if cap_state:
                 capabilities_output.append(cap_state)
 
         for prop in device.get("properties", []):
-            logger.debug(f"Reading property state: %r", prop)
+            logger.debug("Reading property state: %r", prop)
             prop_state = await self._read_property_state(device_id, prop)
             if prop_state:
                 properties_output.append(prop_state)

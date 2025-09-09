@@ -67,43 +67,43 @@ def init_globals():
         setting = load_setting()
         translations = setting.get("translations", {})
     except Exception as e:
-        logger.critical(f"Failed to initialize global variables: {e}")
+        logger.critical("Failed to initialize global variables: %r", e)
         raise
 
 
 def get_controller_sn():
     """Get controller SN from the configuration file"""
 
-    logger.debug(f"Reading controller SN...")
+    logger.debug("Reading controller SN...")
     try:
         controller_sn = SHORT_SN_PATH.read_text().strip()
-        logger.debug(f"Сontroller SN: {controller_sn}")
+        logger.debug("Сontroller SN: %r", controller_sn)
         return controller_sn
     except FileNotFoundError:
-        logger.error(f"Controller SN file not found! Check the path: {SHORT_SN_PATH}")
+        logger.error("Controller SN file not found! Check the path: %r", SHORT_SN_PATH)
         return None
     except Exception as e:
-        logger.error(f"Error reading controller SN: {e}")
+        logger.error("Error reading controller SN: %r", e)
         return None
 
 
 def get_board_revision():
     """Read the controller hardware revision (board-revision) from Device Tree."""
 
-    logger.debug(f"Reading controller hardware revision...")
+    logger.debug("Reading controller hardware revision...")
     try:
         board_revision = ".".join(
             BOARD_REVISION_PATH.read_text().rstrip("\x00").split(".")[:2]
         )
-        logger.debug(f"Сontroller hardware revision: {board_revision}")
+        logger.debug("Сontroller hardware revision: %r", board_revision)
         return board_revision
     except FileNotFoundError:
         logger.error(
-            f"Controller board revition file not found! Check the path: {BOARD_REVISION_PATH}"
+            "Controller board revition file not found! Check the path: %r", BOARD_REVISION_PATH
         )
         return None
     except Exception as e:
-        logger.error(f"Error reading controller board revition: {e}")
+        logger.error("Error reading controller board revition: %r", e)
         return None
 
 
@@ -119,28 +119,28 @@ def get_key_id(controller_version: str) -> str:
         )
     except (ValueError, AttributeError) as e:
         raise ValueError(
-            f"Invalid controller version format: {controller_version}"
+            "Invalid controller version format: %r" % controller_version
         ) from e
 
 
 def load_config() -> Config:
     """Load configurations from file"""
 
-    logger.debug(f"Reading configuration file...")
+    logger.debug("Reading configuration file...")
     try:
         config = Config(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
         return Config(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
     except Exception as e:
         config = Config(**DEFAULT_CONFIG)
         save_config(config)
-        logger.error(f"Error reading configuration file: {e}")
+        logger.error("Error reading configuration file: %r", e)
         return config
 
 
 def save_config(config: Config):
     """Save configuration file"""
 
-    logger.debug(f"Saving configuration file...")
+    logger.debug("Saving configuration file...")
     try:
         CONFIG_PATH.write_text(
             json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8"
@@ -156,7 +156,7 @@ def save_config(config: Config):
             )
 
     except Exception as e:
-        logger.error(f"Error saveing configuration file: {e}")
+        logger.error("Error saving configuration file: %r", e)
         raise
 
     asyncio.create_task(async_restart_service(CLIENT_SERVICE_NAME))
@@ -165,24 +165,24 @@ def save_config(config: Config):
 def load_client_config():
     """Load client configuration file"""
 
-    logger.debug(f"Reading client configuration file...")
+    logger.debug("Reading client configuration file...")
     try:
         client_config = json.loads(CLIENT_CONFIG_PATH.read_text(encoding="utf-8"))
         return client_config
     except Exception as e:
-        logger.error(f"Error reading client configuration file: {e}")
+        logger.error("Error reading client configuration file: %r", e)
         raise
 
 
 def load_setting():
     """Load settings from file"""
 
-    logger.debug(f"Reading settings file...")
+    logger.debug("Reading settings file...")
     try:
         setting = json.loads(SETTING_PATH.read_text(encoding="utf-8"))
         return setting
     except Exception as e:
-        logger.error(f"Error reading settings file: {e}")
+        logger.error("Error reading settings file: %r", e)
         raise
 
 
@@ -218,14 +218,14 @@ def is_service_active(CLIENT_SERVICE_NAME):
 
 async def async_restart_service(service_name: str):
     if not is_service_active(service_name):
-        logger.info(f"'{service_name}' service not started")
+        logger.info("%r service not started", service_name)
         return None
 
     try:
         await asyncio.create_subprocess_exec("systemctl", "restart", service_name)
-        logger.info(f"'{service_name}' service restart...")
+        logger.info("%r service restart...", service_name)
     except subprocess.CalledProcessError as e:
-        logger.info(f"'{service_name}' service restart error")
+        logger.info("%r service restart error", service_name)
         return None
 
 
@@ -424,7 +424,7 @@ async def get_all_rooms_and_devices():
             config.link_url = None
             config.unlink_url = f"https://{server_address.split(':')[0]}"
     except Exception as e:
-        logger.error(f"Failed to fetch registration URL: {str(e)}")
+        logger.error("Failed to fetch registration URL: %r", e)
         config.link_url = None
         config.unlink_url = f"https://{server_address.split(':')[0]}"
 
@@ -638,7 +638,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
     error_id = str(uuid.uuid4())
     logger.exception(
-        f"[{error_id}] Unhandled error on {request.method} {request.url.path}: {exc}"
+        "[%r] Unhandled error on %r %r: %r", error_id, request.method, request.url.path, exc
     )
 
     # Try to find a hint, otherwise show a short cause

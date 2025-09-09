@@ -39,10 +39,10 @@ def _to_bool(raw_state: Any) -> bool:
         elif raw_state.isdigit():
             return int(raw_state) != 0
         else:
-            logger.debug("[to_bool] Unknown string %r → False", raw_state)
+            logger.debug("Unknown string %r → False", raw_state)
             return False
     else:
-        logger.debug("[to_bool] Unknown value type %r → False", type(raw_state))
+        logger.debug("Unknown value type %s → False", type(raw_state).__name__)
         return False
 
 
@@ -50,7 +50,7 @@ def _to_float(raw: Any) -> float:
     try:
         return float(raw)
     except (ValueError, TypeError):
-        logger.debug("[to_float] Cannot convert %r to float → 0.0", raw)
+        logger.debug("Cannot convert %r to float → 0.0", raw)
         return 0.0
 
 
@@ -191,7 +191,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
 
 def _not_implemented(cap_type: str) -> Callable[..., None]:
     def _stub(*_a, **_kw) -> None:
-        raise NotImplementedError(f"Handler for '{cap_type}' is not implemented yet")
+        raise NotImplementedError("Handler for %r is not implemented yet" % cap_type)
 
     return _stub
 

@@ -160,7 +160,7 @@ def mqtt_on_connect(
     client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int
 ) -> None:
     if rc != 0:
-        logger.error(f"MQTT Connection failed with code: {rc}")
+        logger.error("MQTT Connection failed with code: %r", rc)
         return None
 
     # Check if registry is ready
@@ -171,7 +171,7 @@ def mqtt_on_connect(
     # subscribe to every topic from registry
     for t in ctx.registry.topic2info.keys():
         client.subscribe(t, qos=0)
-        logger.debug(f"MQTT Subscribed to {t}")
+        logger.debug("MQTT Subscribed to %r", t)
 
 
 def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
@@ -193,9 +193,9 @@ def mqtt_on_message(
         logger.debug("MQTT Raw bytes: %r", message.payload)
         return None
 
-    logger.debug(f"MQTT Incoming from topic '{topic_str}':")
-    logger.debug(f"       - Size   : '{len(message.payload)}'")
-    logger.debug(f"       - Message: '{payload_str}'")
+    logger.debug("MQTT Incoming from topic %r:", topic_str)
+    logger.debug("       - Size   : %r", len(message.payload))
+    logger.debug("       - Message: %r", payload_str)
 
     ctx.registry.forward_mqtt_to_yandex(topic_str, payload_str)
 
@@ -242,11 +242,11 @@ async def disconnect() -> None:
 
 
 async def response(data: Any) -> None:
-    logger.debug(f"SocketIO server response: {data}")
+    logger.debug("SocketIO server response: %r", data)
 
 
 async def error(data: Any) -> None:
-    logger.debug(f"SocketIO server error: {data}")
+    logger.debug("SocketIO server error: %r", data)
 
 
 async def connect_error(data: Dict[str, Any]) -> None:
@@ -260,7 +260,7 @@ async def any_unprocessed_event(event: str, sid: str, data: Any) -> None:
     """
     Fallback handler for Socket.IO events that don't have specific handlers
     """
-    logger.debug(f"SocketIO not handled event {event}")
+    logger.debug("SocketIO not handled event %r", event)
 
 
 async def on_alice_devices_list(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -305,7 +305,7 @@ async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
 
     for dev in data.get("devices", []):
         device_id = dev.get("id")
-        logger.debug(f"Try get data for device: '{device_id}'")
+        logger.debug("Try get data for device: %r", device_id)
         devices_response.append(await ctx.registry.get_device_current_state(device_id))
 
     query_response = {
@@ -419,13 +419,13 @@ def get_controller_sn() -> Optional[str]:
     try:
         with open(SHORT_SN_PATH, "r") as file:
             controller_sn = file.read().strip()
-            logger.debug(f"Read controller ID: {controller_sn}")
+            logger.debug("Read controller ID: %r", controller_sn)
             return controller_sn
     except FileNotFoundError:
-        logger.error(f"Controller ID file not found! Check the path: {SHORT_SN_PATH}")
+        logger.error("Controller ID file not found! Check the path: %r", SHORT_SN_PATH)
         return None
     except Exception as e:
-        logger.error(f"Reading controller ID exception: {e}")
+        logger.error("Reading controller ID exception: %r", e)
         return None
 
 
@@ -435,7 +435,7 @@ def read_config() -> Optional[Dict[str, Any]]:
     """
     try:
         if not os.path.exists(CONFIG_PATH):
-            logger.error(f"Configuration file not found at {CONFIG_PATH}")
+            logger.error("Configuration file not found at %r", CONFIG_PATH)
             return None
 
         with open(CONFIG_PATH, "r") as file:
@@ -445,7 +445,7 @@ def read_config() -> Optional[Dict[str, Any]]:
         logger.error("Parsing configuration file: Invalid JSON format")
         return None
     except Exception as e:
-        logger.error(f"Reading configuration exception: {e}")
+        logger.error("Reading configuration exception: %r", e)
         return None
 
 
@@ -470,8 +470,8 @@ async def connect_controller(
     if not server_address:
         logger.error("'server_address' not specified in configuration")
         return None
-    logger.info(f"Target SocketIO server: {server_address}")
-    logger.info(f"Connecting via Nginx proxy: {LOCAL_PROXY_URL}")
+    logger.info("Target SocketIO server: %r", server_address)
+    logger.info("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
 
     try:
         # Connect to local Nginx proxy which forwards to actual server
@@ -483,13 +483,13 @@ async def connect_controller(
         logger.info("Socket.IO connected successfully via proxy")
 
     except socketio.exceptions.ConnectionError as e:
-        logger.error(f"Socket.IO connection error: {e}")
+        logger.error("Socket.IO connection error: %r", e)
         # Unable to connect
         # - The controller might have been unregistered
         # - Or Server may have error or offline
         # ACTION - do reconnection
     except Exception as e:
-        logger.exception(f"Unexpected exception during connection: {e}")
+        logger.exception("Unexpected exception during connection: %r", e)
         # ACTION - do reconnection
 
 
@@ -536,9 +536,9 @@ async def main() -> None:
             send_to_yandex=send_to_yandex_state,
             publish_to_mqtt=publish_to_mqtt,
         )
-        logger.debug(f"Registry created with {len(ctx.registry.devices)} devices")
+        logger.debug("Registry created with %r devices", len(ctx.registry.devices))
     except Exception as e:
-        logger.error(f"Failed to create registry: {e}")
+        logger.error("Failed to create registry: %r", e)
         logger.info("Continuing without device configuration")
         ctx.registry = None
 
@@ -549,7 +549,7 @@ async def main() -> None:
         ctx.mqtt_client.loop_start()
         logger.info("Connected to local MQTT broker")
     except Exception as e:
-        logger.error(f"MQTT connect failed: {e}")
+        logger.error("MQTT connect failed: %r", e)
         return None
 
     is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
