@@ -11,6 +11,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from constants import CAP_COLOR_SETTING
 
 import paho.mqtt.subscribe as subscribe
 
@@ -200,7 +201,7 @@ class DeviceRegistry:
                 cap_type = cap["type"]
 
                 # Merge all color_setting sub-parameters into one capability
-                if cap_type == "devices.capabilities.color_setting":
+                if cap_type == CAP_COLOR_SETTING:
                     params = dict(cap.get("parameters", {}))
                     # Do not include 'instance' in discovery parameters
                     params.pop("instance", None)
@@ -247,7 +248,7 @@ class DeviceRegistry:
             if color_params:
                 caps.append(
                     {
-                        "type": "devices.capabilities.color_setting",
+                        "type": CAP_COLOR_SETTING,
                         "retrievable": True,
                         "parameters": color_params,
                     }

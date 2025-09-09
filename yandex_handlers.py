@@ -5,10 +5,14 @@
 Yandex Smart Home Handlers for Wiren Board Alice Integration
 Handles type conversions and state management for Yandex Smart Home API
 """
-import json
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
+from constants import (
+  CAP_ON_OFF, CAP_COLOR_SETTING, CAP_RANGE, CAP_TOGGLE, CAP_MODE, CAP_VIDEO_STREAM,
+  PROP_FLOAT, PROP_EVENT
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +60,13 @@ def _to_float(raw: Any) -> float:
 
 def _on_off(device_id: str, instance: Optional[str], value: Any) -> None:
     send_state_to_server(
-        device_id, "devices.capabilities.on_off", instance, _to_bool(value)
+        device_id, CAP_ON_OFF, instance, _to_bool(value)
     )
 
 
 def _float_prop(device_id: str, instance: Optional[str], value: Any) -> None:
     send_state_to_server(
-        device_id, "devices.properties.float", instance, _to_float(value)
+        device_id, PROP_FLOAT, instance, _to_float(value)
     )
 
 
@@ -156,7 +160,7 @@ def parse_rgb_payload(raw: str = "") -> Optional[int]:
 
 def _range_cap(device_id: str, instance: Optional[str], value: Any) -> None:
     send_state_to_server(
-        device_id, "devices.capabilities.range", instance, _to_float(value)
+        device_id, CAP_RANGE, instance, _to_float(value)
     )
 
 
@@ -175,12 +179,12 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
                 logger.warning("Failed to parse RGB value: %r", value)
                 return None
         send_state_to_server(
-            device_id, "devices.capabilities.color_setting", "rgb", rgb_int
+            device_id, CAP_COLOR_SETTING, "rgb", rgb_int
         )
     elif instance == "temperature_k":
         send_state_to_server(
             device_id,
-            "devices.capabilities.color_setting",
+            CAP_COLOR_SETTING,
             "temperature_k",
             int(float(value)),
         )
@@ -199,15 +203,15 @@ def _not_implemented(cap_type: str) -> Callable[..., None]:
 # Yandex types handler table for select send logic from MQTT to Yandex
 _HANDLERS: Dict[str, Callable[[str, Optional[str], Any], None]] = {
     # Capabilities
-    "devices.capabilities.on_off": _on_off,
-    "devices.capabilities.color_setting": _color_setting,
-    "devices.capabilities.video_stream": _not_implemented("cap.video_stream"),
-    "devices.capabilities.mode": _not_implemented("cap.mode"),
-    "devices.capabilities.range": _range_cap,
-    "devices.capabilities.toggle": _not_implemented("cap.toggle"),
+    CAP_ON_OFF: _on_off,
+    CAP_COLOR_SETTING: _color_setting,
+    CAP_VIDEO_STREAM: _not_implemented("cap.video_stream"),
+    CAP_MODE: _not_implemented("cap.mode"),
+    CAP_RANGE: _range_cap,
+    CAP_TOGGLE: _not_implemented("cap.toggle"),
     # Properties
-    "devices.properties.float": _float_prop,
-    "devices.properties.event": _not_implemented("prop.event"),
+    PROP_FLOAT: _float_prop,
+    PROP_EVENT: _not_implemented("prop.event"),
 }
 
 

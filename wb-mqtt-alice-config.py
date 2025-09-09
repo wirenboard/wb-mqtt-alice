@@ -8,15 +8,14 @@ import uuid
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
-from typing import Optional
 
-import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from fetch_url import fetch_url
 from models import Capability, Config, Device, Property, Room, RoomID
+from constants import CAP_COLOR_SETTING
 
 # FastAPI initialization
 app = FastAPI(
@@ -368,7 +367,7 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
 
         # Validate only specific "instance" whithh user can setup from frontend
         # Other structure frontend MUST send correctly
-        if capability.type == "devices.capabilities.color_setting":
+        if capability.type == CAP_COLOR_SETTING:
             params = capability.parameters or {}
 
             has_color_model = isinstance(params.get("color_model"), str)
