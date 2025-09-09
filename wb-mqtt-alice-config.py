@@ -128,7 +128,7 @@ def load_config() -> Config:
     logger.debug("Reading configuration file...")
     try:
         config = Config(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
-        return Config(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        return config
     except Exception as e:
         config = Config(**DEFAULT_CONFIG)
         save_config(config)
