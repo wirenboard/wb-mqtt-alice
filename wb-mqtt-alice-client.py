@@ -40,9 +40,7 @@ READ_TOPIC_TIMEOUT = 1.0
 RECONNECT_DELAY_INITIAL = 2
 RECONNECT_DELAY_MAX = 30
 
-logging.basicConfig(
-    level=logging.DEBUG, format="%(levelname)s: %(message)s", force=True
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
