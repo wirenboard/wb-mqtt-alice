@@ -146,7 +146,7 @@ def publish_to_mqtt(topic: str, payload: str) -> None:
         logger.warning("MQTT Client not connected, dropping message to %r", topic)
         return None
     try:
-        ctx.mqtt_client.publish(topic, payload)
+        ctx.mqtt_client.publish(topic, payload, retain=True)
     except Exception as e:
         logger.error("MQTT Failed to publish to %r: %r", topic, e)
 
