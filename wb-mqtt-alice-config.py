@@ -13,9 +13,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from constants import CAP_COLOR_SETTING
 from fetch_url import fetch_url
 from models import Capability, Config, Device, Property, Room, RoomID
-from constants import CAP_COLOR_SETTING
 
 # FastAPI initialization
 app = FastAPI(
@@ -98,7 +98,8 @@ def get_board_revision():
         return board_revision
     except FileNotFoundError:
         logger.error(
-            "Controller board revition file not found! Check the path: %r", BOARD_REVISION_PATH
+            "Controller board revition file not found! Check the path: %r",
+            BOARD_REVISION_PATH,
         )
         return None
     except Exception as e:
@@ -637,7 +638,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
     error_id = str(uuid.uuid4())
     logger.exception(
-        "[%r] Unhandled error on %r %r: %r", error_id, request.method, request.url.path, exc
+        "[%r] Unhandled error on %r %r: %r",
+        error_id,
+        request.method,
+        request.url.path,
+        exc,
     )
 
     # Try to find a hint, otherwise show a short cause

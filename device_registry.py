@@ -362,7 +362,6 @@ class DeviceRegistry:
             # Handle topics with or without '/on' suffix
             payload = "1" if value else "0"
         elif cap_type.endswith("color_setting"):
-            cmd_topic = f"{base}"
             if instance == "rgb":
                 # Yandex sends int, convert to WB format "R;G;B"
                 try:
