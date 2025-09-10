@@ -10,16 +10,13 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
-from constants import CAP_COLOR_SETTING
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import paho.mqtt.subscribe as subscribe
 
+from constants import CAP_COLOR_SETTING
 from mqtt_topic import MQTTTopic
-from yandex_handlers import (
-    int_to_rgb_wb_format,
-    parse_rgb_payload,
-)
+from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +95,7 @@ class DeviceRegistry:
         cfg_path: str,
         *,
         send_to_yandex: Callable[[str, str, Optional[str], Any], None],
-        publish_to_mqtt: Callable[[str, str], None],
+        publish_to_mqtt: Callable[[str, str], Awaitable[None]],
     ) -> None:
         self._send_to_yandex = send_to_yandex
         self._publish_to_mqtt = publish_to_mqtt
@@ -123,7 +120,8 @@ class DeviceRegistry:
             config_data = Path(path).read_text(encoding="utf-8")
             config_data = json.loads(config_data)
             logger.info(
-                "Config loaded: %r", json.dumps(config_data, indent=2, ensure_ascii=False)
+                "Config loaded: %r",
+                json.dumps(config_data, indent=2, ensure_ascii=False),
             )
         except FileNotFoundError:
             logger.error("Config file not found: %r", path)
@@ -165,7 +163,7 @@ class DeviceRegistry:
         logger.info(
             "Devices loaded: %r, mqtt topics: %r",
             len(self.devices),
-            len(self.topic2info)
+            len(self.topic2info),
         )
 
     def build_yandex_devices_list(self) -> List[Dict[str, Any]]:
@@ -179,7 +177,9 @@ class DeviceRegistry:
         devices_out: List[Dict[str, Any]] = []
 
         for dev_id, dev in self.devices.items():
-            logger.debug("Processing device: %r - %r", dev_id, dev.get('name', 'No name'))
+            logger.debug(
+                "Processing device: %r - %r", dev_id, dev.get("name", "No name")
+            )
             room_name = ""
             room_id = dev.get("room_id")
             if room_id and room_id in self.rooms:
@@ -233,7 +233,11 @@ class DeviceRegistry:
                             if scene and isinstance(scene, str):
                                 normalized_scenes.append({"id": scene})
                             else:
-                                logger.warning("Unexpected scene type in color_scene: %s - %r", type(scene).__name__, scene)
+                                logger.warning(
+                                    "Unexpected scene type in color_scene: %s - %r",
+                                    type(scene).__name__,
+                                    scene,
+                                )
                         color_params["color_scene"] = {"scenes": normalized_scenes}
                     continue  # skip adding separate color_setting capability
 
@@ -286,7 +290,7 @@ class DeviceRegistry:
 
         logger.info("Final device list contains %r devices:", len(devices_out))
         for i, device in enumerate(devices_out):
-            logger.info("  %r. %r - %r", i+1, device['id'], device['name'])
+            logger.info("  %r. %r - %r", i + 1, device["id"], device["name"])
 
         return devices_out
 
@@ -338,7 +342,7 @@ class DeviceRegistry:
         # Send color_setting instances for Yandex send "as it"
         self._send_to_yandex(device_id, cap_type, instance, value)
 
-    def forward_yandex_to_mqtt(
+    async def forward_yandex_to_mqtt(
         self,
         device_id: str,
         cap_type: str,
@@ -372,7 +376,7 @@ class DeviceRegistry:
         else:
             payload = str(value)
 
-        self._publish_to_mqtt(cmd_topic, payload)
+        await self._publish_to_mqtt(cmd_topic, payload)
         logger.debug("Published %r → %r", payload, cmd_topic)
 
     async def _read_capability_state(

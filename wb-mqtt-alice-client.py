@@ -132,7 +132,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
             logger.error("ctx.main_loop is not running – cannot emit %r", event)
 
 
-def publish_to_mqtt(topic: str, payload: str) -> None:
+async def publish_to_mqtt(topic: str, payload: str) -> None:
     """
     Helper for publishing from registry
     """
@@ -144,7 +144,13 @@ def publish_to_mqtt(topic: str, payload: str) -> None:
         logger.warning("MQTT Client not connected, dropping message to %r", topic)
         return None
     try:
-        ctx.mqtt_client.publish(topic, payload, retain=True)
+        await asyncio.wait_for(
+            asyncio.to_thread(ctx.mqtt_client.publish, topic, payload, retain=True),
+            timeout=2.0,
+        )
+        logger.debug("Published %r → %r", payload, topic)
+    except asyncio.TimeoutError:
+        logger.error("MQTT publish timeout for topic %r", topic)
     except Exception as e:
         logger.error("MQTT Failed to publish to %r: %r", topic, e)
 
@@ -318,7 +324,7 @@ async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
     return query_response
 
 
-def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
     """
     Processes all capabilities for a single device and returns the result block,
     formatted according to Yandex Smart Home action response spec.
@@ -335,7 +341,9 @@ def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
         value: Any = cap.get("state", {}).get("value")
 
         try:
-            ctx.registry.forward_yandex_to_mqtt(device_id, cap_type, instance, value)
+            await ctx.registry.forward_yandex_to_mqtt(
+                device_id, cap_type, instance, value
+            )
             logger.debug("Action applied to %r: %r = %r", device_id, instance, value)
             status = "DONE"
         except Exception as e:
@@ -373,7 +381,7 @@ async def on_alice_devices_action(data: Dict[str, Any]) -> Dict[str, Any]:
     devices_info: List[Dict[str, Any]] = []
 
     for device in devices_in:
-        result = handle_single_device_action(device)
+        result = await handle_single_device_action(device)
         if result:
             devices_info.append(result)
 
