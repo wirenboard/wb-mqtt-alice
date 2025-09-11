@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.4.0) stable; urgency=medium
+
+  * Add support for capabilities: range, color_setting(rgb, temperature_k)
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Tue, 09 Sep 2025 15:00:00 +0300
+
 wb-mqtt-alice (0.3.8) stable; urgency=medium
 
   * Fix incorrect units
