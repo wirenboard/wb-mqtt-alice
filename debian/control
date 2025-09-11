@@ -17,7 +17,7 @@ Section: python
 Architecture: all
 Depends: ${misc:Depends},
          jq,
-         wb-mqtt-homeui (>= 2.82.5~~),
+         wb-mqtt-homeui (>= 2.133.0~~),
          ${python3:Depends},
          python3-fastapi (>= 0.63.0),
          python3-requests (>= 2.25.1),

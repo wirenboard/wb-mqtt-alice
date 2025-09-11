@@ -6,6 +6,7 @@ wb-mqtt-alice-webui.conf /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice-client.py /usr/lib/wb-mqtt-alice/
 mqtt_topic.py /usr/lib/wb-mqtt-alice/
 device_registry.py /usr/lib/wb-mqtt-alice/
+constants.py /usr/lib/wb-mqtt-alice/
 yandex_handlers.py /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice-config.py /usr/lib/wb-mqtt-alice/
 models.py /usr/lib/wb-mqtt-alice/

@@ -19,8 +19,9 @@ import os
 import random
 import signal
 import string
+import subprocess
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import paho.mqtt.client as mqtt_client
 import socketio
@@ -28,18 +29,27 @@ import socketio
 from device_registry import DeviceRegistry
 from yandex_handlers import send_to_yandex_state, set_emit_callback
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: %(message)s',
-    force=True)
+# Configuration constants
+MQTT_HOST = "localhost"
+MQTT_PORT = 1883
+MQTT_KEEPALIVE = 60
+LOCAL_PROXY_URL = "http://localhost:8042"
+SOCKETIO_PATH = "/socket.io"
+
+# Timeouts
+READ_TOPIC_TIMEOUT = 1.0
+RECONNECT_DELAY_INITIAL = 2
+RECONNECT_DELAY_MAX = 30
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
-logger.debug("socketio module path: %s", socketio.__file__)
+logger.debug("socketio module path: %r", socketio.__file__)
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    logger.debug("python-socketio version: %s", version("python-socketio"))
+    logger.debug("python-socketio version: %r", version("python-socketio"))
 except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
 
@@ -73,39 +83,49 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
     Safely schedules a Socket.IO event to be emitted
     from any thread (async or not).
     """
-    if not ctx.sio or not ctx.sio.connected:
-        logger.warning("Not connected, skipping emit '%s'", event)
-        logger.debug("            Payload: %s", json.dumps(data))
-        return
-    logger.debug("Connected status: %s", ctx.sio.connected)
+    if not ctx.sio:
+        logger.warning("Socket.IO client not initialized, skipping emit %r", event)
+        logger.debug("            Payload: %r", json.dumps(data))
+        return None
+
+    if not ctx.sio.connected or getattr(ctx.sio.eio, "state", None) != "connected":
+        logger.warning(
+            "Socket.IO not ready (state: %s), skipping emit %r",
+            getattr(ctx.sio.eio, "state", "unknown"),
+            event,
+        )
+        logger.debug("            Payload: %r", json.dumps(data))
+        return None
+
+    logger.debug("Connected status: %r", ctx.sio.connected)
 
     if not hasattr(ctx.sio, "namespaces") or "/" not in ctx.sio.namespaces:
-        logger.warning("Namespace not ready, skipping emit '%s'", event)
-        return
+        logger.warning("Namespace not ready, skipping emit %r", event)
+        return None
 
     # BUG: Additional check for version SocketIO 5.0.3 (may delete when upgrade)
     if hasattr(ctx.sio.eio, "write_loop_task") and ctx.sio.eio.write_loop_task is None:
         logger.warning(
-            "Write loop task is None, connection unstable - skipping emit '%s'",
+            "Write loop task is None, connection unstable - skipping emit %r",
             event,
         )
-        return
+        return None
 
-    logger.debug("Attempting to emit '%s' with payload: %s", event, data)
+    logger.debug("Attempting to emit %r with payload: %r", event, data)
 
     try:
-        # We're in an asyncio thread – safe to call create_task directly
+        # We're in an asyncio thread - safe to call create_task directly
         asyncio.get_running_loop()
         asyncio.create_task(ctx.sio.emit(event, data))
-        logger.debug("Scheduled emit '%s' via asyncio task", event)
+        logger.debug("Scheduled emit %r via asyncio task", event)
 
     except RuntimeError:
-        # No running loop in current thread – fallback to ctx.main_loop
-        logger.debug("No running loop in current thread – using ctx.main_loop")
+        # No running loop in current thread - fallback to ctx.main_loop
+        logger.debug("No running loop in current thread - using ctx.main_loop")
 
         if ctx.main_loop is None:
-            logger.warning("ctx.main_loop not available – dropping event '%s'", event)
-            return
+            logger.warning("ctx.main_loop not available - dropping event %r", event)
+            return None
 
         if ctx.main_loop.is_running():
             fut = asyncio.run_coroutine_threadsafe(
@@ -116,28 +136,34 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
             def log_emit_exception(f: asyncio.Future):
                 exc = f.exception()
                 if exc:
-                    logger.error("Emit '%s' failed: %s", event, exc, exc_info=True)
+                    logger.error("Emit %r failed: %r", event, exc, exc_info=True)
 
             fut.add_done_callback(log_emit_exception)
         else:
-            logger.error("ctx.main_loop is not running – cannot emit '%s'", event)
+            logger.error("ctx.main_loop is not running - cannot emit %r", event)
 
 
-def publish_to_mqtt(topic: str, payload: str) -> None:
+async def publish_to_mqtt(topic: str, payload: str) -> None:
     """
     Helper for publishing from registry
     """
     if ctx.mqtt_client is None:
         logger.error("MQTT Client not initialized")
-        return
+        return None
 
     if not ctx.mqtt_client.is_connected():
-        logger.warning("MQTT Client not connected, dropping message to %s", topic)
-        return
+        logger.warning("MQTT Client not connected, dropping message to %r", topic)
+        return None
     try:
-        ctx.mqtt_client.publish(topic, payload)
+        await asyncio.wait_for(
+            asyncio.to_thread(ctx.mqtt_client.publish, topic, payload),
+            timeout=2.0,
+        )
+        logger.debug("Published %r → %r", payload, topic)
+    except asyncio.TimeoutError:
+        logger.error("MQTT publish timeout for topic %r", topic)
     except Exception as e:
-        logger.error("MQTT Failed to publish to %s: %s", topic, e)
+        logger.error("MQTT Failed to publish to %r: %r", topic, e)
 
 
 # ---------------------------------------------------------------------
@@ -149,22 +175,22 @@ def mqtt_on_connect(
     client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int
 ) -> None:
     if rc != 0:
-        logger.error(f"MQTT Connection failed with code: {rc}")
-        return
+        logger.error("MQTT Connection failed with code: %r", rc)
+        return None
 
     # Check if registry is ready
     if ctx.registry is None or not hasattr(ctx.registry, "topic2info"):
         logger.error("MQTT Registry not ready, no topics to subscribe")
-        return
+        return None
 
     # subscribe to every topic from registry
     for t in ctx.registry.topic2info.keys():
         client.subscribe(t, qos=0)
-        logger.debug(f"MQTT Subscribed to {t}")
+        logger.debug("MQTT Subscribed to %r", t)
 
 
 def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
-    logger.warning("MQTT Disconnected with code %s", rc)
+    logger.warning("MQTT Disconnected with code %r", rc)
 
 
 def mqtt_on_message(
@@ -172,19 +198,24 @@ def mqtt_on_message(
 ) -> None:
     if ctx.registry is None:
         logger.debug("MQTT Registry not available, ignoring message")
-        return
+        return None
+
+    if message.retain:
+        logger.debug("MQTT Ignoring retained message from %r", message.topic)
+        # This fix needed for not get new messages in first second after connect
+        return None
 
     topic_str = message.topic
     try:
         payload_str = message.payload.decode("utf-8").strip()
     except UnicodeDecodeError:
-        logger.warning("MQTT Cannot decode payload in topic '%s'", message.topic)
-        logger.debug("MQTT Raw bytes: %s", message.payload)
-        return
+        logger.warning("MQTT Cannot decode payload in topic %r", message.topic)
+        logger.debug("MQTT Raw bytes: %r", message.payload)
+        return None
 
-    logger.debug(f"MQTT Incoming from topic '{topic_str}':")
-    logger.debug(f"       - Size   : '{len(message.payload)}'")
-    logger.debug(f"       - Message: '{payload_str}'")
+    logger.debug("MQTT Incoming from topic %r:", topic_str)
+    logger.debug("       - Size   : %r", len(message.payload))
+    logger.debug("       - Message: %r", payload_str)
 
     ctx.registry.forward_mqtt_to_yandex(topic_str, payload_str)
 
@@ -231,25 +262,25 @@ async def disconnect() -> None:
 
 
 async def response(data: Any) -> None:
-    logger.debug(f"SocketIO server response: {data}")
+    logger.debug("SocketIO server response: %r", data)
 
 
 async def error(data: Any) -> None:
-    logger.debug(f"SocketIO server error: {data}")
+    logger.debug("SocketIO server error: %r", data)
 
 
 async def connect_error(data: Dict[str, Any]) -> None:
     """
     Called when initial connection to server fails
     """
-    logger.warning("Connection refused by server: %s", data)
+    logger.warning("Connection refused by server: %r", data)
 
 
 async def any_unprocessed_event(event: str, sid: str, data: Any) -> None:
     """
     Fallback handler for Socket.IO events that don't have specific handlers
     """
-    logger.debug(f"SocketIO not handled event {event}")
+    logger.debug("SocketIO not handled event %r", event)
 
 
 async def on_alice_devices_list(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -294,7 +325,7 @@ async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
 
     for dev in data.get("devices", []):
         device_id = dev.get("id")
-        logger.debug(f"Try get data for device: '{device_id}'")
+        logger.debug("Try get data for device: %r", device_id)
         devices_response.append(await ctx.registry.get_device_current_state(device_id))
 
     query_response = {
@@ -309,14 +340,14 @@ async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
     return query_response
 
 
-def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
     """
     Processes all capabilities for a single device and returns the result block,
     formatted according to Yandex Smart Home action response spec.
     """
     device_id: str = device.get("id", "")
     if not device_id:
-        logger.warning("Device block missing 'id': %s", device)
+        logger.warning("Device block missing 'id': %r", device)
         return {}
 
     cap_results: List[Dict[str, Any]] = []
@@ -326,11 +357,13 @@ def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
         value: Any = cap.get("state", {}).get("value")
 
         try:
-            ctx.registry.forward_yandex_to_mqtt(device_id, cap_type, instance, value)
-            logger.debug("Action applied to %s: %s = %s", device_id, instance, value)
+            await ctx.registry.forward_yandex_to_mqtt(
+                device_id, cap_type, instance, value
+            )
+            logger.debug("Action applied to %r: %r = %r", device_id, instance, value)
             status = "DONE"
         except Exception as e:
-            logger.exception("Failed to apply action for device '%s'", device_id)
+            logger.exception("Failed to apply action for device %r", device_id)
             status = "ERROR"
 
         cap_results.append(
@@ -364,7 +397,7 @@ async def on_alice_devices_action(data: Dict[str, Any]) -> Dict[str, Any]:
     devices_info: List[Dict[str, Any]] = []
 
     for device in devices_in:
-        result = handle_single_device_action(device)
+        result = await handle_single_device_action(device)
         if result:
             devices_info.append(result)
 
@@ -408,13 +441,13 @@ def get_controller_sn() -> Optional[str]:
     try:
         with open(SHORT_SN_PATH, "r") as file:
             controller_sn = file.read().strip()
-            logger.debug(f"Read controller ID: {controller_sn}")
+            logger.debug("Read controller ID: %r", controller_sn)
             return controller_sn
     except FileNotFoundError:
-        logger.error(f"Controller ID file not found! Check the path: {SHORT_SN_PATH}")
+        logger.error("Controller ID file not found! Check the path: %r", SHORT_SN_PATH)
         return None
     except Exception as e:
-        logger.error(f"Reading controller ID exception: {e}")
+        logger.error("Reading controller ID exception: %r", e)
         return None
 
 
@@ -424,7 +457,7 @@ def read_config() -> Optional[Dict[str, Any]]:
     """
     try:
         if not os.path.exists(CONFIG_PATH):
-            logger.error(f"Configuration file not found at {CONFIG_PATH}")
+            logger.error("Configuration file not found at %r", CONFIG_PATH)
             return None
 
         with open(CONFIG_PATH, "r") as file:
@@ -434,20 +467,20 @@ def read_config() -> Optional[Dict[str, Any]]:
         logger.error("Parsing configuration file: Invalid JSON format")
         return None
     except Exception as e:
-        logger.error(f"Reading configuration exception: {e}")
+        logger.error("Reading configuration exception: %r", e)
         return None
 
 
 async def connect_controller(
     sock: socketio.AsyncClient, config: Dict[str, Any]
-) -> None:
+) -> bool:
     """
     Connect to SocketIO server using provided configuration
     """
     ctx.controller_sn = get_controller_sn()
     if not ctx.controller_sn:
         logger.error("Cannot proceed without controller ID")
-        return
+        return False
 
     # ARCHITECTURE NOTE: We always connect to localhost:8042 where Nginx proxy runs.
     # Nginx forwards requests to the actual server specified in 'server_address'.
@@ -455,32 +488,33 @@ async def connect_controller(
     # - SSL termination at Nginx level
     # - Certificate-based authentication
     # See configure-nginx-proxy.sh for Nginx configuration details.
-    LOCAL_PROXY_URL = "http://localhost:8042"
     server_address = config.get("server_address")  # Used by Nginx proxy
     if not server_address:
         logger.error("'server_address' not specified in configuration")
-        return
-    logger.info(f"Target SocketIO server: {server_address}")
-    logger.info(f"Connecting via Nginx proxy: {LOCAL_PROXY_URL}")
+        return False
+    logger.info("Target SocketIO server: %r", server_address)
+    logger.info("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
+
+    logger.info("Waiting for nginx proxy to be ready...")
+    if not await wait_for_nginx_ready():
+        logger.error("Nginx proxy not ready - exiting")
+        return False
 
     try:
         # Connect to local Nginx proxy which forwards to actual server
-        await sock.connect(
-            LOCAL_PROXY_URL,
-            socketio_path="/socket.io",
-            # controller_sn is passed via SSL certificate when Nginx proxies
+        # "controller_sn" is passed via SSL certificate when Nginx proxies
+        await asyncio.wait_for(
+            sock.connect(LOCAL_PROXY_URL, socketio_path=SOCKETIO_PATH), timeout=10.0
         )
         logger.info("Socket.IO connected successfully via proxy")
+        return True
 
-    except socketio.exceptions.ConnectionError as e:
-        logger.error(f"Socket.IO connection error: {e}")
-        # Unable to connect
-        # - The controller might have been unregistered
-        # - Or Server may have error or offline
-        # ACTION - do reconnection
+    except (socketio.exceptions.ConnectionError, asyncio.TimeoutError) as e:
+        logger.error("Initial Socket.IO connection failed: %r", e)
+        return False
     except Exception as e:
-        logger.exception(f"Unexpected exception during connection: {e}")
-        # ACTION - do reconnection
+        logger.exception("Unexpected exception during connection: %r", e)
+        return False
 
 
 def _log_and_stop(sig: signal.Signals) -> None:
@@ -491,7 +525,7 @@ def _log_and_stop(sig: signal.Signals) -> None:
     Idempotent: repeated signals after the first one do nothing.
     """
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    logger.warning("Signal %s received at %s – shutting down…", sig.name, ts)
+    logger.warning("Signal %r received at %r - shutting down...", sig.name, ts)
 
     # ctx.stop_event is created in main() before signal handlers are registered,
     # but we keep the guard just in case.
@@ -499,7 +533,105 @@ def _log_and_stop(sig: signal.Signals) -> None:
         ctx.stop_event.set()
 
 
-async def main() -> None:
+def check_nginx_status() -> bool:
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "nginx"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip() == "active"
+    except Exception:
+        return False
+
+
+async def wait_for_nginx_ready(timeout: int = 15) -> bool:
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        if check_nginx_status():
+            logger.debug("Nginx is active")
+            return True
+        await asyncio.sleep(0.5)
+
+    return False
+
+
+async def graceful_shutdown() -> None:
+    """
+    Perform graceful shutdown of Socket.IO client with proper server notification
+    """
+    logger.info("Starting graceful shutdown...")
+
+    # Notify server about going offline
+    # This is informative message, not have spesial beckend processing
+    if ctx.sio and ctx.sio.connected:
+        try:
+            logger.info("Notifying server about offline status...")
+            await asyncio.wait_for(
+                ctx.sio.emit(
+                    "message", {"controller_sn": ctx.controller_sn, "status": "offline"}
+                ),
+                timeout=3.0,
+            )
+            # Give server time to process the offline message
+            await asyncio.sleep(0.5)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout while notifying server about offline status")
+        except Exception as e:
+            logger.warning("Failed to notify server about offline status: %r", e)
+
+    logger.info("Properly disconnect from Socket.IO server ...")
+    # When service stop by user and then fast up
+    # We need stop correctly with wait disconnect from server, without it server not connect second controller twice
+    if ctx.sio and ctx.sio.connected:
+        try:
+            logger.info("Disconnecting from Socket.IO server...")
+            await asyncio.wait_for(ctx.sio.disconnect(), timeout=5.0)
+            logger.info("Socket.IO disconnected successfully")
+        except asyncio.TimeoutError:
+            logger.warning("Timeout while disconnecting from Socket.IO server")
+        except Exception as e:
+            logger.warning("Error during Socket.IO disconnect: %r", e)
+
+    # Cancel Socket.IO wait task if still running
+    sio_task = getattr(ctx, "sio_task", None)
+    if sio_task and not sio_task.done():
+        logger.info("Cancelling Socket.IO wait task...")
+        sio_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sio_task
+
+    # Stop MQTT client
+    if ctx.mqtt_client:
+        logger.info("Stopping MQTT client...")
+        try:
+            ctx.mqtt_client.loop_stop()
+            ctx.mqtt_client.disconnect()
+        except Exception as e:
+            logger.warning("Error during MQTT disconnect: %r", e)
+    logger.info("MQTT disconnected")
+
+    # Cancel any remaining asyncio tasks
+    pending = {t for t in asyncio.all_tasks() if t is not asyncio.current_task()}
+    if pending:
+        logger.info("Cancelling %d remaining tasks...", len(pending))
+        for task in pending:
+            task.cancel()
+
+        # Wait for tasks to finish cancellation
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True), timeout=3.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Some tasks did not cancel within timeout")
+
+    logger.info("Graceful shutdown completed")
+
+
+async def main() -> int:
     ctx.main_loop = asyncio.get_running_loop()
 
     ctx.stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
@@ -509,7 +641,7 @@ async def main() -> None:
     config = read_config()
     if not config:
         logger.error("Cannot proceed without configuration")
-        return
+        return 0  # 0 mean - exit without service restart
 
     if not config.get("client_enabled", False):
         logger.info(
@@ -518,7 +650,7 @@ async def main() -> None:
         logger.info("To enable Alice integration, set 'client_enabled': true in config")
         # Just wait for shutdown signal without doing anything
         await ctx.stop_event.wait()
-        return
+        return 0
 
     try:
         ctx.registry = DeviceRegistry(
@@ -526,21 +658,21 @@ async def main() -> None:
             send_to_yandex=send_to_yandex_state,
             publish_to_mqtt=publish_to_mqtt,
         )
-        logger.debug(f"Registry created with {len(ctx.registry.devices)} devices")
+        logger.debug("Registry created with %r devices", len(ctx.registry.devices))
     except Exception as e:
-        logger.error(f"Failed to create registry: {e}")
+        logger.error("Failed to create registry: %r", e)
         logger.info("Continuing without device configuration")
         ctx.registry = None
 
     # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
     ctx.mqtt_client = setup_mqtt_client()
     try:
-        ctx.mqtt_client.connect("localhost", 1883, 60)
+        ctx.mqtt_client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
         ctx.mqtt_client.loop_start()
         logger.info("Connected to local MQTT broker")
     except Exception as e:
-        logger.error(f"MQTT connect failed: {e}")
-        return
+        logger.error("MQTT connect failed: %r", e)
+        return 0  # 0 mean - exit without service restart
 
     is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
     ctx.sio = socketio.AsyncClient(
@@ -559,38 +691,20 @@ async def main() -> None:
     bind_socketio_handlers(ctx.sio)
 
     logger.info("Connecting Socket.IO client...")
-    await connect_controller(ctx.sio, config)
-    sio_task = asyncio.create_task(ctx.sio.wait())
+    if not await connect_controller(ctx.sio, config):
+        logger.error("Failed to establish initial connection - exiting")
+        return 1  # Need exit with error for restart
+
+    # Store the sio_task reference for graceful shutdown
+    ctx.sio_task = asyncio.create_task(ctx.sio.wait())
 
     # Wait for shutdown signal
     await ctx.stop_event.wait()
     logger.info("Shutdown signal received")
 
-    logger.info("Stopping Socket.IO client ...")
-    if ctx.sio.connected:
-        await ctx.sio.disconnect()
-    if not sio_task.done():
-        sio_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await sio_task
-
-    # Cancel any remaining asyncio tasks
-    pending = {t for t in asyncio.all_tasks() if t is not asyncio.current_task()}
-    logger.info("Cancelling %d pending tasks…", len(pending))
-    for task in pending:
-        task.cancel()
-
-    # Gather only if something is pending
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-        logger.info("%d tasks cancelled", len(pending))
-
-    logger.info("Stopping MQTT client")
-    ctx.mqtt_client.loop_stop()
-    ctx.mqtt_client.disconnect()
-    logger.info("MQTT disconnected")
-
+    await graceful_shutdown()
     logger.info("Shutdown complete")
+    return 0
 
 
 if __name__ == "__main__":
@@ -601,8 +715,11 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.warning("Interrupted by user (Ctrl+C)")
     except SystemExit as e:
-        logger.warning("System exit with code %s", e.code)
+        logger.warning("System exit with code %r", e.code)
+        # Pass SystemExit as-it
+        # This needed for service restarted if stop with error from this code
+        raise
     except Exception as e:
-        logger.exception("Unhandled exception: %s", e)
+        logger.exception("Unhandled exception: %r", e)
     finally:
         logger.info("wb-alice-client stopped")

@@ -73,7 +73,7 @@ class MQTTTopic:
             except ValueError:
                 # Invalid format
                 self.is_valid = False
-                return
+                return None
             self.device = device
             self.control = control
             self.is_valid = True
