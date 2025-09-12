@@ -217,15 +217,19 @@ def is_service_active(CLIENT_SERVICE_NAME):
 
 
 async def async_restart_service(service_name: str):
+    logger.debug("Attempting to restart service: %r", service_name)
+
     if not is_service_active(service_name):
-        logger.info("%r service not started", service_name)
-        return None
+        logger.info("%r service not active, starting...", service_name)
+        action = "start"
+    else:
+        action = "restart"
 
     try:
-        await asyncio.create_subprocess_exec("systemctl", "restart", service_name)
-        logger.info("%r service restart...", service_name)
+        await asyncio.create_subprocess_exec("systemctl", action, service_name)
+        logger.info("%r service %s...", service_name, action)
     except subprocess.CalledProcessError as e:
-        logger.info("%r service restart error", service_name)
+        logger.error("%r service %s error", service_name, action)
         return None
 
 

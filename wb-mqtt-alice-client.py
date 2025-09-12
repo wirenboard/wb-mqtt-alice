@@ -20,6 +20,7 @@ import random
 import signal
 import string
 import subprocess
+import sys
 import time
 from typing import Any, Dict, List, Optional
 
@@ -711,11 +712,24 @@ if __name__ == "__main__":
     logger.info("Starting wb-alice-client...")
 
     try:
-        asyncio.run(main(), debug=True)
+        exit_code = asyncio.run(main(), debug=True)
+        if exit_code != 0:
+            logger.warning(
+                "Service 'main()' returned error code %d - exiting with error",
+                exit_code,
+            )
+            sys.exit(exit_code)
     except KeyboardInterrupt:
         logger.warning("Interrupted by user (Ctrl+C)")
     except SystemExit as e:
-        logger.warning("System exit with code %r", e.code)
+        # One place called when code explicitly uses "sys.exit(code)" anywhere
+        exit_code = e.code if e.code is not None else 0
+        if exit_code == 0:
+            logger.info("Service exiting normally (code %d)", exit_code)
+        else:
+            logger.warning(
+                "Service exiting with error (code %d) - systemd will restart", exit_code
+            )
         # Pass SystemExit as-it
         # This needed for service restarted if stop with error from this code
         raise
