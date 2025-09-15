@@ -16,9 +16,12 @@ import paho.mqtt.subscribe as subscribe
 
 from constants import CAP_COLOR_SETTING
 from mqtt_topic import MQTTTopic
+from wb_alice_device_event_rate import AliceDeviceEventRate
 from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
 
 logger = logging.getLogger(__name__)
+
+CONFIG_EVENTS = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-event-rates.json"
 
 
 async def read_topic_once(
@@ -96,13 +99,15 @@ class DeviceRegistry:
         *,
         send_to_yandex: Callable[[str, str, Optional[str], Any], None],
         publish_to_mqtt: Callable[[str, str], Awaitable[None]],
+        cfg_events_path: Optional[str] = CONFIG_EVENTS,
     ) -> None:
         self._send_to_yandex = send_to_yandex
         self._publish_to_mqtt = publish_to_mqtt
+        self._cfg_events_path = cfg_events_path
 
         self.devices: Dict[str, Dict[str, Any]] = {}  # "id" to full json block
-        self.topic2info: Dict[str, Tuple[str, str, int]] = {}
-        self.cap_index: Dict[Tuple[str, str, Optional[str]], str] = {}
+        self.topic2info: Dict[str, Tuple[str, str, int, AliceDeviceEventRate]] = {}
+        self.cap_index: Dict[Tuple[str, str, Optional[str]], str, AliceDeviceEventRate] = {}
         self.rooms: Dict[str, Dict[str, Any]] = {}  # "room_id" to block
 
         self._load_config(cfg_path)
@@ -111,7 +116,7 @@ class DeviceRegistry:
         """
         Read device configuration file and populate internal structures
         - self.devices: full json device description
-        - self.topic2info: full_topic → (device_id, 'capabilities' / 'properties', index)
+        - self.topic2info: full_topic → (device_id, 'capabilities' / 'properties', index, AliceDeviceEventRate)
         - self.cap_index: 'capabilities' / 'properties'(device_id, type, instance) → full_topic
         """
 
@@ -122,6 +127,13 @@ class DeviceRegistry:
             logger.info(
                 "Config loaded: %r",
                 json.dumps(config_data, indent=2, ensure_ascii=False),
+            )
+            logger.info("Try to read event rates from %r", CONFIG_EVENTS)
+            config_evets = Path(self._cfg_events_path).read_text(encoding="utf-8")
+            config_evets = json.loads(config_evets)
+            logger.info(
+                "Config loaded: %r",
+                json.dumps(config_evets, indent=2, ensure_ascii=False),
             )
         except FileNotFoundError:
             logger.error("Config file not found: %r", path)
@@ -138,25 +150,30 @@ class DeviceRegistry:
         devices_config = config_data.get("devices", {})
         for device_id, device_data in devices_config.items():
             self.devices[device_id] = device_data
-
             for i, cap in enumerate(device_data.get("capabilities", [])):
                 mqtt_topic = MQTTTopic(cap["mqtt"])  # convert once
                 full = mqtt_topic.full  # always full form
-                self.topic2info[full] = (device_id, "capabilities", i)
+                # event-rate timer
+                event_rate_info = config_evets.get(cap["type"], {})
+                event_rate = AliceDeviceEventRate(event_rate_info)
+                self.topic2info[full] = (device_id, "capabilities", i, event_rate)
                 inst = cap.get("parameters", {}).get("instance")
-
-                # Instance types for each capabilities
+                # Instance types for each capability
                 # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
-                self.cap_index[(device_id, cap["type"], inst)] = full
+                self.cap_index[(device_id, cap["type"], inst, event_rate)] = full
 
             for i, prop in enumerate(device_data.get("properties", [])):
                 mqtt_topic = MQTTTopic(prop["mqtt"])
                 full = mqtt_topic.full
-                self.topic2info[full] = (device_id, "properties", i)
+                # event-rate timer
+                event_rate_info = config_evets.get(prop["type"], {})
+                event_rate = AliceDeviceEventRate(event_rate_info)
+                self.topic2info[full] = (device_id, "properties", i, event_rate)
                 index_key = (
                     device_id,
                     prop["type"],
                     prop.get("parameters", {}).get("instance"),
+                    event_rate,
                 )
                 self.cap_index[index_key] = full
 
@@ -305,7 +322,7 @@ class DeviceRegistry:
         if topic not in self.topic2info:
             return None
 
-        device_id, section, idx = self.topic2info[topic]
+        device_id, section, idx, _ = self.topic2info[topic]
         blk = self.devices[device_id][section][idx]
 
         cap_type = blk["type"]

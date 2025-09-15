@@ -1,0 +1,34 @@
+{
+  "devices.capabilities.on_off": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
+  "devices.capabilities.color_setting": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
+  "devices.capabilities.range": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
+  "devices.capabilities.mode": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
+  "devices.capabilities.toggle": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
+  "devices.capabilities.video_stream": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
+  "devices.properties.float": {
+    "rate_timer": 15,
+    "rate_rule": "average_value"
+  },
+  "devices.properties.event": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  }
+}

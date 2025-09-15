@@ -29,6 +29,7 @@ import socketio
 
 from device_registry import DeviceRegistry
 from yandex_handlers import send_to_yandex_state, set_emit_callback
+from wb_alice_device_state_sender import AliceDeviceStateSender
 
 # Configuration constants
 MQTT_HOST = "localhost"
@@ -57,6 +58,7 @@ except PackageNotFoundError:
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 CONFIG_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
+DEVICE_PATH = "/etc/wb-mqtt-alice-devices.conf"
 
 
 class AppContext:
@@ -74,7 +76,7 @@ class AppContext:
         self.registry: Optional[DeviceRegistry] = None
         self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
-
+        self.time_rate_sender: Optional[AliceDeviceStateSender] = None
 
 ctx = AppContext()
 
@@ -218,7 +220,10 @@ def mqtt_on_message(
     logger.debug("       - Size   : %r", len(message.payload))
     logger.debug("       - Message: %r", payload_str)
 
-    ctx.registry.forward_mqtt_to_yandex(topic_str, payload_str)
+    # add message to wb_alice_device_state_sender
+    asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.add_message(topic_str, payload_str), ctx.main_loop)
+
+
 
 
 def generate_client_id(prefix: str = "wb-alice-client") -> str:
@@ -565,6 +570,12 @@ async def graceful_shutdown() -> None:
     """
     logger.info("Starting graceful shutdown...")
 
+    # Stop AliceDeviceEventRate
+    if ctx.time_rate_sender.running:
+        logger.info("Stopping AliceDeviceEventRate...")
+        await ctx.time_rate_sender.stop()
+        await asyncio.sleep(0.1)
+
     # Notify server about going offline
     # This is informative message, not have spesial beckend processing
     if ctx.sio and ctx.sio.connected:
@@ -655,7 +666,7 @@ async def main() -> int:
 
     try:
         ctx.registry = DeviceRegistry(
-            "/etc/wb-mqtt-alice-devices.conf",
+            cfg_path=DEVICE_PATH,
             send_to_yandex=send_to_yandex_state,
             publish_to_mqtt=publish_to_mqtt,
         )
@@ -665,12 +676,16 @@ async def main() -> int:
         logger.info("Continuing without device configuration")
         ctx.registry = None
 
+    # init and start AliceDeviceStateSender
+    ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
+    asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.start(), ctx.main_loop)
+
     # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
     ctx.mqtt_client = setup_mqtt_client()
     try:
         ctx.mqtt_client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
         ctx.mqtt_client.loop_start()
-        logger.info("Connected to local MQTT broker")
+        logger.info(f"Connected to '{MQTT_HOST}' MQTT broker")
     except Exception as e:
         logger.error("MQTT connect failed: %r", e)
         return 0  # 0 mean - exit without service restart
