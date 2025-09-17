@@ -50,7 +50,7 @@ class AliceDeviceStateSender:
         """
         Add message to buffer
         """
-        logger.info(f"add message {topic_str} {payload_str}")
+        logger.debug(f"add message {topic_str} {payload_str}")
         # struct for device info
         async with self.lock:
             _, cap_prop, _, event_rate = self.get_device_info_by_topic(topic=topic_str)
