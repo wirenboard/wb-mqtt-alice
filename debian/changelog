@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.4.3) stable; urgency=medium
+
+  *  Add event rate limiting
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Mon, 22 Sep 2025 12:00:00 +0300
+
 wb-mqtt-alice (0.4.2) stable; urgency=medium
 
   * Fix version reading error when board-revision file is missing

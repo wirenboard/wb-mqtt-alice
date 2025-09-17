@@ -50,16 +50,19 @@ class AliceDeviceStateSender:
         """
         Add message to buffer
         """
-        logger.info(f"add message {topic_str} {payload_str}")
+        logger.debug(f"add message {topic_str} {payload_str}")
         # struct for device info
         async with self.lock:
             _, cap_prop, _, event_rate = self.get_device_info_by_topic(topic=topic_str)
+            logger.debug(f"add message: cap_prop is: {cap_prop}")
+            logger.debug(f"add message: event_rate {event_rate}")
             message = {
                 "topic": topic_str,
                 "cap_prop": cap_prop,
                 "payload": payload_str,
                 "origin_rate": event_rate,
             }
+            logger.debug(f"add message: message {message}")
             self.buffers[topic_str].append(message)
             # limits the size of the buffer (slice window)
             if len(self.buffers[topic_str]) > MAX_BUFFER_SIZE:
@@ -91,18 +94,19 @@ class AliceDeviceStateSender:
                                 raw=message_info["payload"]
                             )
                         else:
+                            logger.info("-> forward_mqtt_to_yandex")
                             self.device_registry.forward_mqtt_to_yandex(
                                 topic=topic,
                                 raw=message_info["payload"]
                             )
-                        # очищаем буфер
+                        # clear buffer
                         self.buffers[topic].clear()
-                        #  обновляем время отправки
+                        #  refresh current "send" time
                         self.last_send_times[topic] = current_time
                 await asyncio.sleep(0.1)
             except Exception as e:
                 logger.error(f"Error in send loop: {e}", exc_info=True)
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
         logger.info("send loop finished")
 
     def get_device_info_by_topic(self, topic):
@@ -115,7 +119,7 @@ class AliceDeviceStateSender:
             return messages[-1]
         if rule.lower() == "average_value":
             # calc average value in messages["payload"]
-            logger.info(messages)
+            logger.debug(messages)
             # be carful! for float types correctly !
             all_values_list = []
             for items in messages:
@@ -124,7 +128,8 @@ class AliceDeviceStateSender:
                 except ValueError:
                     logger.error(f"not a number: {items['payload']}")
             message = messages[-1]
-            message["payload"] = sum(all_values_list) / len(all_values_list)
+            if len(all_values_list) > 0:
+                message["payload"] = sum(all_values_list) / len(all_values_list)
             return message
         # process by default = last value
         return messages[-1]

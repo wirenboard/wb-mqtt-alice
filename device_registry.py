@@ -154,7 +154,10 @@ class DeviceRegistry:
                 mqtt_topic = MQTTTopic(cap["mqtt"])  # convert once
                 full = mqtt_topic.full  # always full form
                 # event-rate timer
-                event_rate_info = config_evets.get(cap["type"], {})
+                event_rate_info = config_evets.get(
+                    cap["type"],
+                    config_evets.get("devices.capabilities.default", {}),
+                )
                 event_rate = AliceDeviceEventRate(event_rate_info)
                 self.topic2info[full] = (device_id, "capabilities", i, event_rate)
                 inst = cap.get("parameters", {}).get("instance")
@@ -166,14 +169,16 @@ class DeviceRegistry:
                 mqtt_topic = MQTTTopic(prop["mqtt"])
                 full = mqtt_topic.full
                 # event-rate timer
-                event_rate_info = config_evets.get(prop["type"], {})
+                event_rate_info = config_evets.get(
+                    prop["type"],
+                    config_evets.get("devices.properties.default", {}),
+                )
                 event_rate = AliceDeviceEventRate(event_rate_info)
                 self.topic2info[full] = (device_id, "properties", i, event_rate)
                 index_key = (
                     device_id,
                     prop["type"],
                     prop.get("parameters", {}).get("instance"),
-                    event_rate,
                 )
                 self.cap_index[index_key] = full
 

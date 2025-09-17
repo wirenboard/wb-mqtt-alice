@@ -1,4 +1,12 @@
 {
+  "devices.capabilities.default": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
+  "devices.properties.default": {
+    "rate_timer": 1,
+    "rate_rule": "last_value"
+  },
   "devices.capabilities.on_off": {
     "rate_timer": 1,
     "rate_rule": "last_value"
@@ -24,7 +32,7 @@
     "rate_rule": "last_value"
   },
   "devices.properties.float": {
-    "rate_timer": 15,
+    "rate_timer": 1,
     "rate_rule": "average_value"
   },
   "devices.properties.event": {
