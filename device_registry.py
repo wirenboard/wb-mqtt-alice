@@ -173,7 +173,6 @@ class DeviceRegistry:
                     device_id,
                     prop["type"],
                     prop.get("parameters", {}).get("instance"),
-                    event_rate,
                 )
                 self.cap_index[index_key] = full
 
