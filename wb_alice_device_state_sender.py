@@ -54,12 +54,15 @@ class AliceDeviceStateSender:
         # struct for device info
         async with self.lock:
             _, cap_prop, _, event_rate = self.get_device_info_by_topic(topic=topic_str)
+            logger.debug(f"add message: cap_prop is: {cap_prop}")
+            logger.debug(f"add message: event_rate {event_rate}")
             message = {
                 "topic": topic_str,
                 "cap_prop": cap_prop,
                 "payload": payload_str,
                 "origin_rate": event_rate,
             }
+            logger.debug(f"add message: message {message}")
             self.buffers[topic_str].append(message)
             # limits the size of the buffer (slice window)
             if len(self.buffers[topic_str]) > MAX_BUFFER_SIZE:
