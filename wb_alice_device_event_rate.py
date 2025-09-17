@@ -20,3 +20,6 @@ class AliceDeviceEventRate:
             values = {}
         self.time_rate = values.get("rate_timer", DEFAULT_EVENT_RATE)
         self.rule = values.get("rate_rule", DEFAULT_EVENT_RULE)
+
+    def __repr__(self):
+        return f"AliceDeviceEventRate({self.time_rate}, {self.rule})"
