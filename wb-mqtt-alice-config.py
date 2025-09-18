@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # Constants
 SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
 BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
+BOARD_MODEL_PATH = Path("/proc/device-tree/model")
 CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
 SETTING_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-webui.conf")
 CLIENT_CONFIG_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf")
@@ -87,7 +88,7 @@ def get_controller_sn():
 
 
 def get_board_revision():
-    """Read the controller hardware revision (board-revision) from Device Tree."""
+    """Read the controller hardware revision from Device Tree."""
 
     logger.debug("Reading controller hardware revision...")
     try:
@@ -97,13 +98,21 @@ def get_board_revision():
         logger.debug("Сontroller hardware revision: %r", board_revision)
         return board_revision
     except FileNotFoundError:
-        logger.error(
-            "Controller board revition file not found! Check the path: %r",
-            BOARD_REVISION_PATH,
-        )
-        return None
+        try:
+            content = BOARD_MODEL_PATH.read_text().rstrip("\x00")
+            board_revision = re.search(r'rev\.\s*(\d+\.\d+)', content).group(1)
+            logger.debug("Сontroller revision: %r", board_revision)
+            return board_revision
+        except FileNotFoundError:
+            logger.error(
+                "Controller board revision files not found! Check paths: %r and %r",
+                BOARD_REVISION_PATH,
+                BOARD_MODEL_PATH,
+            )
+            return None
+
     except Exception as e:
-        logger.error("Error reading controller board revition: %r", e)
+        logger.error("Error reading controller board revision: %r", e)
         return None
 
 
