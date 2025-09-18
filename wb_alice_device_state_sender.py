@@ -98,9 +98,9 @@ class AliceDeviceStateSender:
                                 topic=topic,
                                 raw=message_info["payload"]
                             )
-                        # очищаем буфер
+                        # clear buffer
                         self.buffers[topic].clear()
-                        #  обновляем время отправки
+                        #  refresh current "send" time
                         self.last_send_times[topic] = current_time
                 await asyncio.sleep(0.1)
             except Exception as e:
