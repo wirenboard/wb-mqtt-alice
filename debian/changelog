@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.4.2) stable; urgency=medium
+
+  * Fix version reading error when board-revision file is missing
+
+ -- Mikhail Burchu <mikhail.burchu@wirenboard.com>  Thu, 18 Sep 2025 08:00:00 +0300
+
 wb-mqtt-alice (0.4.1) stable; urgency=medium
 
   * Fix service restart if clietn exit with error from code
