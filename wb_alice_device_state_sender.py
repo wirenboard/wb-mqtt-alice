@@ -4,7 +4,7 @@ import os
 import time
 from collections import defaultdict
 from os import getenv
-from typing import List
+from typing import Dict, List
 
 from device_registry import DeviceRegistry
 
@@ -46,7 +46,7 @@ class AliceDeviceStateSender:
         self.running = False
         logger.info("stop alice device state sender")
 
-    async def add_message(self, topic_str, payload_str):
+    async def add_message(self, topic_str: str, payload_str: str):
         """
         Add message to buffer
         """
@@ -83,31 +83,27 @@ class AliceDeviceStateSender:
                     # check time-rate
                     if current_time - last_send_time > message_info[-1]["origin_rate"].time_rate:
                         # Processes all messages in the buffer using the provided rule
-                        message_info = self.modify_messages_by_rule(
-                            rule=message_info[-1]["origin_rate"].rule,
-                            messages=message_info,
-                        )
-                        # send message to Yandex
-                        if os.getenv("__DEBUG__"):
-                            self.log_test_send(
-                                topic=topic,
-                                raw=message_info["payload"]
-                            )
-                        else:
-                            logger.info("-> forward_mqtt_to_yandex")
-                            self.device_registry.forward_mqtt_to_yandex(
-                                topic=topic,
-                                raw=message_info["payload"]
-                            )
+                        self.process_and_send_message(topic, message_info)
                         # clear buffer
                         self.buffers[topic].clear()
                         #  refresh current "send" time
                         self.last_send_times[topic] = current_time
-                await asyncio.sleep(0.1)
             except Exception as e:
                 logger.error(f"Error in send loop: {e}", exc_info=True)
-                await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1)
         logger.info("send loop finished")
+
+    def process_and_send_message(self, topic: str, message_info: Dict[List]):
+        message_info = self.modify_messages_by_rule(
+            rule=message_info[-1]["origin_rate"].rule,
+            messages=message_info,
+        )
+        # send message to Yandex
+        if os.getenv("__DEBUG__"):
+            self.log_test_send(topic=topic, raw=message_info["payload"])
+        else:
+            logger.info("-> forward_mqtt_to_yandex")
+            self.device_registry.forward_mqtt_to_yandex(topic=topic, raw=message_info["payload"])
 
     def get_device_info_by_topic(self, topic):
         return self.device_registry.topic2info.get(topic)
@@ -135,5 +131,5 @@ class AliceDeviceStateSender:
         return messages[-1]
 
     @staticmethod
-    def log_test_send(topic, raw):
+    def log_test_send(topic: str, raw: str):
         logger.info(f"log test send for {topic} : {raw}")

@@ -27,9 +27,10 @@ from typing import Any, Dict, List, Optional
 import paho.mqtt.client as mqtt_client
 import socketio
 
+from constants import CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH
 from device_registry import DeviceRegistry
-from yandex_handlers import send_to_yandex_state, set_emit_callback
 from wb_alice_device_state_sender import AliceDeviceStateSender
+from yandex_handlers import send_to_yandex_state, set_emit_callback
 
 # Configuration constants
 MQTT_HOST = "localhost"
@@ -55,11 +56,6 @@ try:
 except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
 
-# Configuration file paths
-SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
-CONFIG_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
-DEVICE_PATH = "/etc/wb-mqtt-alice-devices.conf"
-
 
 class AppContext:
     def __init__(self):
@@ -77,6 +73,7 @@ class AppContext:
         self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
         self.time_rate_sender: Optional[AliceDeviceStateSender] = None
+
 
 ctx = AppContext()
 
@@ -131,9 +128,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
             return None
 
         if ctx.main_loop.is_running():
-            fut = asyncio.run_coroutine_threadsafe(
-                ctx.sio.emit(event, data), ctx.main_loop
-            )
+            fut = asyncio.run_coroutine_threadsafe(ctx.sio.emit(event, data), ctx.main_loop)
 
             # Log if the future raises an exception
             def log_emit_exception(f: asyncio.Future):
@@ -174,9 +169,7 @@ async def publish_to_mqtt(topic: str, payload: str) -> None:
 # ---------------------------------------------------------------------
 
 
-def mqtt_on_connect(
-    client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int
-) -> None:
+def mqtt_on_connect(client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
     if rc != 0:
         logger.error("MQTT Connection failed with code: %r", rc)
         return None
@@ -196,9 +189,7 @@ def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> No
     logger.warning("MQTT Disconnected with code %r", rc)
 
 
-def mqtt_on_message(
-    client: mqtt_client.Client, userdata: Any, message: mqtt_client.MQTTMessage
-) -> None:
+def mqtt_on_message(client: mqtt_client.Client, userdata: Any, message: mqtt_client.MQTTMessage) -> None:
     if ctx.registry is None:
         logger.debug("MQTT Registry not available, ignoring message")
         return None
@@ -222,8 +213,6 @@ def mqtt_on_message(
 
     # add message to wb_alice_device_state_sender
     asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.add_message(topic_str, payload_str), ctx.main_loop)
-
-
 
 
 def generate_client_id(prefix: str = "wb-alice-client") -> str:
@@ -252,9 +241,7 @@ def setup_mqtt_client() -> mqtt_client.Client:
 
 async def connect() -> None:
     logger.info("Success connected to Socket.IO server!")
-    await ctx.sio.emit(
-        "message", {"controller_sn": ctx.controller_sn, "status": "online"}
-    )
+    await ctx.sio.emit("message", {"controller_sn": ctx.controller_sn, "status": "online"})
 
 
 async def disconnect() -> None:
@@ -363,9 +350,7 @@ async def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
         value: Any = cap.get("state", {}).get("value")
 
         try:
-            await ctx.registry.forward_yandex_to_mqtt(
-                device_id, cap_type, instance, value
-            )
+            await ctx.registry.forward_yandex_to_mqtt(device_id, cap_type, instance, value)
             logger.debug("Action applied to %r: %r = %r", device_id, instance, value)
             status = "DONE"
         except Exception as e:
@@ -477,9 +462,7 @@ def read_config() -> Optional[Dict[str, Any]]:
         return None
 
 
-async def connect_controller(
-    sock: socketio.AsyncClient, config: Dict[str, Any]
-) -> bool:
+async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any]) -> bool:
     """
     Connect to SocketIO server using provided configuration
     """
@@ -509,9 +492,7 @@ async def connect_controller(
     try:
         # Connect to local Nginx proxy which forwards to actual server
         # "controller_sn" is passed via SSL certificate when Nginx proxies
-        await asyncio.wait_for(
-            sock.connect(LOCAL_PROXY_URL, socketio_path=SOCKETIO_PATH), timeout=10.0
-        )
+        await asyncio.wait_for(sock.connect(LOCAL_PROXY_URL, socketio_path=SOCKETIO_PATH), timeout=10.0)
         logger.info("Socket.IO connected successfully via proxy")
         return True
 
@@ -582,9 +563,7 @@ async def graceful_shutdown() -> None:
         try:
             logger.info("Notifying server about offline status...")
             await asyncio.wait_for(
-                ctx.sio.emit(
-                    "message", {"controller_sn": ctx.controller_sn, "status": "offline"}
-                ),
+                ctx.sio.emit("message", {"controller_sn": ctx.controller_sn, "status": "offline"}),
                 timeout=3.0,
             )
             # Give server time to process the offline message
@@ -634,9 +613,7 @@ async def graceful_shutdown() -> None:
 
         # Wait for tasks to finish cancellation
         try:
-            await asyncio.wait_for(
-                asyncio.gather(*pending, return_exceptions=True), timeout=3.0
-            )
+            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=3.0)
         except asyncio.TimeoutError:
             logger.warning("Some tasks did not cancel within timeout")
 
@@ -656,9 +633,7 @@ async def main() -> int:
         return 0  # 0 mean - exit without service restart
 
     if not config.get("client_enabled", False):
-        logger.info(
-            "Client is disabled in configuration. Waiting for shutdown signal..."
-        )
+        logger.info("Client is disabled in configuration. Waiting for shutdown signal...")
         logger.info("To enable Alice integration, set 'client_enabled': true in config")
         # Just wait for shutdown signal without doing anything
         await ctx.stop_event.wait()
@@ -742,9 +717,7 @@ if __name__ == "__main__":
         if exit_code == 0:
             logger.info("Service exiting normally (code %d)", exit_code)
         else:
-            logger.warning(
-                "Service exiting with error (code %d) - systemd will restart", exit_code
-            )
+            logger.warning("Service exiting with error (code %d) - systemd will restart", exit_code)
         # Pass SystemExit as-it
         # This needed for service restarted if stop with error from this code
         raise

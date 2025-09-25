@@ -14,14 +14,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import paho.mqtt.subscribe as subscribe
 
-from constants import CAP_COLOR_SETTING
+from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
 from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
 
 logger = logging.getLogger(__name__)
-
-CONFIG_EVENTS = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-event-rates.json"
 
 
 async def read_topic_once(
@@ -41,9 +39,7 @@ async def read_topic_once(
 
     try:
         res = await asyncio.wait_for(
-            asyncio.to_thread(
-                subscribe.simple, topic, hostname=host, retained=retain, msg_count=1
-            ),
+            asyncio.to_thread(subscribe.simple, topic, hostname=host, retained=retain, msg_count=1),
             timeout=timeout,
         )
         if res:
@@ -58,9 +54,7 @@ async def read_topic_once(
         return None
 
 
-async def read_mqtt_state(
-    topic: str, mqtt_host="localhost", timeout=1
-) -> Optional[bool]:
+async def read_mqtt_state(topic: str, mqtt_host="localhost", timeout=1) -> Optional[bool]:
     """
     Reads the value of a topic (0/1, "false"/"true", etc.) and returns a Python bool
     Uses subscribe.simple(...) from paho.mqtt, which BLOCKS for the duration of reading
@@ -99,7 +93,7 @@ class DeviceRegistry:
         *,
         send_to_yandex: Callable[[str, str, Optional[str], Any], None],
         publish_to_mqtt: Callable[[str, str], Awaitable[None]],
-        cfg_events_path: Optional[str] = CONFIG_EVENTS,
+        cfg_events_path: Optional[str] = CONFIG_EVENTS_RATE,
     ) -> None:
         self._send_to_yandex = send_to_yandex
         self._publish_to_mqtt = publish_to_mqtt
@@ -128,7 +122,7 @@ class DeviceRegistry:
                 "Config loaded: %r",
                 json.dumps(config_data, indent=2, ensure_ascii=False),
             )
-            logger.info("Try to read event rates from %r", CONFIG_EVENTS)
+            logger.info("Try to read event rates from %r", CONFIG_EVENTS_RATE)
             config_evets = Path(self._cfg_events_path).read_text(encoding="utf-8")
             config_evets = json.loads(config_evets)
             logger.info(
@@ -199,9 +193,7 @@ class DeviceRegistry:
         devices_out: List[Dict[str, Any]] = []
 
         for dev_id, dev in self.devices.items():
-            logger.debug(
-                "Processing device: %r - %r", dev_id, dev.get("name", "No name")
-            )
+            logger.debug("Processing device: %r - %r", dev_id, dev.get("name", "No name"))
             room_name = ""
             room_id = dev.get("room_id")
             if room_id and room_id in self.rooms:
@@ -400,9 +392,7 @@ class DeviceRegistry:
         await self._publish_to_mqtt(cmd_topic, payload)
         logger.debug("Published %r → %r", payload, cmd_topic)
 
-    async def _read_capability_state(
-        self, device_id: str, cap: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    async def _read_capability_state(self, device_id: str, cap: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
         key = (device_id, cap_type, instance)
@@ -464,9 +454,7 @@ class DeviceRegistry:
             logger.debug("Failed to read capability topic %r: %r", topic, e)
             return None
 
-    async def _read_property_state(
-        self, device_id: str, prop: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
         key = (device_id, prop_type, instance)
