@@ -13,3 +13,6 @@ models.py /usr/lib/wb-mqtt-alice/
 fetch_url.py /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice-nginx.conf /usr/share/wb-mqtt-homeui/nginx/includes/
 configure-nginx-proxy.sh /usr/lib/wb-mqtt-alice/
+wb_alice_device_state_sender.py  /usr/lib/wb-mqtt-alice/
+wb_alice_device_event_rate.py /usr/lib/wb-mqtt-alice/
+wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/

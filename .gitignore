@@ -19,3 +19,7 @@
 
 # IDE files
 .vscode
+.pybuild
+.idea
+requirements.txt
+pyproject.toml
