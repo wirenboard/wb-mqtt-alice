@@ -50,19 +50,19 @@ class AliceDeviceStateSender:
         """
         Add message to buffer
         """
-        logger.debug(f"add message {topic_str} {payload_str}")
+        logger.debug("add message %s %s", topic_str, payload_str)
         # struct for device info
         async with self.lock:
             _, cap_prop, _, event_rate = self.get_device_info_by_topic(topic=topic_str)
-            logger.debug(f"add message: cap_prop is: {cap_prop}")
-            logger.debug(f"add message: event_rate {event_rate}")
+            logger.debug("add message: cap_prop is: %s", cap_prop)
+            logger.debug("add message: event_rate: %s", event_rate)
             message = {
                 "topic": topic_str,
                 "cap_prop": cap_prop,
                 "payload": payload_str,
                 "origin_rate": event_rate,
             }
-            logger.debug(f"add message: message {message}")
+            logger.debug("add message: message %s", message)
             self.buffers[topic_str].append(message)
             # limits the size of the buffer (slice window)
             if len(self.buffers[topic_str]) > MAX_BUFFER_SIZE:
@@ -77,7 +77,7 @@ class AliceDeviceStateSender:
                 current_time = time.time()
                 for topic, message_info in self.buffers.items():
                     if not message_info:
-                        logger.debug(f"not message info for topic={topic}")
+                        logger.debug("not message info for topic=%s", topic)
                         continue
                     last_send_time = self.last_send_times.get(topic, 0)
                     # check time-rate
@@ -89,7 +89,7 @@ class AliceDeviceStateSender:
                         #  refresh current "send" time
                         self.last_send_times[topic] = current_time
             except Exception as e:
-                logger.error(f"Error in send loop: {e}", exc_info=True)
+                logger.error("Error in send loop: %s", e, exc_info=True)
             await asyncio.sleep(0.1)
         logger.info("send loop finished")
 
@@ -122,7 +122,7 @@ class AliceDeviceStateSender:
                 try:
                     all_values_list.append(float(items["payload"]))
                 except ValueError:
-                    logger.error(f"not a number: {items['payload']}")
+                    logger.error("not a number: %s", items["payload"])
             message = messages[-1]
             if len(all_values_list) > 0:
                 message["payload"] = sum(all_values_list) / len(all_values_list)
@@ -132,4 +132,4 @@ class AliceDeviceStateSender:
 
     @staticmethod
     def log_test_send(topic: str, raw: str):
-        logger.info(f"log test send for {topic} : {raw}")
+        logger.info("log test send for %s : %s", topic, raw)

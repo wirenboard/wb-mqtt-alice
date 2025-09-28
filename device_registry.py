@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import paho.mqtt.subscribe as subscribe
 
-from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE
+from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
 from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
@@ -93,7 +93,7 @@ class DeviceRegistry:
         *,
         send_to_yandex: Callable[[str, str, Optional[str], Any], None],
         publish_to_mqtt: Callable[[str, str], Awaitable[None]],
-        cfg_events_path: Optional[str] = CONFIG_EVENTS_RATE,
+        cfg_events_path: Optional[str] = CONFIG_EVENTS_RATE_PATH,
     ) -> None:
         self._send_to_yandex = send_to_yandex
         self._publish_to_mqtt = publish_to_mqtt
@@ -122,7 +122,7 @@ class DeviceRegistry:
                 "Config loaded: %r",
                 json.dumps(config_data, indent=2, ensure_ascii=False),
             )
-            logger.info("Try to read event rates from %r", CONFIG_EVENTS_RATE)
+            logger.info("Try to read event rates from %r", CONFIG_EVENTS_RATE_PATH)
             config_evets = Path(self._cfg_events_path).read_text(encoding="utf-8")
             config_evets = json.loads(config_evets)
             logger.info(
