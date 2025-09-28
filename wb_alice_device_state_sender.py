@@ -82,11 +82,8 @@ class AliceDeviceStateSender:
                     last_send_time = self.last_send_times.get(topic, 0)
                     # check time-rate
                     if current_time - last_send_time > message_info[-1]["origin_rate"].time_rate:
-                        # Processes all messages in the buffer using the provided rule
                         self.process_and_send_message(topic, message_info)
-                        # clear buffer
                         self.buffers[topic].clear()
-                        #  refresh current "send" time
                         self.last_send_times[topic] = current_time
             except Exception as e:
                 logger.error("Error in send loop: %s", e, exc_info=True)
