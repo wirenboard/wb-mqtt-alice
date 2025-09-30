@@ -92,15 +92,13 @@ def get_board_revision():
 
     logger.debug("Reading controller hardware revision...")
     try:
-        board_revision = ".".join(
-            BOARD_REVISION_PATH.read_text().rstrip("\x00").split(".")[:2]
-        )
+        board_revision = ".".join(BOARD_REVISION_PATH.read_text().rstrip("\x00").split(".")[:2])
         logger.debug("Сontroller hardware revision: %r", board_revision)
         return board_revision
     except FileNotFoundError:
         try:
             content = BOARD_MODEL_PATH.read_text().rstrip("\x00")
-            board_revision = re.search(r'rev\.\s*(\d+\.\d+)', content).group(1)
+            board_revision = re.search(r"rev\.\s*(\d+\.\d+)", content).group(1)
             logger.debug("Сontroller revision: %r", board_revision)
             return board_revision
         except FileNotFoundError:
@@ -121,15 +119,9 @@ def get_key_id(controller_version: str) -> str:
     min_version = [7, 0]
     try:
         version_parts = list(map(int, controller_version.split(".")[:2]))
-        return (
-            "ATECCx08:00:02:C0:00"
-            if version_parts >= min_version
-            else "ATECCx08:00:04:C0:00"
-        )
+        return "ATECCx08:00:02:C0:00" if version_parts >= min_version else "ATECCx08:00:04:C0:00"
     except (ValueError, AttributeError) as e:
-        raise ValueError(
-            "Invalid controller version format: %r" % controller_version
-        ) from e
+        raise ValueError("Invalid controller version format: %r" % controller_version) from e
 
 
 def load_config() -> Config:
@@ -151,9 +143,7 @@ def save_config(config: Config):
 
     logger.debug("Saving configuration file...")
     try:
-        CONFIG_PATH.write_text(
-            json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        CONFIG_PATH.write_text(json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8")
 
         client_config = load_client_config()
         new_status = should_enable_client(config)
@@ -219,9 +209,7 @@ def get_translation(key: str, language: str = None) -> str:
 
 
 def is_service_active(CLIENT_SERVICE_NAME):
-    result = subprocess.run(
-        ["systemctl", "is-active", CLIENT_SERVICE_NAME], capture_output=True, text=True
-    )
+    result = subprocess.run(["systemctl", "is-active", CLIENT_SERVICE_NAME], capture_output=True, text=True)
     return result.stdout.strip() == "active"
 
 
@@ -311,13 +299,9 @@ def validate_room_name(name: str, language: str) -> None:
         )
 
 
-def validate_device_name_unique(
-    name: str, room_id: str, devices: dict, language: str
-) -> None:
+def validate_device_name_unique(name: str, room_id: str, devices: dict, language: str) -> None:
     """Validate that device name is unique"""
-    if any(
-        device.name == name and device.room_id == room_id for device in devices.values()
-    ):
+    if any(device.name == name and device.room_id == room_id for device in devices.values()):
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
             detail=get_translation("device_exists", language),
@@ -634,9 +618,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     HINTS = [
         # This error when frontend send not correct config with
         (
-            re.compile(
-                r"\b(color_model|temperature_k|color_scene|instance)\b", re.IGNORECASE
-            ),
+            re.compile(r"\b(color_model|temperature_k|color_scene|instance)\b", re.IGNORECASE),
             "Frontend must send instance explicitly: "
             "{color_model:'rgb'|'hsv', instance:'rgb'|'hsv'} OR "
             "{temperature_k:{min,max}, instance:'temperature_k'} OR "
