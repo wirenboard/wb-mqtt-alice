@@ -99,7 +99,6 @@ class AliceDeviceStateSender:
         if os.getenv("__DEBUG__"):
             self.log_test_send(topic=topic, raw=message_info["payload"])
         else:
-            logger.info("-> forward_mqtt_to_yandex")
             self.device_registry.forward_mqtt_to_yandex(topic=topic, raw=message_info["payload"])
 
     def get_device_info_by_topic(self, topic):
