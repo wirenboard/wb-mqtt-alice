@@ -101,7 +101,7 @@ class DeviceRegistry:
 
         self.devices: Dict[str, Dict[str, Any]] = {}  # "id" to full json block
         self.topic2info: Dict[str, Tuple[str, str, int, AliceDeviceEventRate]] = {}
-        self.cap_index: Dict[Tuple[str, str, Optional[str]], str, AliceDeviceEventRate] = {}
+        self.cap_index: Dict[Tuple[str, str, Optional[str]], str] = {}
         self.rooms: Dict[str, Dict[str, Any]] = {}  # "room_id" to block
 
         self._load_config(cfg_path)
@@ -157,7 +157,7 @@ class DeviceRegistry:
                 inst = cap.get("parameters", {}).get("instance")
                 # Instance types for each capability
                 # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
-                self.cap_index[(device_id, cap["type"], inst, event_rate)] = full
+                self.cap_index[(device_id, cap["type"], inst)] = full
 
             for i, prop in enumerate(device_data.get("properties", [])):
                 mqtt_topic = MQTTTopic(prop["mqtt"])
