@@ -610,7 +610,7 @@ async def delete_controller(request: Request):
     try:
         fetch_url(
             url=f"https://{server_address}/request-unregistration",
-            data={"controller_version": f"{controller_version}"},
+            data={"controller_version": f"{controller_version}", "controller_sn": controller_sn},
             key_id=key_id,
         )
     except Exception as e:
