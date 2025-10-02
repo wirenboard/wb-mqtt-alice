@@ -19,9 +19,10 @@ def unlink_controller():
         server_address = wb_mqtt_alice_config.load_client_config()["server_address"]
         controller_version = wb_mqtt_alice_config.get_board_revision()
         key_id = wb_mqtt_alice_config.get_key_id(controller_version)
+        controller_sn = wb_mqtt_alice_config.get_controller_sn()
         fetch_url(
             url=f"https://{server_address}/request-unregistration",
-            data={"controller_version": f"{controller_version}"},
+            data={"controller_version": f"{controller_version}", "controller_sn": controller_sn},
             key_id=key_id,
         )
     except Exception as e:
