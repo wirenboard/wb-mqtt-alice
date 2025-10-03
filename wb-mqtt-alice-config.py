@@ -606,12 +606,9 @@ async def delete_controller(request: Request):
     """Delete controller"""
 
     language = get_language(request)
-    config = load_config()
     try:
         fetch_url(
             url=f"https://{server_address}/request-unregistration",
-            data={"controller_version": f"{controller_version}", "controller_sn": controller_sn},
-            key_id=key_id,
         )
     except Exception as e:
         logger.error("Failed to fetch unregistration URL: %r", e)
