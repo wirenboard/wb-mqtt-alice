@@ -13,7 +13,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-def _to_bool(raw_state: Any) -> bool:
+def convert_to_bool(raw_state: Any) -> bool:
     """
     Conversion to bool according to Yandex on_off rules
     """
@@ -30,18 +30,18 @@ def _to_bool(raw_state: Any) -> bool:
         elif raw_state.isdigit():
             return int(raw_state) != 0
         else:
-            logger.debug("Unknown string %r → False", raw_state)
+            logger.debug("Unknown string %r, set False", raw_state)
             return False
     else:
-        logger.debug("Unknown value type %s → False", type(raw_state).__name__)
+        logger.debug("Unknown value type %s, set False", type(raw_state).__name__)
         return False
 
 
-def _to_float(raw: Any) -> float:
+def convert_to_float(raw: Any) -> float:
     try:
         return float(raw)
     except (ValueError, TypeError):
-        logger.debug("Cannot convert %r to float → 0.0", raw)
+        logger.debug("Cannot convert %r to float, set 0.0", raw)
         return 0.0
 
 

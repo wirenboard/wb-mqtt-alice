@@ -15,8 +15,8 @@ from constants import (
 )
 
 from converters import (
-    _to_bool,
-    _to_float,
+    convert_to_bool,
+    convert_to_float,
     convert_rgb_wb_to_int,
 )
 
@@ -34,19 +34,19 @@ def set_emit_callback(callback: Callable[[str, Dict[str, Any]], None]) -> None:
 
 def _on_off(device_id: str, instance: Optional[str], value: Any) -> None:
     send_state_to_server(
-        device_id, CAP_ON_OFF, instance, _to_bool(value)
+        device_id, CAP_ON_OFF, instance, convert_to_bool(value)
     )
 
 
 def _float_prop(device_id: str, instance: Optional[str], value: Any) -> None:
     send_state_to_server(
-        device_id, PROP_FLOAT, instance, _to_float(value)
+        device_id, PROP_FLOAT, instance, convert_to_float(value)
     )
 
 
 def _range_cap(device_id: str, instance: Optional[str], value: Any) -> None:
     send_state_to_server(
-        device_id, CAP_RANGE, instance, _to_float(value)
+        device_id, CAP_RANGE, instance, convert_to_float(value)
     )
 
 
@@ -142,9 +142,9 @@ def send_state_to_server(
 
     # Normalize known value types
     if block_type.endswith("on_off"):
-        value = _to_bool(value)
+        value = convert_to_bool(value)
     elif block_type.endswith("float"):
-        value = _to_float(value)
+        value = convert_to_float(value)
 
     payload = {
         "ts": int(time.time()),
