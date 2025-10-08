@@ -17,7 +17,7 @@ import paho.mqtt.subscribe as subscribe
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
-from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
+from yandex_handlers import convert_rgb_int_to_wb, convert_rgb_wb_to_int
 
 logger = logging.getLogger(__name__)
 
@@ -335,7 +335,7 @@ class DeviceRegistry:
                 return None
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
-                rgb_int = parse_rgb_payload(raw)
+                rgb_int = convert_rgb_wb_to_int(raw)
                 if rgb_int is None:
                     logger.warning("RGB payload can't be parsed: %r", raw)
                     return None
@@ -383,7 +383,7 @@ class DeviceRegistry:
                 except Exception:
                     logger.warning("Unexpected rgb value from Yandex: %r", value)
                     return None
-                payload = int_to_rgb_wb_format(v_int)
+                payload = convert_rgb_int_to_wb(v_int)
             elif instance == "temperature_k":
                 payload = str(int(float(value)))
         else:
@@ -423,7 +423,7 @@ class DeviceRegistry:
                     return None
                 raw = msg.payload.decode().strip()
                 if instance == "rgb":
-                    parsed = parse_rgb_payload(raw)
+                    parsed = convert_rgb_wb_to_int(raw)
                     if parsed is None:
                         return None
                     logger.debug("Successfully parsed RGB: %r to %r", raw, parsed)

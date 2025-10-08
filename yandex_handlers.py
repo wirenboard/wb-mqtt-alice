@@ -95,22 +95,25 @@ def _rgb_to_int(red: int, green: int, blue: int) -> int:
     return (red << 16) | (green << 8) | blue
 
 
-def int_to_rgb_wb_format(val: int) -> str:
+def convert_rgb_int_to_wb(val: int) -> str:
     """
-    Convert integer RGB value to WirenBoard format string
+    Convert RGB value from Yandex integer format to WirenBoard 
+    MQTT format (semicolon-separated)
     
     Extracts RGB components from a 24-bit integer and formats them 
     as semicolon-separated string for WirenBoard MQTT
-    
+
     Args:
         val: RGB integer value (0-16777215)
-        
+
     Returns:
         str: RGB components in WirenBoard format "R;G;B"
-        
+
     Example:
-        >>> int_to_rgb_wb_format(16744448)
-        "255;128;0"  # 0xFF8000 → "255;128;0"
+        >>> convert_rgb_int_to_wb(16744448)
+        "255;128;0"  # 0xFF8000 convertes to "255;128;0"
+        >>> convert_rgb_int_to_wb(0)
+        "0;0;0"
     """
     rgb_value = int(val) & 0xFFFFFF
     red = (rgb_value >> 16) & 0xFF
@@ -119,21 +122,23 @@ def int_to_rgb_wb_format(val: int) -> str:
     return f"{red};{green};{blue}"
 
 
-def parse_rgb_payload(raw: str = "") -> Optional[int]:
+def convert_rgb_wb_to_int(raw: str = "") -> Optional[int]:
     """
-    Parse RGB payload from WirenBoard MQTT format, semicolon separated:
-      - 'R;G;B' (0..255)
+    Convert RGB  value from WirenBoard MQTT format (semicolon-separated)
+    to Yandex integer format
 
     Args:
-        raw: RGB string in WirenBoard format "R;G;B"
-        
+        string: RGB in WirenBoard format "R;G;B" - for example "255;128;0"
+
     Returns:
         int: converted RGB value as integer 0..16777215, or None if failed
-        
+
     Example:
-        >>> parse_rgb_payload("255;128;0")
+        >>> convert_rgb_wb_to_int("255;128;0")
         16744448  # 0xFF8000
-        >>> parse_rgb_payload("invalid")
+        >>> convert_rgb_wb_to_int("invalid")
+        None
+        >>> convert_rgb_wb_to_int("")
         None
     """
     payload_str = raw.strip()
@@ -141,20 +146,20 @@ def parse_rgb_payload(raw: str = "") -> Optional[int]:
         if not payload_str:
             return None
         if ";" not in payload_str:
-            logger.warning("RGB payload must be in WirenBoard format 'R;G;B': %r", raw)
+            logger.warning("RGB must be in WirenBoard format 'R;G;B': %r", raw)
             return None
 
         # WirenBoard format: R;G;B
         rgb_components = payload_str.split(";")
         if len(rgb_components) != 3:
-            logger.warning("RGB payload must have exactly 3 components: %r", raw)
+            logger.warning("RGB must have exactly 3 components: %r", raw)
             return None
 
         red, green, blue = [int(component.strip()) for component in rgb_components]
         return _rgb_to_int(red, green, blue)
 
     except Exception as parse_error:
-        logger.warning("Failed to parse RGB payload %r: %r", raw, parse_error)
+        logger.warning("Failed to convert WB RGB %r: %r", raw, parse_error)
         return None
 
 
@@ -174,7 +179,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
         if isinstance(value, int):
             rgb_int = value
         else:
-            rgb_int = parse_rgb_payload(str(value))
+            rgb_int = convert_rgb_wb_to_int(str(value))
             if rgb_int is None:
                 logger.warning("Failed to parse RGB value: %r", value)
                 return None
