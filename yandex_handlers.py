@@ -163,6 +163,58 @@ def convert_rgb_wb_to_int(raw: str = "") -> Optional[int]:
         return None
 
 
+def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> int:
+    """
+    Convert WirenBoard temperature percentage (0-100) to Yandex Kelvin format
+    
+    Args:
+        percent: Temperature value in percentage (0-100)
+        min_k: Minimum temperature in Kelvin (typically 2700K)
+        max_k: Maximum temperature in Kelvin (typically 6500K)
+    
+    Returns:
+        int: Temperature in Kelvin
+    
+    Examples:
+        >>> convert_temp_percent_to_kelvin(0, 2700, 6500)
+        2700
+        >>> convert_temp_percent_to_kelvin(50, 2700, 6500)
+        4600
+        >>> convert_temp_percent_to_kelvin(100, 2700, 6500)
+        6500
+    """
+    percent = max(0.0, min(100.0, float(percent)))
+    kelvin = min_k + (max_k - min_k) * (percent / 100.0)
+    return int(round(kelvin))
+
+
+def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float:
+    """
+    Convert Yandex Kelvin temperature to WirenBoard percentage (0-100)
+    
+    Args:
+        kelvin: Temperature in Kelvin
+        min_k: Minimum temperature in Kelvin (typically 2700K)
+        max_k: Maximum temperature in Kelvin (typically 6500K)
+    
+    Returns:
+        float: Temperature in percentage (0-100)
+    
+    Examples:
+        >>> convert_temp_kelvin_to_percent(2700, 2700, 6500)
+        0.0
+        >>> convert_temp_kelvin_to_percent(4600, 2700, 6500)
+        50.0
+        >>> convert_temp_kelvin_to_percent(6500, 2700, 6500)
+        100.0
+    """
+    kelvin = max(min_k, min(max_k, int(kelvin)))
+    if max_k == min_k:
+        return 0.0
+    percent = ((kelvin - min_k) / (max_k - min_k)) * 100.0
+    return round(percent, 1)
+
+
 def _range_cap(device_id: str, instance: Optional[str], value: Any) -> None:
     send_state_to_server(
         device_id, CAP_RANGE, instance, _to_float(value)
