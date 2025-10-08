@@ -166,6 +166,7 @@ def convert_rgb_wb_to_int(raw: str = "") -> Optional[int]:
 def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> int:
     """
     Convert WirenBoard temperature percentage (0-100) to Yandex Kelvin format
+    Result is rounded to nearest 100K to avoid echo issues when converting back
     
     Args:
         percent: Temperature value in percentage (0-100)
@@ -173,25 +174,26 @@ def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> in
         max_k: Maximum temperature in Kelvin (typically 6500K)
     
     Returns:
-        int: Temperature in Kelvin
+        int: Temperature in Kelvin, rounded to nearest 100K
     
     Examples:
         >>> convert_temp_percent_to_kelvin(0, 2700, 6500)
         2700
-        >>> convert_temp_percent_to_kelvin(50, 2700, 6500)
-        4600
+        >>> convert_temp_percent_to_kelvin(47.4, 2700, 6500)
+        4500  # 4501K rounded to 4500K
         >>> convert_temp_percent_to_kelvin(100, 2700, 6500)
         6500
     """
     percent = max(0.0, min(100.0, float(percent)))
     kelvin = min_k + (max_k - min_k) * (percent / 100.0)
-    return int(round(kelvin))
+    return int(round(kelvin / 100.0) * 100)
 
 
 def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float:
     """
     Convert Yandex Kelvin temperature to WirenBoard percentage (0-100)
-    
+    Input is expected to be pre-rounded to nearest 100K by convert_temp_percent_to_kelvin
+
     Args:
         kelvin: Temperature in Kelvin
         min_k: Minimum temperature in Kelvin (typically 2700K)
@@ -203,8 +205,8 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
     Examples:
         >>> convert_temp_kelvin_to_percent(2700, 2700, 6500)
         0.0
-        >>> convert_temp_kelvin_to_percent(4600, 2700, 6500)
-        50.0
+        >>> convert_temp_kelvin_to_percent(4500, 2700, 6500)
+        47.4
         >>> convert_temp_kelvin_to_percent(6500, 2700, 6500)
         100.0
     """
