@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import sys
+
+sys.path.insert(0, '/usr/lib/wb-mqtt-alice')
+from wb_mqtt_alice_cli import main
+
+if __name__ == "__main__":
+    sys.exit(main())

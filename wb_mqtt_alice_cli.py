@@ -28,7 +28,7 @@ def unlink_controller():
         logger.error("Failed to fetch unregistration URL: %r", e)
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Args parsinfg for wb-mqtt-alice-client-cli")
     parser.add_argument(
         "--unlink-controller",
@@ -42,3 +42,6 @@ if __name__ == "__main__":
         logger.info("Unlinking controller from account...")
         unlink_controller()
         sys.exit(0)
+
+if __name__ == "__main__":
+    main()
