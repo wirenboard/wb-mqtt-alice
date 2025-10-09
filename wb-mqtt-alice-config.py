@@ -138,26 +138,68 @@ def load_config() -> Config:
         return config
 
 
-def save_config(config: Config):
-    """Save configuration file"""
-
-    logger.debug("Saving configuration file...")
+def save_config(config: Config) -> None:
+    """Save yandex devices configuration to file"""
+    logger.debug("Saving yandex devices configuration file...")
     try:
-        CONFIG_PATH.write_text(json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-
-        client_config = load_client_config()
-        new_status = should_enable_client(config)
-        if client_config.get("client_enabled") != new_status:
-            client_config["client_enabled"] = new_status
-            CLIENT_CONFIG_PATH.write_text(
-                json.dumps(client_config, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-
+        CONFIG_PATH.write_text(
+            json.dumps(config.dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
     except Exception as e:
-        logger.error("Error saving configuration file: %r", e)
+        logger.error("Error saving yandex devices configuration file: %r", e)
         raise
 
+
+def sync_client_enabled_status(config: Config) -> bool:
+    """
+    Synchronize client enabled status based on current config state
+
+    Returns:
+        bool: True if status was changed and client needs restart
+
+    Example:
+        - No devices, registered: False
+        - Has devices, not registered: False  
+        - Has devices, registered: True
+    """
+    client_config = load_client_config()
+
+    old_status = client_config.get("client_enabled")
+    new_status = should_enable_client(config)
+    if old_status == new_status:
+        return False  # No need to sync client state
+
+    client_config["client_enabled"] = new_status
+    try:
+        CLIENT_CONFIG_PATH.write_text(
+            json.dumps(client_config, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.error("Error saving yandex devices configuration file: %r", e)
+        raise
+
+    logger.info(
+        "Client status changed: %s -> %s (devices: %d, registered: %s)",
+        old_status, new_status, 
+        len(config.devices), 
+        bool(config.unlink_url)
+    )
+    return True
+
+
+def force_client_reload_config() -> None:
+    """
+    Force client to reload configuration by restarting the service
+    This function schedules an asynchronous service restart to apply
+    configuration changes. The restart is non-blocking
+
+    TODO: This is a temporary solution that requires service restart
+          Need refactor to use a signal/message-based approach (Unix socket)
+          to notify the running client about config changes without restart
+    """
+    logger.debug("Forcing client to reload configuration...")
     asyncio.create_task(async_restart_service(CLIENT_SERVICE_NAME))
 
 
@@ -246,8 +288,34 @@ def move_device_to_room(device_id, room_id, config):
 
 
 def should_enable_client(config: Config) -> bool:
-    """Check the minimum conditions for enabling the client"""
-    return bool(config.devices) and bool(config.unlink_url)
+    """
+    Check the minimum conditions for enabling the client
+
+    Both conditions must be met for client to be enabled:
+    - Has at least one device configured
+    - Controller is registered (unlink_url is set)
+    
+    Returns:
+        - True if client should be enabled
+        - False otherwise
+    """
+    devices_qty = len(config.devices)
+    has_devices = devices_qty > 0
+    is_registered = bool(config.unlink_url)
+
+    if not has_devices:
+        logger.debug("Client should be disabled: no devices configured")
+        return False
+    
+    if not is_registered:
+        logger.debug("Client should be disabled: controller not registered (no unlink_url)")
+        return False
+
+    logger.debug(
+        "Client should be enabled: %d device(s) configured, controller registered",
+        devices_qty
+    )
+    return True
 
 
 # Data validation functions
@@ -426,6 +494,13 @@ async def get_all_rooms_and_devices():
         config.unlink_url = f"https://{server_address.split(':')[0]}"
 
     save_config(config)
+    # Don't force client reload because this doesn't change devices
+    # But need try sync registration status with server
+    if sync_client_enabled_status(config):
+        force_client_reload_config()
+    else:
+        logger.debug("Registration status unchanged, no restart needed")
+
     return config
 
 
@@ -452,6 +527,12 @@ async def create_room(request: Request, room_data: Room):
     response = room_data.post_response(room_id)
 
     save_config(config)
+    # Don't force client reload because new room is empty
+    # But need try sync registration status with server
+    if sync_client_enabled_status(config):
+        force_client_reload_config()
+    else:
+        logger.debug("Registration status unchanged, no restart needed")
     return response
 
 
@@ -472,6 +553,9 @@ async def update_room(request: Request, room_id: str, room_data: Room):
     config.rooms[room_id] = response
 
     save_config(config)
+    # Always sync status and restart client when device config changes
+    sync_client_enabled_status(config)
+    force_client_reload_config()
     return response
 
 
@@ -499,6 +583,9 @@ async def delete_room(request: Request, room_id: str):
     del config.rooms[room_id]
 
     save_config(config)
+    # Always sync status and restart client when device config changes
+    sync_client_enabled_status(config)
+    force_client_reload_config()
     return {"message": get_translation("room_deleted", language)}
 
 
@@ -530,6 +617,9 @@ async def create_device(request: Request, device_data: Device):
     config.rooms[device_data.room_id].devices.append(device_id)
 
     save_config(config)
+    # Always sync status and restart client when device config changes
+    sync_client_enabled_status(config)
+    force_client_reload_config()
     return response
 
 
@@ -557,6 +647,9 @@ async def update_device(request: Request, device_id: str, device_data: Device):
     config.devices[device_id] = response
 
     save_config(config)
+    # Always sync status and restart client when device config changes
+    sync_client_enabled_status(config)
+    force_client_reload_config()
     return response
 
 
@@ -575,6 +668,9 @@ async def delete_device(request: Request, device_id: str):
     config.rooms[del_room_id].devices.remove(device_id)
 
     save_config(config)
+    # Always sync status and restart client when device config changes
+    sync_client_enabled_status(config)
+    force_client_reload_config()
     return {"message": get_translation("device_deleted", language)}
 
 
@@ -598,6 +694,9 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     response = RoomID(room_id=device_data.room_id)
 
     save_config(config)
+    # Always sync status and restart client when device config changes
+    sync_client_enabled_status(config)
+    force_client_reload_config()
     return response
 
 

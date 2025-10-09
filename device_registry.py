@@ -14,10 +14,16 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import paho.mqtt.subscribe as subscribe
 
+from converters import (
+    convert_rgb_int_to_wb,
+    convert_rgb_wb_to_int,
+    convert_temp_percent_to_kelvin,
+    convert_temp_kelvin_to_percent,
+)
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
-from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
+
 
 logger = logging.getLogger(__name__)
 
@@ -335,14 +341,25 @@ class DeviceRegistry:
                 return None
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
-                rgb_int = parse_rgb_payload(raw)
+                rgb_int = convert_rgb_wb_to_int(raw)
                 if rgb_int is None:
                     logger.warning("RGB payload can't be parsed: %r", raw)
                     return None
                 value = rgb_int
             elif instance == "temperature_k":
+                # Get temperature range from config
+                temp_params = blk.get("parameters", {}).get("temperature_k", {})
+                min_k = temp_params.get("min", 2700)
+                max_k = temp_params.get("max", 6500)
+
                 try:
-                    value = int(float(raw))
+                    # Convert WB percentage (0-100) to Kelvin for Yandex
+                    percent_value = float(raw)
+                    value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
+                    logger.debug(
+                        "Converted temp %r%% → %rK (range: %r-%rK)",
+                        percent_value, value, min_k, max_k
+                    )
                 except ValueError:
                     logger.warning("Can't convert %r to temperature_k", raw)
                     return None
@@ -383,9 +400,40 @@ class DeviceRegistry:
                 except Exception:
                     logger.warning("Unexpected rgb value from Yandex: %r", value)
                     return None
-                payload = int_to_rgb_wb_format(v_int)
+                payload = convert_rgb_int_to_wb(v_int)
             elif instance == "temperature_k":
-                payload = str(int(float(value)))
+                # Get device config to extract temperature range
+                if device_id not in self.devices:
+                    logger.warning("Device %r not found", device_id)
+                    return None
+                
+                device = self.devices[device_id]
+                
+                # Find capability with temperature_k parameters
+                temp_params = None
+                for cap in device.get("capabilities", []):
+                    if cap["type"] == cap_type:
+                        params = cap.get("parameters", {})
+                        if params.get("instance") == "temperature_k":
+                            temp_params = params.get("temperature_k", {})
+                            break
+                
+                if not temp_params:
+                    logger.warning("No temperature_k parameters for device %r", device_id)
+                    return None
+                
+                min_k = temp_params.get("min", 2700)
+                max_k = temp_params.get("max", 6500)
+                
+                # Convert Yandex Kelvin to WB percentage (0-100)
+                kelvin_value = int(float(value))
+                percent_value = convert_temp_kelvin_to_percent(kelvin_value, min_k, max_k)
+                payload = str(percent_value)
+                
+                logger.debug(
+                    "Converted temp %rK → %r%% (range: %r-%rK)",
+                    kelvin_value, percent_value, min_k, max_k
+                )
         else:
             payload = str(value)
 
@@ -423,15 +471,26 @@ class DeviceRegistry:
                     return None
                 raw = msg.payload.decode().strip()
                 if instance == "rgb":
-                    parsed = parse_rgb_payload(raw)
+                    parsed = convert_rgb_wb_to_int(raw)
                     if parsed is None:
                         return None
                     logger.debug("Successfully parsed RGB: %r to %r", raw, parsed)
                     value = parsed
                 elif instance == "temperature_k":
-                    # Convert to integer for temperature
+                    # Get temperature range from capability config
+                    temp_params = cap.get("parameters", {}).get("temperature_k", {})
+                    min_k = temp_params.get("min", 2700)
+                    max_k = temp_params.get("max", 6500)
+
                     try:
-                        value = int(float(raw))
+                        # Convert WB percentage to Kelvin for Yandex
+                        percent_value = float(raw)
+                        value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
+                        logger.debug(
+                            "Read temp: %r%% → %rK (range: %r-%rK)",
+                            percent_value, value, min_k, max_k
+                        )
+
                     except (ValueError, TypeError):
                         logger.warning("Invalid temperature_k value: %r", raw)
                         return None
