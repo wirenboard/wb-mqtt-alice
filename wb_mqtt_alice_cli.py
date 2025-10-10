@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 def unlink_controller():
-    logger.info("Controller unlinked successfully.")
+    logger.info("Controller unlinked start...")
     try:
-        spec = importlib.util.spec_from_file_location("wb_mqtt_alice_config", "wb-mqtt-alice-config.py")
+        spec = importlib.util.spec_from_file_location("wb_mqtt_alice_config", "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-config.py")
         wb_mqtt_alice_config = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(wb_mqtt_alice_config)
         server_address = wb_mqtt_alice_config.load_client_config()["server_address"]
@@ -23,9 +23,11 @@ def unlink_controller():
             url=f"https://{server_address}/request-unlink",
             key_id=key_id,
         )
-        logger.info("Unregistration response: %s", response)
+        if response["status_code"] >= 400:
+            raise Exception("Unlink request failed with status code %r", response)
+        logger.info("Controller unlinked Success...")
     except Exception as e:
-        logger.error("Failed to fetch unregistration URL: %r", e)
+        logger.error("Failed to unlink: %r,", e, exc_info=True)
 
 
 def main():
