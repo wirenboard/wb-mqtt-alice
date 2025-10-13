@@ -1,4 +1,4 @@
-wb-mqtt-alice (0.4.5) stable; urgency=medium
+wb-mqtt-alice (0.5.0) stable; urgency=medium
 
   * Add route to unlink controller
 
