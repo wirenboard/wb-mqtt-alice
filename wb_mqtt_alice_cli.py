@@ -6,6 +6,7 @@ import logging
 import sys
 
 from fetch_url import fetch_url
+from wb_mqtt_load_config import load_client_config, get_board_revision, get_key_id  
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +14,9 @@ logger = logging.getLogger(__name__)
 def unlink_controller():
     logger.info("Controller unlinked start...")
     try:
-        spec = importlib.util.spec_from_file_location("wb_mqtt_alice_config", "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-config.py")
-        wb_mqtt_alice_config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(wb_mqtt_alice_config)
-        server_address = wb_mqtt_alice_config.load_client_config()["server_address"]
-        controller_version = wb_mqtt_alice_config.get_board_revision()
-        key_id = wb_mqtt_alice_config.get_key_id(controller_version)
+        server_address = load_client_config()["server_address"]
+        controller_version = get_board_revision()
+        key_id = get_key_id(controller_version)
         response = fetch_url(
             url=f"https://{server_address}/request-unlink",
             key_id=key_id,

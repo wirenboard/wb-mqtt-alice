@@ -18,4 +18,5 @@ wb_alice_device_state_sender.py  /usr/lib/wb-mqtt-alice/
 wb_alice_device_event_rate.py /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/
 wb_mqtt_alice_cli.py /usr/lib/wb-mqtt-alice/
+wb_mqtt_load_config.py /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice /usr/bin/
