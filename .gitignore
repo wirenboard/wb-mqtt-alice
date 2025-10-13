@@ -23,3 +23,7 @@
 .idea
 requirements.txt
 pyproject.toml
+__pycache__/constants.cpython-312.pyc
+__pycache__/fetch_url.cpython-312.pyc
+__pycache__/models.cpython-312.pyc
+__pycache__/wb-mqtt-alice-config.cpython-312.pyc

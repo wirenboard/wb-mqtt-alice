@@ -601,6 +601,20 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     return response
 
 
+@app.delete("/integrations/alice/controller", status_code=HTTPStatus.OK)
+async def unlink_controller(request: Request):
+    """Unlink controller"""
+    language = get_language(request)
+    try:
+        fetch_url(
+            url=f"https://{server_address}/request-unlink",
+        )
+    except Exception as e:
+        logger.error("Failed to fetch unregistration URL: %r", e)
+
+    return {"message": get_translation("controller_inlinked", language)}
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """
