@@ -2,7 +2,7 @@ wb-mqtt-alice (0.4.5) stable; urgency=medium
 
   * Add route to unlink controller
 
- -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 30 Sep 2025 15:00:00 +0300
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 13 Oct 2025 15:00:00 +0300
 
 wb-mqtt-alice (0.4.4) stable; urgency=medium
 
