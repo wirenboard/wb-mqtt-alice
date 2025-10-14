@@ -6,7 +6,7 @@ import logging
 import sys
 
 from fetch_url import fetch_url
-from wb_mqtt_load_config import load_client_config, get_board_revision, get_key_id  
+from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
 
 logger = logging.getLogger(__name__)
 

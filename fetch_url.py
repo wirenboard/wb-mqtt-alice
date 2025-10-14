@@ -1,6 +1,5 @@
-import subprocess
 import json
-
+import subprocess
 from pathlib import Path
 
 BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
@@ -106,3 +105,8 @@ def fetch_url(
             "data": json_data,
             "error": None,
         }
+    return {
+        "status_code": int(status_code) if status_code.isdigit() else None,
+        "data": None,
+        "error": None,
+    }
