@@ -9,6 +9,7 @@ from fetch_url import fetch_url
 from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def unlink_controller():
@@ -23,7 +24,7 @@ def unlink_controller():
         )
         if response["status_code"] >= 400:
             raise Exception("Unlink request failed with status code %r", response)
-        logger.info("Controller unlinked Success...")
+        logger.info("Controller unlinked Successfully")
     except Exception as e:
         logger.error("Failed to unlink: %r,", e, exc_info=True)
 
