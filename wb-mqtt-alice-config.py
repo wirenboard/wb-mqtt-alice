@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from fetch_url import fetch_url
 from models import Capability, Config, Device, Property, Room, RoomID
-from wb_mqtt_load_config import load_client_config, get_board_revision, get_key_id
+from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
 
 # FastAPI initialization
 app = FastAPI(
@@ -110,7 +110,7 @@ def save_config(config: Config):
         new_status = should_enable_client(config)
         if client_config.get("client_enabled") != new_status:
             client_config["client_enabled"] = new_status
-            CLIENT_CONFIG_PATH.write_text(
+            Path(CLIENT_CONFIG_PATH).write_text(
                 json.dumps(client_config, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
