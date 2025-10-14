@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from fetch_url import fetch_url
 from models import Capability, Config, Device, Property, Room, RoomID
-from wb_mqtt_load_config import load_client_config, get_board_revision, get_key_id
+from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
 
 # FastAPI initialization
 app = FastAPI(
