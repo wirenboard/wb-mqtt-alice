@@ -396,6 +396,74 @@ class DeviceRegistry:
         except (ValueError, TypeError) as e:
             logger.warning("Failed to convert MQTT→Yandex for topic %r: %r", topic, e)
 
+    def _convert_cap_to_mqtt(
+        self, 
+        value: Any,
+        cap_type: str, 
+        instance: Optional[str] = None,
+        params: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Convert Yandex Smart Home value to MQTT payload string WirenBoard format
+
+        Args:
+            value: Value from Yandex in their format
+                Examples: - True/False (on_off)
+                            - 16744448 (RGB as int 0xFF8000)
+                            - 4500 (temperature in Kelvin)
+            cap_type: Yandex capability type string
+                Examples: - "devices.capabilities.on_off"
+                            - "devices.capabilities.color_setting"
+            [instance]: Capability instance identifier
+                Examples: - "on" (on_off)
+                            - "rgb"/"temperature_k" (color_setting)
+                Defaults to None for capabilities without instances
+            [params]: Device-specific capability parameters
+                Examples: - temperature_k range: {"temperature_k": {"min": 2700, "max": 6500}}
+                Defaults to None (empty dict used internally)
+        """
+        params = params or {}
+
+        if cap_type.endswith("on_off"):
+            return "1" if value else "0"
+
+        elif cap_type.endswith("color_setting"):
+            if instance == "rgb":
+                # Yandex sends int, convert to WB format "R;G;B"
+                try:
+                    v_int = int(value)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Unexpected RGB value from Yandex: {value!r}")
+                return convert_rgb_int_to_wb(v_int)
+
+            elif instance == "temperature_k":
+                # Get device config to extract temperature range
+                temp_params = params.get("temperature_k", {})
+                min_k = temp_params.get("min", 2700)
+                max_k = temp_params.get("max", 6500)
+                
+                # Convert Yandex Kelvin to WB percentage (0-100)
+                try:
+                    kelvin_value = int(float(value))
+                except (ValueError, TypeError):
+                    raise ValueError(f"Invalid temperature value from Yandex: {value!r}")
+                percent_value = convert_temp_kelvin_to_percent(kelvin_value, min_k, max_k)
+                
+                logger.debug(
+                    "Converted temp %rK → %r%% (range: %r-%rK)",
+                    kelvin_value, percent_value, min_k, max_k
+                )
+                
+                return str(percent_value)
+            
+            else:
+                # Other color_setting instances - passthrough
+                return str(value)
+        
+        else:
+            # Unknown capability types - passthrough as string
+            return str(value)
+
 
     async def forward_yandex_to_mqtt(
         self,
@@ -413,53 +481,29 @@ class DeviceRegistry:
         base = self.cap_index[key]  # already full topic
         cmd_topic = f"{base}/on"
 
-        if cap_type.endswith("on_off"):
-            # Handle topics with or without '/on' suffix
-            payload = "1" if value else "0"
-        elif cap_type.endswith("color_setting"):
-            if instance == "rgb":
-                # Yandex sends int, convert to WB format "R;G;B"
-                try:
-                    v_int = int(value)
-                except Exception:
-                    logger.warning("Unexpected rgb value from Yandex: %r", value)
-                    return None
-                payload = convert_rgb_int_to_wb(v_int)
-            elif instance == "temperature_k":
-                # Get device config to extract temperature range
-                if device_id not in self.devices:
-                    logger.warning("Device %r not found", device_id)
-                    return None
-                
-                device = self.devices[device_id]
-                
-                # Find capability with temperature_k parameters
-                temp_params = None
-                for cap in device.get("capabilities", []):
-                    if cap["type"] == cap_type:
-                        params = cap.get("parameters", {})
-                        if params.get("instance") == "temperature_k":
-                            temp_params = params.get("temperature_k", {})
-                            break
-                
-                if not temp_params:
-                    logger.warning("No temperature_k parameters for device %r", device_id)
-                    return None
-                
-                min_k = temp_params.get("min", 2700)
-                max_k = temp_params.get("max", 6500)
-                
-                # Convert Yandex Kelvin to WB percentage (0-100)
-                kelvin_value = int(float(value))
-                percent_value = convert_temp_kelvin_to_percent(kelvin_value, min_k, max_k)
-                payload = str(percent_value)
-                
-                logger.debug(
-                    "Converted temp %rK → %r%% (range: %r-%rK)",
-                    kelvin_value, percent_value, min_k, max_k
-                )
-        else:
-            payload = str(value)
+        # Get device parameters for conversion, later extract temperature range
+        device = self.devices.get(device_id)
+        if not device:
+            logger.warning("Device %r not found (key=%r)", device_id, key)
+            return None
+        cap_params: Optional[Dict[str, Any]] = None
+        for cap in device.get("capabilities", []):
+            if cap.get("type") == cap_type:
+                params = cap.get("parameters", {}) or {}
+                cap_instance = params.get("instance")
+                if cap_instance == instance:
+                    cap_params = params
+                    break
+
+        # Convert value to MQTT format
+        try:
+            payload = self._convert_cap_to_mqtt(value, cap_type, instance, cap_params)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Failed to convert Yandex→MQTT for %r (device=%r, instance=%r, value=%r): %s",
+                cap_type, device_id, instance, value, e
+            )
+            return None
 
         await self._publish_to_mqtt(cmd_topic, payload)
         logger.debug("Published %r → %r", payload, cmd_topic)
