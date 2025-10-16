@@ -410,6 +410,9 @@ class DeviceRegistry:
         logger.debug("Published %r → %r", payload, cmd_topic)
 
     async def _read_capability_state(self, device_id: str, cap: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Read capability state from MQTT and convert to Yandex format
+        """
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
         key = (device_id, cap_type, instance)
@@ -419,27 +422,18 @@ class DeviceRegistry:
             logger.debug("No MQTT topic found for capability: %r", key)
             return None
 
+        msg = await read_topic_once(topic, timeout=1)
+        if msg is None:
+            return None  # topic not found
+        raw = msg.payload.decode().strip()
+
+        # TODO(vg): Migrate conversion logic to use self._convert_to_yandex()
         try:
             if cap_type.endswith("on_off"):
-                # read like bool
-                msg = await read_topic_once(topic, timeout=1)
-                if msg is None:
-                    # topic not found
-                    return None
-                raw = msg.payload.decode().strip()
                 value = convert_to_bool(raw)
             elif cap_type.endswith("range"):
-                # Read range value as float
-                msg = await read_topic_once(topic, timeout=1)
-                if msg is None:
-                    return None
-                value = float(msg.payload.decode().strip())
+                value = float(raw)
             elif cap_type.endswith("color_setting"):
-                # Read color value and normalize instance
-                msg = await read_topic_once(topic, timeout=1)
-                if msg is None:
-                    return None
-                raw = msg.payload.decode().strip()
                 if instance == "rgb":
                     parsed = convert_rgb_wb_to_int(raw)
                     if parsed is None:
@@ -461,10 +455,7 @@ class DeviceRegistry:
                 else:
                     value = raw
             else:
-                msg = await read_topic_once(topic, timeout=1)
-                if msg is None:
-                    return None
-                value = msg.payload.decode().strip()
+                value = raw
 
             return {
                 "type": cap_type,
