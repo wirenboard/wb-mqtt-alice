@@ -15,7 +15,21 @@ logger = logging.getLogger(__name__)
 
 def convert_to_bool(raw_state: Any) -> bool:
     """
-    Conversion to bool according to Yandex on_off rules
+    Convert value to bool according to Yandex on_off rules
+
+    Args:
+        raw_state: Value to convert (bool, int, float, str)
+
+    Returns:
+        Boolean value
+
+    Examples:
+        >>> convert_to_bool("1")
+        True
+        >>> convert_to_bool("off")
+        False
+        >>> convert_to_bool(0)
+        False
     """
     if isinstance(raw_state, bool):
         return raw_state
