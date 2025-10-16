@@ -287,6 +287,72 @@ class DeviceRegistry:
 
         return devices_out
 
+    def _convert_cap_to_yandex(
+        self, 
+        raw: str, 
+        cap_type: str, 
+        instance: Optional[str] = None,
+        params: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """
+        Convert raw MQTT payload string to Yandex Smart Home capability format
+
+        Args:
+            raw: Raw MQTT payload string from WirenBoard device
+                Examples: - "1"
+                          - "255;128;64" (RGB)
+            cap_type: Yandex capability type string
+                Examples: - "devices.capabilities.on_off"
+                          - "devices.capabilities.range"
+            [instance]: Capability instance identifier, specific to capability type
+                Examples: - "on" (on_off)
+                          - "rgb"/"temperature_k" (color_setting)
+                Defaults to None - for capabilities that don't require instance
+            [params]: Device-specific capability parameters from configuration
+                May contain type-specific settings such as:
+                Examples: - temperature_k range: {"temperature_k": {"min": 2700, "max": 6500}}
+                          - color_model: {"color_model": "rgb"}
+                Defaults to None (empty dict used internally)
+
+        Returns:
+            Converted value in Yandex format
+
+        Raises:
+            ValueError: If raw value cannot be converted to expected format
+        """
+        # Use empty dict if None provided
+        params = params or {}
+        
+        if cap_type.endswith("on_off"):
+            return convert_to_bool(raw)
+
+        elif cap_type.endswith("float") or cap_type.endswith("range"):
+            return float(raw)
+        
+        elif cap_type.endswith("color_setting"):
+            if instance == "rgb":
+                rgb_int = convert_rgb_wb_to_int(raw)
+                if rgb_int is None:
+                    raise ValueError(f"Can't parse RGB value: {raw!r}")
+                logger.debug("Successfully parsed RGB: %r to %r", raw, rgb_int)
+                return rgb_int
+            
+            elif instance == "temperature_k":
+                # Get temperature range from capability config
+                temp_params = params.get("temperature_k", {})
+                min_k = temp_params.get("min", 2700)
+                max_k = temp_params.get("max", 6500)
+                percent_value = float(raw)
+                return convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
+
+            else:
+                # Other color_setting instances (e.g., color_scene) - passthrough
+                return raw
+
+        else:
+            # Unknown capability types - passthrough as string
+            return raw
+
 
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
         """
@@ -304,36 +370,8 @@ class DeviceRegistry:
 
         cap_type = blk["type"]
         instance = blk.get("parameters", {}).get("instance")
-
-        # Convert value to Yandex format
-        # TODO(vg): Migrate conversion logic to use self._convert_to_yandex()
         try:
-            if cap_type.endswith("on_off"):
-                value = convert_to_bool(raw)
-            elif cap_type.endswith("float") or cap_type.endswith("range"):
-                value = float(raw)
-            elif cap_type.endswith("color_setting"):
-                if instance == "rgb":
-                    rgb_int = convert_rgb_wb_to_int(raw)
-                    if rgb_int is None:
-                        raise ValueError(f"Can't parse RGB: {raw!r}")
-                    logger.debug("Successfully parsed RGB: %r to %r", raw, rgb_int)
-                    value = rgb_int
-                elif instance == "temperature_k":
-                    # Get temperature range from capability config
-                    temp_params = blk.get("parameters", {}).get("temperature_k", {})
-                    min_k = temp_params.get("min", 2700)
-                    max_k = temp_params.get("max", 6500)
-                    percent_value = float(raw)
-                    value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
-                else:
-                    # for other color_setting
-                    value = raw
-            else:
-                # for any other
-                value = raw
-
-            # Send color_setting instances for Yandex send "as it"
+            value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
             self._send_to_yandex(device_id, cap_type, instance, value)
         except (ValueError, TypeError) as e:
             logger.warning("Failed to convert MQTT→Yandex for topic %r: %r", topic, e)
@@ -428,32 +466,8 @@ class DeviceRegistry:
             logger.debug("Failed to read capability topic %r: %r", topic, e)
             return None
 
-        # Convert value to Yandex format
-        # TODO(vg): Migrate conversion logic to use self._convert_to_yandex()
         try:
-            if cap_type.endswith("on_off"):
-                value = convert_to_bool(raw)
-            elif cap_type.endswith("float") or cap_type.endswith("range"):
-                value = float(raw)
-            elif cap_type.endswith("color_setting"):
-                if instance == "rgb":
-                    rgb_int = convert_rgb_wb_to_int(raw)
-                    if rgb_int is None:
-                        raise ValueError(f"Can't parse RGB: {raw!r}")
-                    logger.debug("Successfully parsed RGB: %r to %r", raw, rgb_int)
-                    value = rgb_int
-                elif instance == "temperature_k":
-                    # Get temperature range from capability config
-                    temp_params = cap.get("parameters", {}).get("temperature_k", {})
-                    min_k = temp_params.get("min", 2700)
-                    max_k = temp_params.get("max", 6500)
-                    percent_value = float(raw)
-                    value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
-                else:
-                    value = raw
-            else:
-                value = raw
-
+            value = self._convert_cap_to_yandex(raw, cap_type, instance, cap.get("parameters"))
             return {
                 "type": cap_type,
                 "state": {
