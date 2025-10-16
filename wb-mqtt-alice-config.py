@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
 BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
 BOARD_MODEL_PATH = Path("/proc/device-tree/model")
-CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
+DEVICES_CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
 SETTING_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-webui.conf")
 CLIENT_CONFIG_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf")
 CLIENT_SERVICE_NAME = "wb-mqtt-alice-client"
@@ -129,7 +129,7 @@ def load_config() -> Config:
 
     logger.debug("Reading configuration file...")
     try:
-        config = Config(**json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        config = Config(**json.loads(DEVICES_CONFIG_PATH.read_text(encoding="utf-8")))
         return config
     except Exception as e:
         config = Config(**DEFAULT_CONFIG)
@@ -142,7 +142,7 @@ def save_config(config: Config) -> None:
     """Save yandex devices configuration to file"""
     logger.debug("Saving yandex devices configuration file...")
     try:
-        CONFIG_PATH.write_text(
+        DEVICES_CONFIG_PATH.write_text(
             json.dumps(config.dict(), ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
