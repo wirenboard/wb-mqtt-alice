@@ -306,7 +306,7 @@ class DeviceRegistry:
         instance = blk.get("parameters", {}).get("instance")
 
         if cap_type.endswith("on_off"):
-            value = raw.strip().lower() not in ("0", "false", "off")
+            value = convert_to_bool(raw)
         elif cap_type.endswith("float") or cap_type.endswith("range"):
             try:
                 value = float(raw)
