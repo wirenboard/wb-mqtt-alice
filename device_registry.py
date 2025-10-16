@@ -161,10 +161,72 @@ class DeviceRegistry:
             len(self.topic2info),
         )
 
+    def _merge_color_setting_params(self, capabilities: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Merge all color_setting sub-parameters into one capability
+        
+        WirenBoard stores color_setting as separate capabilities (rgb, temperature_k, etc.),
+        but Yandex expects them merged into single capability with combined parameters
+        
+        Args:
+            capabilities: List of device capabilities from config
+        
+        Returns:
+            Merged color_setting parameters dict, empty if no color capabilities found
+        """
+        color_params: Dict[str, Any] = {}
+        
+        for cap in capabilities:
+            cap_type = cap.get("type")
+            if cap_type is None:
+                continue
+            if cap_type != CAP_COLOR_SETTING:
+                continue
+                
+            params = dict(cap.get("parameters", {}))
+            params.pop("instance", None)  # Don't include 'instance' in discovery
+            
+            # color_model: "rgb" | "hsv"
+            if "color_model" in params and isinstance(params["color_model"], str):
+                color_params["color_model"] = params["color_model"]
+            
+            # temperature_k: {min, max}
+            if "temperature_k" in params and isinstance(params["temperature_k"], dict):
+                tk = params["temperature_k"]
+                color_params["temperature_k"] = {
+                    "min": tk.get("min"),
+                    "max": tk.get("max"),
+                }
+            
+            # Normalize color_scene data:
+            # - WB frontend write data to config in format:
+            #   "color_scene": {"scenes": [ "ocean", "sunset"]}
+            # - Yandex API expects format:
+            #   color_scene: { scenes: [{"id": "ocean"}, {"id": "sunset"}] }
+            if "color_scene" in params:
+                scenes_list = params["color_scene"].get("scenes", [])
+                normalized_scenes = []
+                for scene in scenes_list:
+                    if scene and isinstance(scene, str):
+                        normalized_scenes.append({"id": scene})
+                    else:
+                        logger.warning(
+                            "Unexpected scene type in color_scene: %s - %r",
+                            type(scene).__name__,
+                            scene,
+                        )
+                if normalized_scenes:
+                    color_params["color_scene"] = {"scenes": normalized_scenes}
+        
+        return color_params
+
     def build_yandex_devices_list(self) -> List[Dict[str, Any]]:
         """
         Build devices list in Yandex Smart Home discovery format
         Answer on discovery endpoint: /user/devices
+
+        Returns:
+            List of devices for /user/devices endpoint response
         """
 
         logger.info("Building device list from %r devices", len(self.devices))
@@ -188,59 +250,17 @@ class DeviceRegistry:
             }
 
             caps: List[Dict[str, Any]] = []
-            color_params: Dict[str, Any] = {}  # merge holder for color_setting
 
             for cap in dev.get("capabilities", []):
-                cap_type = cap["type"]
-
-                # Merge all color_setting sub-parameters into one capability
-                if cap_type == CAP_COLOR_SETTING:
-                    params = dict(cap.get("parameters", {}))
-                    # Do not include 'instance' in discovery parameters
-                    params.pop("instance", None)
-
-                    # color_model: "rgb" | "hsv"
-                    if "color_model" in params:
-                        cm = params["color_model"]
-                        if isinstance(cm, str):
-                            color_params["color_model"] = cm
-
-                    # temperature_k: {min, max}
-                    if "temperature_k" in params:
-                        tk = params["temperature_k"]
-                        if isinstance(tk, dict):
-                            color_params["temperature_k"] = {
-                                "min": tk.get("min"),
-                                "max": tk.get("max"),
-                            }
-
-                    # Normalize color_scene data:
-                    # - WB frontend write data to config in format:
-                    #   "color_scene": {"scenes": [ "ocean", "sunset"]}
-                    # - Yandex API expects format:
-                    #   color_scene: { scenes: [{"id": "ocean"}, {"id": "sunset"}] }
-                    if "color_scene" in params:
-                        scenes_list = params["color_scene"].get("scenes", [])
-                        normalized_scenes = []
-                        for scene in scenes_list:
-                            if scene and isinstance(scene, str):
-                                normalized_scenes.append({"id": scene})
-                            else:
-                                logger.warning(
-                                    "Unexpected scene type in color_scene: %s - %r",
-                                    type(scene).__name__,
-                                    scene,
-                                )
-                        color_params["color_scene"] = {"scenes": normalized_scenes}
-                    continue  # skip adding separate color_setting capability
-
-                # Non-color capabilities: pass through as-is
-                cap_dict = {"type": cap_type, "retrievable": True}
+                if cap["type"] == CAP_COLOR_SETTING:
+                    continue  # Will be merged later
+                cap_dict = {"type": cap["type"], "retrievable": True}
                 if "parameters" in cap and cap["parameters"]:
                     cap_dict["parameters"] = cap["parameters"].copy()
                 caps.append(cap_dict)
 
-            # Append merged color_setting (if any sub-params were found)
+            # Merge and append color_setting if present
+            color_params = self._merge_color_setting_params(dev.get("capabilities", []))
             if color_params:
                 caps.append(
                     {
