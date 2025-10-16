@@ -168,7 +168,7 @@ def sync_client_enabled_status(config: Config) -> bool:
     old_status = client_config.get("client_enabled")
     new_status = should_enable_client(config)
     if old_status == new_status:
-        return False  # No need to sync client state
+        return False  # No need to sync client "enabled" state
 
     client_config["client_enabled"] = new_status
     try:
