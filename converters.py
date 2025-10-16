@@ -142,12 +142,12 @@ def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> in
     """
     Convert WirenBoard temperature percentage (0-100) to Yandex Kelvin format
     Result is rounded to nearest 100K to avoid echo issues when converting back
-    
+
     Args:
         percent: Temperature value in percentage (0-100)
         min_k: Minimum temperature in Kelvin (typically 2700K)
         max_k: Maximum temperature in Kelvin (typically 6500K)
-    
+
     Returns:
         int: Temperature in Kelvin, rounded to nearest 100K
     
@@ -160,8 +160,13 @@ def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> in
         6500
     """
     percent = max(0.0, min(100.0, float(percent)))
-    kelvin = min_k + (max_k - min_k) * (percent / 100.0)
-    return int(round(kelvin / 100.0) * 100)
+    kelvin_raw = min_k + (max_k - min_k) * (percent / 100.0)
+    kelvin_rounded = int(round(kelvin_raw / 100.0) * 100)
+    logger.debug(
+        "Converted temp: %r%% → %rK → rounded %rK (range: %r-%rK)",
+        percent, kelvin_raw, kelvin_rounded, min_k, max_k
+    )
+    return kelvin_rounded
 
 
 def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float:

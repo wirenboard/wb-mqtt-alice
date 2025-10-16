@@ -353,13 +353,8 @@ class DeviceRegistry:
                 max_k = temp_params.get("max", 6500)
 
                 try:
-                    # Convert WB percentage (0-100) to Kelvin for Yandex
                     percent_value = float(raw)
                     value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
-                    logger.debug(
-                        "Converted temp %r%% → %rK (range: %r-%rK)",
-                        percent_value, value, min_k, max_k
-                    )
                 except ValueError:
                     logger.warning("Can't convert %r to temperature_k", raw)
                     return None
@@ -483,14 +478,8 @@ class DeviceRegistry:
                     max_k = temp_params.get("max", 6500)
 
                     try:
-                        # Convert WB percentage to Kelvin for Yandex
                         percent_value = float(raw)
                         value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
-                        logger.debug(
-                            "Read temp: %r%% → %rK (range: %r-%rK)",
-                            percent_value, value, min_k, max_k
-                        )
-
                     except (ValueError, TypeError):
                         logger.warning("Invalid temperature_k value: %r", raw)
                         return None
