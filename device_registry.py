@@ -305,42 +305,39 @@ class DeviceRegistry:
         cap_type = blk["type"]
         instance = blk.get("parameters", {}).get("instance")
 
-        if cap_type.endswith("on_off"):
-            value = convert_to_bool(raw)
-        elif cap_type.endswith("float") or cap_type.endswith("range"):
-            try:
+        # Convert value to Yandex format
+        # TODO(vg): Migrate conversion logic to use self._convert_to_yandex()
+        try:
+            if cap_type.endswith("on_off"):
+                value = convert_to_bool(raw)
+            elif cap_type.endswith("float") or cap_type.endswith("range"):
                 value = float(raw)
-            except ValueError:
-                logger.warning("Can't convert %r to float", raw)
-                return None
-        elif cap_type.endswith("color_setting"):
-            if instance == "rgb":
-                rgb_int = convert_rgb_wb_to_int(raw)
-                if rgb_int is None:
-                    logger.warning("RGB payload can't be parsed: %r", raw)
-                    return None
-                value = rgb_int
-            elif instance == "temperature_k":
-                # Get temperature range from capability config
-                temp_params = blk.get("parameters", {}).get("temperature_k", {})
-                min_k = temp_params.get("min", 2700)
-                max_k = temp_params.get("max", 6500)
-
-                try:
+            elif cap_type.endswith("color_setting"):
+                if instance == "rgb":
+                    rgb_int = convert_rgb_wb_to_int(raw)
+                    if rgb_int is None:
+                        raise ValueError(f"Can't parse RGB: {raw!r}")
+                    logger.debug("Successfully parsed RGB: %r to %r", raw, rgb_int)
+                    value = rgb_int
+                elif instance == "temperature_k":
+                    # Get temperature range from capability config
+                    temp_params = blk.get("parameters", {}).get("temperature_k", {})
+                    min_k = temp_params.get("min", 2700)
+                    max_k = temp_params.get("max", 6500)
                     percent_value = float(raw)
                     value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
-                except ValueError:
-                    logger.warning("Can't convert %r to temperature_k", raw)
-                    return None
+                else:
+                    # for other color_setting
+                    value = raw
             else:
-                # for other color_setting
+                # for any other
                 value = raw
-        else:
-            # for any other
-            value = raw
 
-        # Send color_setting instances for Yandex send "as it"
-        self._send_to_yandex(device_id, cap_type, instance, value)
+            # Send color_setting instances for Yandex send "as it"
+            self._send_to_yandex(device_id, cap_type, instance, value)
+        except (ValueError, TypeError) as e:
+            logger.warning("Failed to convert MQTT→Yandex for topic %r: %r", topic, e)
+
 
     async def forward_yandex_to_mqtt(
         self,
@@ -422,36 +419,36 @@ class DeviceRegistry:
             logger.debug("No MQTT topic found for capability: %r", key)
             return None
 
-        msg = await read_topic_once(topic, timeout=1)
-        if msg is None:
-            return None  # topic not found
-        raw = msg.payload.decode().strip()
+        try:
+            msg = await read_topic_once(topic, timeout=1)
+            if msg is None:
+                return None  # topic not found
+            raw = msg.payload.decode().strip()
+        except Exception as e:
+            logger.debug("Failed to read capability topic %r: %r", topic, e)
+            return None
 
+        # Convert value to Yandex format
         # TODO(vg): Migrate conversion logic to use self._convert_to_yandex()
         try:
             if cap_type.endswith("on_off"):
                 value = convert_to_bool(raw)
-            elif cap_type.endswith("range"):
+            elif cap_type.endswith("float") or cap_type.endswith("range"):
                 value = float(raw)
             elif cap_type.endswith("color_setting"):
                 if instance == "rgb":
-                    parsed = convert_rgb_wb_to_int(raw)
-                    if parsed is None:
-                        return None
-                    logger.debug("Successfully parsed RGB: %r to %r", raw, parsed)
-                    value = parsed
+                    rgb_int = convert_rgb_wb_to_int(raw)
+                    if rgb_int is None:
+                        raise ValueError(f"Can't parse RGB: {raw!r}")
+                    logger.debug("Successfully parsed RGB: %r to %r", raw, rgb_int)
+                    value = rgb_int
                 elif instance == "temperature_k":
                     # Get temperature range from capability config
                     temp_params = cap.get("parameters", {}).get("temperature_k", {})
                     min_k = temp_params.get("min", 2700)
                     max_k = temp_params.get("max", 6500)
-
-                    try:
-                        percent_value = float(raw)
-                        value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
-                    except (ValueError, TypeError):
-                        logger.warning("Invalid temperature_k value: %r", raw)
-                        return None
+                    percent_value = float(raw)
+                    value = convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
                 else:
                     value = raw
             else:
@@ -464,8 +461,8 @@ class DeviceRegistry:
                     "value": value,
                 },
             }
-        except Exception as e:
-            logger.debug("Failed to read capability topic %r: %r", topic, e)
+        except (ValueError, TypeError) as e:
+            logger.warning("Failed to convert value for %r: %r", key, e)
             return None
 
     async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
