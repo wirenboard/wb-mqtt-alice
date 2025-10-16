@@ -133,12 +133,12 @@ def load_config() -> Config:
         return config
     except Exception as e:
         config = Config(**DEFAULT_CONFIG)
-        save_config(config)
+        save_devices_config(config)
         logger.error("Error reading configuration file: %r", e)
         return config
 
 
-def save_config(config: Config) -> None:
+def save_devices_config(config: Config) -> None:
     """Save yandex devices configuration to file"""
     logger.debug("Saving yandex devices configuration file...")
     try:
@@ -493,7 +493,7 @@ async def get_all_rooms_and_devices():
         config.link_url = None
         config.unlink_url = f"https://{server_address.split(':')[0]}"
 
-    save_config(config)
+    save_devices_config(config)
     # Don't force client reload because this doesn't change devices
     # But need try sync registration status with server
     if sync_client_enabled_status(config):
@@ -526,7 +526,7 @@ async def create_room(request: Request, room_data: Room):
     config.rooms[room_id] = room_data
     response = room_data.post_response(room_id)
 
-    save_config(config)
+    save_devices_config(config)
     # Don't force client reload because new room is empty
     # But need try sync registration status with server
     if sync_client_enabled_status(config):
@@ -552,7 +552,7 @@ async def update_room(request: Request, room_id: str, room_data: Room):
     response = room_data.put_response()
     config.rooms[room_id] = response
 
-    save_config(config)
+    save_devices_config(config)
     # Always sync status and restart client when device config changes
     sync_client_enabled_status(config)
     force_client_reload_config()
@@ -582,7 +582,7 @@ async def delete_room(request: Request, room_id: str):
     config.rooms["without_rooms"].devices.extend(devices_to_move)
     del config.rooms[room_id]
 
-    save_config(config)
+    save_devices_config(config)
     # Always sync status and restart client when device config changes
     sync_client_enabled_status(config)
     force_client_reload_config()
@@ -616,7 +616,7 @@ async def create_device(request: Request, device_data: Device):
     config.devices[device_id] = device_data
     config.rooms[device_data.room_id].devices.append(device_id)
 
-    save_config(config)
+    save_devices_config(config)
     # Always sync status and restart client when device config changes
     sync_client_enabled_status(config)
     force_client_reload_config()
@@ -646,7 +646,7 @@ async def update_device(request: Request, device_id: str, device_data: Device):
     move_device_to_room(device_id, device_data.room_id, config)
     config.devices[device_id] = response
 
-    save_config(config)
+    save_devices_config(config)
     # Always sync status and restart client when device config changes
     sync_client_enabled_status(config)
     force_client_reload_config()
@@ -667,7 +667,7 @@ async def delete_device(request: Request, device_id: str):
     # Update room
     config.rooms[del_room_id].devices.remove(device_id)
 
-    save_config(config)
+    save_devices_config(config)
     # Always sync status and restart client when device config changes
     sync_client_enabled_status(config)
     force_client_reload_config()
@@ -693,7 +693,7 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     config.devices[device_id].room_id = device_data.room_id
     response = RoomID(room_id=device_data.room_id)
 
-    save_config(config)
+    save_devices_config(config)
     # Always sync status and restart client when device config changes
     sync_client_enabled_status(config)
     force_client_reload_config()
