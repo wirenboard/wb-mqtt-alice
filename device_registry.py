@@ -19,6 +19,7 @@ from converters import (
     convert_rgb_wb_to_int,
     convert_temp_percent_to_kelvin,
     convert_temp_kelvin_to_percent,
+    convert_to_bool,
 )
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
 from mqtt_topic import MQTTTopic
@@ -58,34 +59,6 @@ async def read_topic_once(
     except asyncio.TimeoutError:
         logger.warning("Read topic timeout waiting %r", topic)
         return None
-
-
-async def read_mqtt_state(topic: str, mqtt_host="localhost", timeout=1) -> Optional[bool]:
-    """
-    Reads the value of a topic (0/1, "false"/"true", etc.) and returns a Python bool
-    Uses subscribe.simple(...) from paho.mqtt, which BLOCKS for the duration of reading
-    """
-    logger.debug("Read MQTT state trying to read topic: %r", topic)
-
-    try:
-        msg = await read_topic_once(topic, host=mqtt_host, timeout=timeout)
-        if msg is None:
-            logger.debug("Not find retained payload in %r", topic)
-            return None
-    except Exception as e:
-        logger.warning("Failed to read topic %r: %r", topic, e)
-        return None
-
-    payload_str = msg.payload.decode().strip().lower()
-
-    # Interpret different payload variants
-    if payload_str in {"1", "true", "on"}:
-        return True
-    elif payload_str in {"0", "false", "off"}:
-        return False
-    else:
-        logger.warning("Unexpected payload in topic %r: %r", topic, payload_str)
-        return False
 
 
 class DeviceRegistry:
@@ -314,6 +287,7 @@ class DeviceRegistry:
 
         return devices_out
 
+
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
         """
         Forwards MQTT message to Yandex Smart Home.
@@ -347,7 +321,7 @@ class DeviceRegistry:
                     return None
                 value = rgb_int
             elif instance == "temperature_k":
-                # Get temperature range from config
+                # Get temperature range from capability config
                 temp_params = blk.get("parameters", {}).get("temperature_k", {})
                 min_k = temp_params.get("min", 2700)
                 max_k = temp_params.get("max", 6500)
@@ -448,11 +422,12 @@ class DeviceRegistry:
         try:
             if cap_type.endswith("on_off"):
                 # read like bool
-                value = await read_mqtt_state(topic, mqtt_host="localhost")
-                if value is None:
+                msg = await read_topic_once(topic, timeout=1)
+                if msg is None:
                     # topic not found
                     return None
-                value = bool(value)
+                raw = msg.payload.decode().strip()
+                value = convert_to_bool(raw)
             elif cap_type.endswith("range"):
                 # Read range value as float
                 msg = await read_topic_once(topic, timeout=1)
