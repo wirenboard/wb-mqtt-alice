@@ -151,6 +151,39 @@ def save_devices_config(config: Config) -> None:
         raise
 
 
+def finalize_config_change(config: Config, *, force_client_reload: bool = False) -> None:
+    """
+    Compact helper to finalize config changes (Save → Sync → Optional Restart)
+
+    force_client_reload:
+      - True: restart client unconditionally (still syncing status)
+            This needed when backend changed device config, but not needed
+            if we load configurator main page or create new empty room
+      - False: restart only if sync_client_enabled_status() has changed state
+            This needed when not need restart client for load new dev-config
+    """
+    save_devices_config(config)
+
+    # TODO(vg): Currently, the controller binding status (registration/linking)
+    #           is only re-evaluated when configuration operations occur.
+    #           This approach works but may skip updates if the controller
+    #           state changes independently. A more robust event-based sync
+    #           mechanism will be introduced in future revisions.
+    try:
+        status_changed = sync_client_enabled_status(config)
+    except Exception:
+        logger.exception("Failed to sync client enabled status")
+        status_changed = False
+
+    if force_client_reload or status_changed:
+        force_client_reload_config()
+    else:
+        logger.debug(
+            "No restart needed (force_client_reload=%s, status_changed=%s)",
+            force_client_reload, status_changed
+        )
+
+
 def sync_client_enabled_status(config: Config) -> bool:
     """
     Synchronize client enabled status based on current config state
@@ -493,13 +526,8 @@ async def get_all_rooms_and_devices():
         config.link_url = None
         config.unlink_url = f"https://{server_address.split(':')[0]}"
 
-    save_devices_config(config)
     # Don't force client reload because this doesn't change devices
-    # But need try sync registration status with server
-    if sync_client_enabled_status(config):
-        force_client_reload_config()
-    else:
-        logger.debug("Registration status unchanged, no restart needed")
+    finalize_config_change(config, force_client_reload=False)
 
     return config
 
@@ -526,13 +554,9 @@ async def create_room(request: Request, room_data: Room):
     config.rooms[room_id] = room_data
     response = room_data.post_response(room_id)
 
-    save_devices_config(config)
     # Don't force client reload because new room is empty
-    # But need try sync registration status with server
-    if sync_client_enabled_status(config):
-        force_client_reload_config()
-    else:
-        logger.debug("Registration status unchanged, no restart needed")
+    finalize_config_change(config, force_client_reload=False)
+
     return response
 
 
@@ -552,10 +576,9 @@ async def update_room(request: Request, room_id: str, room_data: Room):
     response = room_data.put_response()
     config.rooms[room_id] = response
 
-    save_devices_config(config)
     # Always sync status and restart client when device config changes
-    sync_client_enabled_status(config)
-    force_client_reload_config()
+    finalize_config_change(config, force_client_reload=True)
+
     return response
 
 
@@ -582,10 +605,9 @@ async def delete_room(request: Request, room_id: str):
     config.rooms["without_rooms"].devices.extend(devices_to_move)
     del config.rooms[room_id]
 
-    save_devices_config(config)
     # Always sync status and restart client when device config changes
-    sync_client_enabled_status(config)
-    force_client_reload_config()
+    finalize_config_change(config, force_client_reload=True)
+
     return {"message": get_translation("room_deleted", language)}
 
 
@@ -616,10 +638,9 @@ async def create_device(request: Request, device_data: Device):
     config.devices[device_id] = device_data
     config.rooms[device_data.room_id].devices.append(device_id)
 
-    save_devices_config(config)
     # Always sync status and restart client when device config changes
-    sync_client_enabled_status(config)
-    force_client_reload_config()
+    finalize_config_change(config, force_client_reload=True)
+
     return response
 
 
@@ -646,10 +667,9 @@ async def update_device(request: Request, device_id: str, device_data: Device):
     move_device_to_room(device_id, device_data.room_id, config)
     config.devices[device_id] = response
 
-    save_devices_config(config)
     # Always sync status and restart client when device config changes
-    sync_client_enabled_status(config)
-    force_client_reload_config()
+    finalize_config_change(config, force_client_reload=True)
+
     return response
 
 
@@ -667,10 +687,9 @@ async def delete_device(request: Request, device_id: str):
     # Update room
     config.rooms[del_room_id].devices.remove(device_id)
 
-    save_devices_config(config)
     # Always sync status and restart client when device config changes
-    sync_client_enabled_status(config)
-    force_client_reload_config()
+    finalize_config_change(config, force_client_reload=True)
+
     return {"message": get_translation("device_deleted", language)}
 
 
@@ -693,10 +712,9 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     config.devices[device_id].room_id = device_data.room_id
     response = RoomID(room_id=device_data.room_id)
 
-    save_devices_config(config)
     # Always sync status and restart client when device config changes
-    sync_client_enabled_status(config)
-    force_client_reload_config()
+    finalize_config_change(config, force_client_reload=True)
+
     return response
 
 
