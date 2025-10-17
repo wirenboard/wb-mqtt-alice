@@ -199,6 +199,11 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
     # HSV and color scene add there in future
 
 
+def _event_prop(device_id: str, instance: Optional[str], value: Any) -> None:
+    #TODO(victor.fedorov): надо подумать, стоит ли преобразовывать события к какому-то виду
+    logger.error(f"Test event_prop args: {args}")
+
+
 def _not_implemented(cap_type: str) -> Callable[..., None]:
     def _stub(*_a, **_kw) -> None:
         raise NotImplementedError("Handler for %r is not implemented yet" % cap_type)
@@ -217,7 +222,7 @@ _HANDLERS: Dict[str, Callable[[str, Optional[str], Any], None]] = {
     CAP_TOGGLE: _not_implemented("cap.toggle"),
     # Properties
     PROP_FLOAT: _float_prop,
-    PROP_EVENT: _not_implemented("prop.event"),
+    PROP_EVENT: _event_prop,
 }
 
 
@@ -257,7 +262,7 @@ def send_state_to_server(
         instance,
         value,
     )
-
+ 
     is_prop = block_type.startswith("devices.properties")
 
     # Normalize known value types
@@ -296,6 +301,15 @@ def send_to_yandex_state(
     """
     Unified sender to Yandex used by registry
     """
+    if device_id != "1f230dd5-251016153129-5aab9fd3-b870-405c-862e-3b700a9f998e":
+        return
+    logger.warning(
+        "[YANDEX] send_to_yandex_state: device=%r, type=%r, instance=%r, value=%r",
+        device_id,
+        cap_type,
+        instance,
+        value,
+    )
     handler = _HANDLERS.get(cap_type)
     if handler is None:
         logger.error(
