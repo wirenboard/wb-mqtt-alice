@@ -465,6 +465,51 @@ class DeviceRegistry:
             return str(value)
 
 
+    def _process_event_property(
+        self,
+        event_func: str,
+        event_unit: str,
+        raw: str,
+    ) -> Any:
+        """
+        Process event property before sending to Yandex.
+        Currently, this is a placeholder for any future processing logic.
+
+        Args:
+            event_func: Event function name from Yandex spec,
+            event_unit: event unit from Yandex spec,
+            raw: Raw payload string from MQTT message
+        Returns:
+            Processed value to be sent to Yandex
+        """
+        is_event_occurred = raw.strip() in ("1", "true", "on")
+
+        if event_func in ("vibration", "open", "button", "motion", "smoke", "gas",)  and is_event_occurred:
+            return event_unit.split(",")[-1]  # last part (TODO(victor.fedorov): test for values "tilt", "fall", "vibration", etc)
+        if event_func  == "battery_level_event":
+            # Example processing for battery level event
+            try:
+                level = int(raw)
+                if level < 20:
+                    value = "low"
+                else:
+                    value = "normal"
+                return value
+            except ValueError:
+                logger.warning(
+                    "[EVENT PROP] Device %r, instance %r invalid battery level: %r",
+                    value,
+                )
+                return value
+        elif event_func == "food_level_event":
+            pass
+        elif event_func == "water_level":
+            pass
+        elif event_func == "water_leak":
+            pass
+        return raw
+
+
     async def forward_yandex_to_mqtt(
         self,
         device_id: str,
