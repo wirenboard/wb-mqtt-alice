@@ -14,10 +14,17 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import paho.mqtt.subscribe as subscribe
 
+from converters import (
+    convert_rgb_int_to_wb,
+    convert_rgb_wb_to_int,
+    convert_temp_percent_to_kelvin,
+    convert_temp_kelvin_to_percent,
+    convert_to_bool,
+)
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
-from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,34 +59,6 @@ async def read_topic_once(
     except asyncio.TimeoutError:
         logger.warning("Read topic timeout waiting %r", topic)
         return None
-
-
-async def read_mqtt_state(topic: str, mqtt_host="localhost", timeout=1) -> Optional[bool]:
-    """
-    Reads the value of a topic (0/1, "false"/"true", etc.) and returns a Python bool
-    Uses subscribe.simple(...) from paho.mqtt, which BLOCKS for the duration of reading
-    """
-    logger.debug("Read MQTT state trying to read topic: %r", topic)
-
-    try:
-        msg = await read_topic_once(topic, host=mqtt_host, timeout=timeout)
-        if msg is None:
-            logger.debug("Not find retained payload in %r", topic)
-            return None
-    except Exception as e:
-        logger.warning("Failed to read topic %r: %r", topic, e)
-        return None
-
-    payload_str = msg.payload.decode().strip().lower()
-
-    # Interpret different payload variants
-    if payload_str in {"1", "true", "on"}:
-        return True
-    elif payload_str in {"0", "false", "off"}:
-        return False
-    else:
-        logger.warning("Unexpected payload in topic %r: %r", topic, payload_str)
-        return False
 
 
 class DeviceRegistry:
@@ -182,10 +161,72 @@ class DeviceRegistry:
             len(self.topic2info),
         )
 
+    def _merge_color_setting_params(self, capabilities: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Merge all color_setting sub-parameters into one capability
+        
+        WirenBoard stores color_setting as separate capabilities (rgb, temperature_k, etc.),
+        but Yandex expects them merged into single capability with combined parameters
+        
+        Args:
+            capabilities: List of device capabilities from config
+        
+        Returns:
+            Merged color_setting parameters dict, empty if no color capabilities found
+        """
+        color_params: Dict[str, Any] = {}
+        
+        for cap in capabilities:
+            cap_type = cap.get("type")
+            if cap_type is None:
+                continue
+            if cap_type != CAP_COLOR_SETTING:
+                continue
+                
+            params = dict(cap.get("parameters", {}))
+            params.pop("instance", None)  # Don't include 'instance' in discovery
+            
+            # color_model: "rgb" | "hsv"
+            if "color_model" in params and isinstance(params["color_model"], str):
+                color_params["color_model"] = params["color_model"]
+            
+            # temperature_k: {min, max}
+            if "temperature_k" in params and isinstance(params["temperature_k"], dict):
+                tk = params["temperature_k"]
+                color_params["temperature_k"] = {
+                    "min": tk.get("min"),
+                    "max": tk.get("max"),
+                }
+            
+            # Normalize color_scene data:
+            # - WB frontend write data to config in format:
+            #   "color_scene": {"scenes": [ "ocean", "sunset"]}
+            # - Yandex API expects format:
+            #   color_scene: { scenes: [{"id": "ocean"}, {"id": "sunset"}] }
+            if "color_scene" in params:
+                scenes_list = params["color_scene"].get("scenes", [])
+                normalized_scenes = []
+                for scene in scenes_list:
+                    if scene and isinstance(scene, str):
+                        normalized_scenes.append({"id": scene})
+                    else:
+                        logger.warning(
+                            "Unexpected scene type in color_scene: %s - %r",
+                            type(scene).__name__,
+                            scene,
+                        )
+                if normalized_scenes:
+                    color_params["color_scene"] = {"scenes": normalized_scenes}
+        
+        return color_params
+
     def build_yandex_devices_list(self) -> List[Dict[str, Any]]:
         """
         Build devices list in Yandex Smart Home discovery format
         Answer on discovery endpoint: /user/devices
+
+        Returns:
+            List of devices for /user/devices endpoint response
         """
 
         logger.info("Building device list from %r devices", len(self.devices))
@@ -209,59 +250,17 @@ class DeviceRegistry:
             }
 
             caps: List[Dict[str, Any]] = []
-            color_params: Dict[str, Any] = {}  # merge holder for color_setting
 
             for cap in dev.get("capabilities", []):
-                cap_type = cap["type"]
-
-                # Merge all color_setting sub-parameters into one capability
-                if cap_type == CAP_COLOR_SETTING:
-                    params = dict(cap.get("parameters", {}))
-                    # Do not include 'instance' in discovery parameters
-                    params.pop("instance", None)
-
-                    # color_model: "rgb" | "hsv"
-                    if "color_model" in params:
-                        cm = params["color_model"]
-                        if isinstance(cm, str):
-                            color_params["color_model"] = cm
-
-                    # temperature_k: {min, max}
-                    if "temperature_k" in params:
-                        tk = params["temperature_k"]
-                        if isinstance(tk, dict):
-                            color_params["temperature_k"] = {
-                                "min": tk.get("min"),
-                                "max": tk.get("max"),
-                            }
-
-                    # Normalize color_scene data:
-                    # - WB frontend write data to config in format:
-                    #   "color_scene": {"scenes": [ "ocean", "sunset"]}
-                    # - Yandex API expects format:
-                    #   color_scene: { scenes: [{"id": "ocean"}, {"id": "sunset"}] }
-                    if "color_scene" in params:
-                        scenes_list = params["color_scene"].get("scenes", [])
-                        normalized_scenes = []
-                        for scene in scenes_list:
-                            if scene and isinstance(scene, str):
-                                normalized_scenes.append({"id": scene})
-                            else:
-                                logger.warning(
-                                    "Unexpected scene type in color_scene: %s - %r",
-                                    type(scene).__name__,
-                                    scene,
-                                )
-                        color_params["color_scene"] = {"scenes": normalized_scenes}
-                    continue  # skip adding separate color_setting capability
-
-                # Non-color capabilities: pass through as-is
-                cap_dict = {"type": cap_type, "retrievable": True}
+                if cap["type"] == CAP_COLOR_SETTING:
+                    continue  # Will be merged later
+                cap_dict = {"type": cap["type"], "retrievable": True}
                 if "parameters" in cap and cap["parameters"]:
                     cap_dict["parameters"] = cap["parameters"].copy()
                 caps.append(cap_dict)
 
-            # Append merged color_setting (if any sub-params were found)
+            # Merge and append color_setting if present
+            color_params = self._merge_color_setting_params(dev.get("capabilities", []))
             if color_params:
                 caps.append(
                     {
@@ -308,6 +307,73 @@ class DeviceRegistry:
 
         return devices_out
 
+    def _convert_cap_to_yandex(
+        self, 
+        raw: str, 
+        cap_type: str, 
+        instance: Optional[str] = None,
+        params: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """
+        Convert raw MQTT payload string to Yandex Smart Home capability format
+
+        Args:
+            raw: Raw MQTT payload string from WirenBoard device
+                Examples: - "1"
+                          - "255;128;64" (RGB)
+            cap_type: Yandex capability type string
+                Examples: - "devices.capabilities.on_off"
+                          - "devices.capabilities.range"
+            [instance]: Capability instance identifier, specific to capability type
+                Examples: - "on" (on_off)
+                          - "rgb"/"temperature_k" (color_setting)
+                Defaults to None - for capabilities that don't require instance
+            [params]: Device-specific capability parameters from configuration
+                May contain type-specific settings such as:
+                Examples: - temperature_k range: {"temperature_k": {"min": 2700, "max": 6500}}
+                          - color_model: {"color_model": "rgb"}
+                Defaults to None (empty dict used internally)
+
+        Returns:
+            Converted value in Yandex format
+
+        Raises:
+            ValueError: If raw value cannot be converted to expected format
+        """
+        # Use empty dict if None provided
+        params = params or {}
+        
+        if cap_type.endswith("on_off"):
+            return convert_to_bool(raw)
+
+        elif cap_type.endswith("float") or cap_type.endswith("range"):
+            return float(raw)
+        
+        elif cap_type.endswith("color_setting"):
+            if instance == "rgb":
+                rgb_int = convert_rgb_wb_to_int(raw)
+                if rgb_int is None:
+                    raise ValueError(f"Can't parse RGB value: {raw!r}")
+                logger.debug("Successfully parsed RGB: %r to %r", raw, rgb_int)
+                return rgb_int
+            
+            elif instance == "temperature_k":
+                # Get temperature range from capability config
+                temp_params = params.get("temperature_k", {})
+                min_k = temp_params.get("min", 2700)
+                max_k = temp_params.get("max", 6500)
+                percent_value = float(raw)
+                return convert_temp_percent_to_kelvin(percent_value, min_k, max_k)
+
+            else:
+                # Other color_setting instances (e.g., color_scene) - passthrough
+                return raw
+
+        else:
+            # Unknown capability types - passthrough as string
+            return raw
+
+
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
         """
         Forwards MQTT message to Yandex Smart Home.
@@ -324,37 +390,80 @@ class DeviceRegistry:
 
         cap_type = blk["type"]
         instance = blk.get("parameters", {}).get("instance")
+        try:
+            value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
+            self._send_to_yandex(device_id, cap_type, instance, value)
+        except (ValueError, TypeError) as e:
+            logger.warning("Failed to convert MQTT→Yandex for topic %r: %r", topic, e)
+
+    def _convert_cap_to_mqtt(
+        self, 
+        value: Any,
+        cap_type: str, 
+        instance: Optional[str] = None,
+        params: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Convert Yandex Smart Home value to MQTT payload string WirenBoard format
+
+        Args:
+            value: Value from Yandex in their format
+                Examples: - True/False (on_off)
+                            - 16744448 (RGB as int 0xFF8000)
+                            - 4500 (temperature in Kelvin)
+            cap_type: Yandex capability type string
+                Examples: - "devices.capabilities.on_off"
+                            - "devices.capabilities.color_setting"
+            [instance]: Capability instance identifier
+                Examples: - "on" (on_off)
+                            - "rgb"/"temperature_k" (color_setting)
+                Defaults to None for capabilities without instances
+            [params]: Device-specific capability parameters
+                Examples: - temperature_k range: {"temperature_k": {"min": 2700, "max": 6500}}
+                Defaults to None (empty dict used internally)
+        """
+        params = params or {}
 
         if cap_type.endswith("on_off"):
-            value = raw.strip().lower() not in ("0", "false", "off")
-        elif cap_type.endswith("float") or cap_type.endswith("range"):
-            try:
-                value = float(raw)
-            except ValueError:
-                logger.warning("Can't convert %r to float", raw)
-                return None
+            return "1" if value else "0"
+
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
-                rgb_int = parse_rgb_payload(raw)
-                if rgb_int is None:
-                    logger.warning("RGB payload can't be parsed: %r", raw)
-                    return None
-                value = rgb_int
-            elif instance == "temperature_k":
+                # Yandex sends int, convert to WB format "R;G;B"
                 try:
-                    value = int(float(raw))
-                except ValueError:
-                    logger.warning("Can't convert %r to temperature_k", raw)
-                    return None
-            else:
-                # for other color_setting
-                value = raw
-        else:
-            # for any other
-            value = raw
+                    v_int = int(value)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Unexpected RGB value from Yandex: {value!r}")
+                return convert_rgb_int_to_wb(v_int)
 
-        # Send color_setting instances for Yandex send "as it"
-        self._send_to_yandex(device_id, cap_type, instance, value)
+            elif instance == "temperature_k":
+                # Get device config to extract temperature range
+                temp_params = params.get("temperature_k", {})
+                min_k = temp_params.get("min", 2700)
+                max_k = temp_params.get("max", 6500)
+                
+                # Convert Yandex Kelvin to WB percentage (0-100)
+                try:
+                    kelvin_value = int(float(value))
+                except (ValueError, TypeError):
+                    raise ValueError(f"Invalid temperature value from Yandex: {value!r}")
+                percent_value = convert_temp_kelvin_to_percent(kelvin_value, min_k, max_k)
+                
+                logger.debug(
+                    "Converted temp %rK → %r%% (range: %r-%rK)",
+                    kelvin_value, percent_value, min_k, max_k
+                )
+                
+                return str(percent_value)
+            
+            else:
+                # Other color_setting instances - passthrough
+                return str(value)
+        
+        else:
+            # Unknown capability types - passthrough as string
+            return str(value)
+
 
     async def forward_yandex_to_mqtt(
         self,
@@ -372,27 +481,37 @@ class DeviceRegistry:
         base = self.cap_index[key]  # already full topic
         cmd_topic = f"{base}/on"
 
-        if cap_type.endswith("on_off"):
-            # Handle topics with or without '/on' suffix
-            payload = "1" if value else "0"
-        elif cap_type.endswith("color_setting"):
-            if instance == "rgb":
-                # Yandex sends int, convert to WB format "R;G;B"
-                try:
-                    v_int = int(value)
-                except Exception:
-                    logger.warning("Unexpected rgb value from Yandex: %r", value)
-                    return None
-                payload = int_to_rgb_wb_format(v_int)
-            elif instance == "temperature_k":
-                payload = str(int(float(value)))
-        else:
-            payload = str(value)
+        # Get device parameters for conversion, later extract temperature range
+        device = self.devices.get(device_id)
+        if not device:
+            logger.warning("Device %r not found (key=%r)", device_id, key)
+            return None
+        cap_params: Optional[Dict[str, Any]] = None
+        for cap in device.get("capabilities", []):
+            if cap.get("type") == cap_type:
+                params = cap.get("parameters", {}) or {}
+                cap_instance = params.get("instance")
+                if cap_instance == instance:
+                    cap_params = params
+                    break
+
+        # Convert value to MQTT format
+        try:
+            payload = self._convert_cap_to_mqtt(value, cap_type, instance, cap_params)
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                "Failed to convert Yandex→MQTT for %r (device=%r, instance=%r, value=%r): %s",
+                cap_type, device_id, instance, value, e
+            )
+            return None
 
         await self._publish_to_mqtt(cmd_topic, payload)
         logger.debug("Published %r → %r", payload, cmd_topic)
 
     async def _read_capability_state(self, device_id: str, cap: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Read capability state from MQTT and convert to Yandex format
+        """
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
         key = (device_id, cap_type, instance)
@@ -403,46 +522,16 @@ class DeviceRegistry:
             return None
 
         try:
-            if cap_type.endswith("on_off"):
-                # read like bool
-                value = await read_mqtt_state(topic, mqtt_host="localhost")
-                if value is None:
-                    # topic not found
-                    return None
-                value = bool(value)
-            elif cap_type.endswith("range"):
-                # Read range value as float
-                msg = await read_topic_once(topic, timeout=1)
-                if msg is None:
-                    return None
-                value = float(msg.payload.decode().strip())
-            elif cap_type.endswith("color_setting"):
-                # Read color value and normalize instance
-                msg = await read_topic_once(topic, timeout=1)
-                if msg is None:
-                    return None
-                raw = msg.payload.decode().strip()
-                if instance == "rgb":
-                    parsed = parse_rgb_payload(raw)
-                    if parsed is None:
-                        return None
-                    logger.debug("Successfully parsed RGB: %r to %r", raw, parsed)
-                    value = parsed
-                elif instance == "temperature_k":
-                    # Convert to integer for temperature
-                    try:
-                        value = int(float(raw))
-                    except (ValueError, TypeError):
-                        logger.warning("Invalid temperature_k value: %r", raw)
-                        return None
-                else:
-                    value = raw
-            else:
-                msg = await read_topic_once(topic, timeout=1)
-                if msg is None:
-                    return None
-                value = msg.payload.decode().strip()
+            msg = await read_topic_once(topic, timeout=1)
+            if msg is None:
+                return None  # topic not found
+            raw = msg.payload.decode().strip()
+        except Exception as e:
+            logger.debug("Failed to read capability topic %r: %r", topic, e)
+            return None
 
+        try:
+            value = self._convert_cap_to_yandex(raw, cap_type, instance, cap.get("parameters"))
             return {
                 "type": cap_type,
                 "state": {
@@ -450,8 +539,8 @@ class DeviceRegistry:
                     "value": value,
                 },
             }
-        except Exception as e:
-            logger.debug("Failed to read capability topic %r: %r", topic, e)
+        except (ValueError, TypeError) as e:
+            logger.warning("Failed to convert value for %r: %r", key, e)
             return None
 
     async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
