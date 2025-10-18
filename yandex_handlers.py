@@ -10,14 +10,14 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from constants import (
-    CAP_COLOR_SETTING,
-    CAP_MODE,
-    CAP_ON_OFF,
-    CAP_RANGE,
-    CAP_TOGGLE,
-    CAP_VIDEO_STREAM,
-    PROP_EVENT,
-    PROP_FLOAT,
+  CAP_ON_OFF, CAP_COLOR_SETTING, CAP_RANGE, CAP_TOGGLE, CAP_MODE, CAP_VIDEO_STREAM,
+  PROP_FLOAT, PROP_EVENT
+)
+
+from converters import (
+    convert_to_bool,
+    convert_to_float,
+    convert_rgb_wb_to_int,
 )
 
 from converters import (
