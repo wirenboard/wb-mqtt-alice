@@ -19,6 +19,8 @@ from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
 from yandex_handlers import int_to_rgb_wb_format, parse_rgb_payload
 
+MOTION_LEVEL_THRESHOLD = 50  # Threshold for motion detection
+
 logger = logging.getLogger(__name__)
 
 
@@ -356,7 +358,6 @@ class DeviceRegistry:
             # For event properties, we want to send the post processing raw value
             _unit = blk.get("parameters", {}).get("unit")
             value = self._process_event_property(instance, _unit, raw)
-            # return  # may be?
         # Send color_setting instances for Yandex send "as it"
         self._send_to_yandex(device_id, cap_type, instance, value)
 
@@ -379,31 +380,38 @@ class DeviceRegistry:
         """
         is_event_occurred = raw.strip() in ("1", "true", "on")
 
-        if event_func in ("vibration", "open", "button", "motion", "smoke", "gas",)  and is_event_occurred:
-            return event_unit.split(",")[-1]  # last part (TODO(victor.fedorov): test for values "tilt", "fall", "vibration", etc)
-        if event_func  == "battery_level_event":
-            # Example processing for battery level event
-            try:
-                level = int(raw)
-                if level < 20:
-                    value = "low"
-                else:
-                    value = "normal"
-                return value
-            except ValueError:
-                logger.warning(
-                    "[EVENT PROP] Device %r, instance %r invalid battery level: %r",
-                    value,
-                )
-                return value
-        elif event_func == "food_level_event":
-            pass
-        elif event_func == "water_level":
-            pass
-        elif event_func == "water_leak":
-            pass
+        if event_func in ("vibration", "open", "button", "motion", "smoke", "gas",
+                          "battery_level_event", "food_level_event", "water_level", "water_leak") and is_event_occurred:
+            return event_unit.split(",")[-1]
+        if not is_event_occurred:
+            return self.convert_value_to_event_unit(event_func, raw)
+        logging.warning("Event property %r with unit %r raw %r passed without changes", event_func, event_unit, raw)
         return raw
 
+    def convert_value_to_event_unit(
+        self,
+        event_func: str,
+        value: str,
+    ) -> str:
+        """
+        Convert value to event unit format before sending to Yandex.
+        Currently, this is a placeholder for any future conversion logic.
+
+        Args:
+            event_func: Event function name from Yandex spec,
+            value: Value to be converted
+        Returns:
+            Converted value to be sent to Yandex
+        """
+        if event_func == "motion":
+            try:
+                _motion_value = int(value.strip())
+                if _motion_value > MOTION_LEVEL_THRESHOLD:
+                    return "detected"
+            except ValueError:
+                logger.warning("Can't convert %r to int for motion event", value)
+            return "not_detected"
+        return value
 
     async def forward_yandex_to_mqtt(
         self,
