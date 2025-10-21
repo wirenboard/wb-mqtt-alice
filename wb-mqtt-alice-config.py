@@ -173,7 +173,7 @@ def sync_client_enabled_status(config: Config) -> bool:
 
     client_config["client_enabled"] = new_status
     try:
-        CLIENT_CONFIG_PATH.write_text(
+        Path(CLIENT_CONFIG_PATH).write_text(
             json.dumps(client_config, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
