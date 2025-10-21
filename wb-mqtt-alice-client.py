@@ -73,6 +73,7 @@ class AppContext:
         self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
         self.time_rate_sender: Optional[AliceDeviceStateSender] = None
+        self.client_pkg_ver: Optional[str] = None
 
 
 ctx = AppContext()
@@ -441,6 +442,39 @@ def get_controller_sn() -> Optional[str]:
         logger.error("Reading controller ID exception: %r", e)
         return None
 
+def get_client_pkg_ver() -> str:
+    """
+    Get wb-mqtt-alice package version from Debian system
+    
+    Returns:
+        - Package version string (e.g. '0.5.2~exp~PR+34~3~g1b68346')
+        - 'unknown' if unable to determine
+    """
+    try:
+        result = subprocess.run(
+            ["dpkg-query", "-W", "-f=${Version}", "wb-mqtt-alice"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+        version = result.stdout.strip()
+        if version:
+            logger.debug("wb-mqtt-alice package version: %r", version)
+            return version
+        logger.warning("dpkg-query returned empty version")
+        return "unknown"
+    
+    except subprocess.CalledProcessError as e:
+        logger.warning("Package not found (returncode: %d)", e.returncode)
+        return "unknown"
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout while querying package version")
+        return "unknown"
+    except Exception as e:
+        logger.warning("Failed to get package version: %r", e)
+        return "unknown"
+
 
 def read_config() -> Optional[Dict[str, Any]]:
     """
@@ -482,6 +516,7 @@ async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any])
         logger.error("'server_address' not specified in configuration")
         return False
     logger.info("Target SocketIO server: %r", server_address)
+    logger.info("Client version: %r", ctx.client_pkg_ver)
     logger.info("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
 
     logger.info("Waiting for nginx proxy to be ready...")
@@ -492,7 +527,15 @@ async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any])
     try:
         # Connect to local Nginx proxy which forwards to actual server
         # "controller_sn" is passed via SSL certificate when Nginx proxies
-        await asyncio.wait_for(sock.connect(LOCAL_PROXY_URL, socketio_path=SOCKETIO_PATH), timeout=10.0)
+        await asyncio.wait_for(
+            sock.connect(
+                LOCAL_PROXY_URL,
+                socketio_path=SOCKETIO_PATH,
+                headers={
+                    "WB-Client-Pkg-Ver": ctx.client_pkg_ver
+                }
+            ),
+            timeout=10.0)
         logger.info("Socket.IO connected successfully via proxy")
         return True
 
@@ -527,8 +570,16 @@ def check_nginx_status() -> bool:
             capture_output=True,
             text=True,
             timeout=5,
+            check=True,
         )
         return result.stdout.strip() == "active"
+
+    except subprocess.CalledProcessError:
+        # nginx is not active (returncode != 0)
+        return False
+    except subprocess.TimeoutExpired:
+        logger.warning("Timeout while checking nginx status")
+        return False
     except Exception:
         return False
 
@@ -626,6 +677,7 @@ async def main() -> int:
     ctx.stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
     ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
     ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
+    ctx.client_pkg_ver = get_client_pkg_ver()
 
     config = read_config()
     if not config:
