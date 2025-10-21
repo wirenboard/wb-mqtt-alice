@@ -1,6 +1,5 @@
 import subprocess
 import json
-
 from pathlib import Path
 
 BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
@@ -35,7 +34,7 @@ def fetch_url(
             "error": str
         }
     """
-        
+
     # Checking for certificate availability
     cert_path = Path(BUNDLE_CRT_PATH)
     if not cert_path.exists():
@@ -101,8 +100,8 @@ def fetch_url(
         except json.JSONDecodeError:
             json_data = response_data
 
-        return {
-            "status_code": int(status_code) if status_code.isdigit() else None,
-            "data": json_data,
-            "error": None,
-        }
+    return {
+        "status_code": int(status_code) if status_code.isdigit() else None,
+        "data": json_data,
+        "error": None,
+    }

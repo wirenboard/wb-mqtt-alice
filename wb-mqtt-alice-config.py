@@ -13,9 +13,10 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from constants import CAP_COLOR_SETTING
+from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from fetch_url import fetch_url
 from models import Capability, Config, Device, Property, Room, RoomID
+from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
 
 # FastAPI initialization
 app = FastAPI(
@@ -34,7 +35,6 @@ BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
 BOARD_MODEL_PATH = Path("/proc/device-tree/model")
 DEVICES_CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
 SETTING_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-webui.conf")
-CLIENT_CONFIG_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf")
 CLIENT_SERVICE_NAME = "wb-mqtt-alice-client"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
@@ -85,43 +85,6 @@ def get_controller_sn():
     except Exception as e:
         logger.error("Error reading controller SN: %r", e)
         return None
-
-
-def get_board_revision():
-    """Read the controller hardware revision from Device Tree."""
-
-    logger.debug("Reading controller hardware revision...")
-    try:
-        board_revision = ".".join(BOARD_REVISION_PATH.read_text().rstrip("\x00").split(".")[:2])
-        logger.debug("Сontroller hardware revision: %r", board_revision)
-        return board_revision
-    except FileNotFoundError:
-        try:
-            content = BOARD_MODEL_PATH.read_text().rstrip("\x00")
-            board_revision = re.search(r"rev\.\s*(\d+\.\d+)", content).group(1)
-            logger.debug("Сontroller revision: %r", board_revision)
-            return board_revision
-        except FileNotFoundError:
-            logger.error(
-                "Controller board revision files not found! Check paths: %r and %r",
-                BOARD_REVISION_PATH,
-                BOARD_MODEL_PATH,
-            )
-            return None
-
-    except Exception as e:
-        logger.error("Error reading controller board revision: %r", e)
-        return None
-
-
-def get_key_id(controller_version: str) -> str:
-    """Determine the appropriate key ID based on controller version"""
-    min_version = [7, 0]
-    try:
-        version_parts = list(map(int, controller_version.split(".")[:2]))
-        return "ATECCx08:00:02:C0:00" if version_parts >= min_version else "ATECCx08:00:04:C0:00"
-    except (ValueError, AttributeError) as e:
-        raise ValueError("Invalid controller version format: %r" % controller_version) from e
 
 
 def load_config() -> Config:
@@ -234,18 +197,6 @@ def force_client_reload_config() -> None:
     """
     logger.debug("Forcing client to reload configuration...")
     asyncio.create_task(async_restart_service(CLIENT_SERVICE_NAME))
-
-
-def load_client_config():
-    """Load client configuration file"""
-
-    logger.debug("Reading client configuration file...")
-    try:
-        client_config = json.loads(CLIENT_CONFIG_PATH.read_text(encoding="utf-8"))
-        return client_config
-    except Exception as e:
-        logger.error("Error reading client configuration file: %r", e)
-        raise
 
 
 def load_setting():
