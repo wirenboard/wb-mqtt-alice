@@ -63,7 +63,12 @@ def init_globals():
         controller_version = get_board_revision()
         key_id = get_key_id(controller_version)
         config = load_config()
-        server_address = load_client_config()["server_address"]
+        
+        client_cfg = load_client_config()
+        server_address = client_cfg.get("server_address")
+        if not server_address:
+            raise ValueError("Missing 'server_address' in client config")
+
         setting = load_setting()
         translations = setting.get("translations", {})
     except Exception as e:
@@ -168,7 +173,7 @@ def sync_client_enabled_status(config: Config) -> bool:
 
     client_config["client_enabled"] = new_status
     try:
-        CLIENT_CONFIG_PATH.write_text(
+        Path(CLIENT_CONFIG_PATH).write_text(
             json.dumps(client_config, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
@@ -300,6 +305,76 @@ def should_enable_client(config: Config) -> bool:
         devices_qty
     )
     return True
+
+
+def sync_registration_status(config: Config) -> Config:
+    """
+    Synchronize controller registration status with remote server
+    
+    Updates config.link_url and config.unlink_url based on current registration state:
+    - If not registered: sets link_url (registration URL)
+    - If registered: sets unlink_url (server base URL)
+    
+    Args:
+        config: Current configuration object
+        
+    Returns:
+        Updated configuration object with actual registration URLs
+    """
+    logger.debug("Synchronizing registration status with server...")
+    
+    try:
+        response = fetch_url(
+            url=f"https://{server_address}/request-registration",
+            data={"controller_version": f"{controller_version}"},
+            key_id=key_id,
+        )
+
+        if response["data"] and "registration_url" in response["data"]:
+            # Controller is not registered - provide registration link
+            config.link_url = response["data"]["registration_url"]
+            config.unlink_url = None
+            logger.debug("Controller not registered, link_url updated")
+        elif response["data"]["detail"]:
+            # Controller is registered - provide unlink capability
+            config.link_url = None
+            config.unlink_url = f"https://{server_address.split(':')[0]}"
+            logger.debug("Controller registered, unlink_url updated")
+
+    except Exception as e:
+        logger.error("Failed to fetch registration URL: %r", e)
+        # On error, assume registered and provide unlink URL
+        config.link_url = None
+        config.unlink_url = f"https://{server_address.split(':')[0]}"
+
+    return config
+
+
+async def restore_client_status_if_needed(config: Config) -> None:
+    """
+    Restore client enabled status based on current configuration state
+    
+    Args:
+        config: Configuration object with actual registration status
+    """
+    logger.info("Checking if client status needs restoration...")
+    
+    try:
+        status_changed = sync_client_enabled_status(config)
+        
+        if status_changed:
+            logger.info("Client status restored on startup")
+            
+            # Start client service if it should be enabled
+            # Service may stop long time - need do it non-blocking
+            if should_enable_client(config):
+                asyncio.create_task(async_restart_service(CLIENT_SERVICE_NAME))
+        else:
+            logger.debug("Client status is already correct, no restoration needed")
+            
+    except Exception as e:
+        logger.error("Failed to restore client status: %r", e)
+        # Don't raise - this is a recovery mechanism, shouldn't break startup
 
 
 # Data validation functions
@@ -459,23 +534,7 @@ async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
 
     config = load_config()
-
-    try:
-        response = fetch_url(
-            url=f"https://{server_address}/request-registration",
-            data={"controller_version": f"{controller_version}"},
-            key_id=key_id,
-        )
-        if response["data"] and "registration_url" in response["data"]:
-            config.link_url = response["data"]["registration_url"]
-            config.unlink_url = None
-        elif response["data"]["detail"]:
-            config.link_url = None
-            config.unlink_url = f"https://{server_address.split(':')[0]}"
-    except Exception as e:
-        logger.error("Failed to fetch registration URL: %r", e)
-        config.link_url = None
-        config.unlink_url = f"https://{server_address.split(':')[0]}"
+    config = sync_registration_status(config)
 
     # Don't force client reload because this doesn't change devices
     finalize_config_change(config, force_client_reload=False)
@@ -731,8 +790,16 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Initialize global variables at startup
-init_globals()
+@app.on_event("startup")
+async def startup_event():
+    """Application startup tasks"""
+    init_globals()
+    config = load_config()
+
+    config = sync_registration_status(config)
+    finalize_config_change(config, force_client_reload=False)
+    
+    await restore_client_status_if_needed(config)
 
 
 if __name__ == "__main__":
