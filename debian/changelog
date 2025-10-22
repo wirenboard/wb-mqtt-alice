@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.5.3) stable; urgency=medium
+
+  * Revised the documentation
+  * Add description for qb-mqtt-alice command line tool 
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Wed, 22 Oct 2025 16:00:00 +0300
+
 wb-mqtt-alice (0.5.2) stable; urgency=medium
 
   * Fix client start after upgdate packet to new version
