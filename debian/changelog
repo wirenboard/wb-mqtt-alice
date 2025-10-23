@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.5.3) stable; urgency=medium
+
+  * Add support for devices properties event in yandex
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Thu, 23 Oct 2025 16:00:00 +0300
+
 wb-mqtt-alice (0.5.2) stable; urgency=medium
 
   * Fix client start after upgdate packet to new version

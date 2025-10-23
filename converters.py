@@ -209,3 +209,146 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
         return 0.0
     percent = ((kelvin - min_k) / (max_k - min_k)) * 100.0
     return round(percent, 1)
+
+# Define handler functions for each event type
+def handle_motion(raw_value:str) -> str:
+    """
+    Convert a raw motion sensor value to a detection status.
+
+    Args:
+        raw_value (str | int | float):
+            Raw input from the sensor (commonly a string or numeric type). The
+            function attempts to convert this value to an int for threshold
+            comparison.
+
+    Returns:
+        str:"detected" if the integer-converted value is greater than 50,
+        otherwise "not_detected".
+
+    Examples:
+        >>> handle_motion("75")
+        "detected"
+        >>> handle_motion("10")
+        "not_detected"
+        >>> handle_motion("abc")
+        "not_detected"
+    """
+    try:
+        value = int(raw_value)
+        if value > 50:
+            logger.debug("Motion detected with value: %r", raw_value)
+            return "detected"
+        logger.debug("No motion detected with value: %r", raw_value)
+    except ValueError:
+        logger.warning("Invalid motion value: %r", raw_value)
+    return "not_detected"
+
+def handle_battery_level(raw_value:str) -> str:
+    """
+    Classify a raw battery-level reading into a simple status string.
+
+    This function attempts to convert the given raw_value to a float and classifies
+    the battery level as either "low" or "normal". A numeric value strictly less
+    than 20.0 is considered "low"; any other numeric value is considered "normal".
+    If the input cannot be converted to a float, the function logs a warning and
+    returns "normal".
+
+    Args:
+        raw_value (str | int | float): The raw battery level value to interpret.
+            Typical inputs are strings received from external sources, but numeric
+            values are also accepted.
+
+    Returns:
+        str: "low" when the parsed battery level is below 20.0, otherwise "normal".
+
+    Examples:
+        >>> handle_battery_level("15")
+        "low"
+        >>> handle_battery_level("85")
+        "normal"
+        >>> handle_battery_level("abc")
+        "normal"
+    """
+    try:
+        value = float(raw_value)
+        if value < 20.0:
+            logger.debug("Low battery level: %r", raw_value)
+            return "low"
+        logger.debug("Battery level normal: %r", raw_value)
+    except ValueError:
+        logger.warning("Invalid battery value: %r", raw_value)
+    return "normal"
+
+def handle_food_level(raw_value:str) -> str:
+    """
+    Convert a raw food level input into a categorical string.
+
+    Args:
+        raw_value (str | int | float):
+            The raw input representing a food level. This is typically a string or numeric
+            value that will be converted to float for evaluation.
+
+    Returns:
+        str:
+            - "empty"  : when the numeric value is less than 1.0
+            - "low"    : when the numeric value is greater than or equal to 1.0 and less than 20.0
+            - "normal" : when the numeric value is greater than or equal to 20.0, or when the
+                        input cannot be parsed as a float (parsing errors are treated as "normal")
+        >>> handle_food_level("0")
+        "empty"
+        >>> handle_food_level("15")
+        "low"
+        >>> handle_food_level("50")
+        "normal"
+        >>> handle_food_level("abc")
+        "normal"
+    """
+    try:
+        value = float(raw_value)
+        if value < 1.0:
+            logger.debug("Empty food level: %r", raw_value)
+            return "empty"
+        if 1.0 <= value < 20.0:
+            logger.debug("Low food level: %r", raw_value)
+            return "low"
+        logger.debug("Foodlevel normal: %r", raw_value)
+    except ValueError:
+        logger.warning("Invalid food level value: %r", raw_value)
+    return "normal"
+
+def handle_water_level(raw_value:str) -> str:
+    """
+    Convert a raw water level input into a categorical string.
+
+    Args:
+        raw_value (str | int | float):
+            The raw input representing a water level. This is typically a string or numeric
+            value that will be converted to float for evaluation.
+
+    Returns:
+        str:
+            - "empty"  : when the numeric value is less than 1.0
+            - "low"    : when the numeric value is greater than or equal to 1.0 and less than 20.0
+            - "normal" : when the numeric value is greater than or equal to 20.0, or when the
+                         input cannot be parsed as a float (parsing errors are treated as "normal")
+        >>> handle_water_level("0")
+        "empty"
+        >>> handle_water_level("15")
+        "low"
+        >>> handle_water_level("50")
+        "normal"
+        >>> handle_water_level("abc")
+        "normal"
+    """
+    try:
+        value = float(raw_value)
+        if value < 1.0:
+            logger.debug("Empty water level: %r", raw_value)
+            return "empty"
+        if 1.0 <= value < 20.0:
+            logger.debug("Low water level: %r", raw_value)
+            return "low"
+        logger.debug("Water level normal: %r", raw_value)
+    except ValueError:
+        logger.warning("Invalid water level value: %r", raw_value)
+    return "normal"
