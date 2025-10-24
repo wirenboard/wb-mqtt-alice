@@ -68,7 +68,6 @@ def get_status_controller():
 def main():
     parser = argparse.ArgumentParser(description="Args parsinfg for wb-mqtt-alice-client-cli")
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    # Создаем парсер для команды unlink-controller
     unlink_parser = subparsers.add_parser('unlink-controller', help='Unlink controller from yandex account')
     unlink_parser = subparsers.add_parser('get-link-status', help='Get link status controller')
     args = parser.parse_args()
