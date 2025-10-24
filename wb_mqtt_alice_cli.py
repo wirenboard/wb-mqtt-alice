@@ -5,7 +5,6 @@ import importlib.util
 import logging
 import sys
 
-from fetch_url import fetch_url
 from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
 
 logger = logging.getLogger(__name__)
@@ -22,6 +21,10 @@ def unlink_controller():
             url=f"https://{server_address}/request-unlink",
             key_id=key_id,
         )
+        if response["status_code"] == 404:
+            if response["data"]["detail"] == "Controller not found":
+                logger.info("Controller not found on the server.")
+                return
         if response["status_code"] >= 400:
             raise Exception("Unlink request failed with status code %r", response)
         logger.info("Controller unlinked Successfully")
