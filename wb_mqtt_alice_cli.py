@@ -23,7 +23,7 @@ def unlink_controller():
             logger.info("Controller status: linked, proceeding to unlink...")
         else:
             logger.info("Controller status: unlinked, not required.")
-            print("    Unlink action result: not needed")
+            print("Unlink action result: not needed")
             return
         response = fetch_url(
             url=f"https://{server_address}/request-unlink",
@@ -36,7 +36,7 @@ def unlink_controller():
         if response["status_code"] >= 400:
             raise Exception("Unlink request failed with status code %r", response)
         logger.info("Controller unlinked Successfully")
-        print("    Unlink action result: successful")
+        print("Unlink action result: successful")
     except Exception as e:
         logger.error("Failed to unlink: %r,", e, exc_info=True)
 
@@ -53,12 +53,12 @@ def get_status_controller():
         if response["data"] and "registration_url" in response["data"]:
             # Controller is not registered - provide registration link
             logger.debug("Controller not registered")
-            print("    Current link status: not linked")
+            print("Current link status: not linked")
             return False
         elif response["data"]["detail"]:
             # Controller is registered
             logger.debug("Controller registered")
-            print("    Current link status: linked")
+            print("Current link status: linked")
             return True
     except Exception as e:
         logger.error("Failed to get status: %r,", e, exc_info=True)

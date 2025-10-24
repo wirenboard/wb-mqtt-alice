@@ -11,7 +11,7 @@
 
 ## Установка пакета на контроллер
 
-Перейдите в релиз [_testing_](https://wiki.wirenboard.com/wiki/Testing).
+Перейдите в [_testing_](https://wiki.wirenboard.com/wiki/Testing).
 
 Если пакет не установился на контроллере после обновления, попробуйте выполнить:
 
@@ -59,5 +59,5 @@ journalctl -u wb-mqtt-alice-client.service -f
 Если невозможно отвязать контроллер со страницы привязанных контроллеров (например, был утрачен доступ к учётной записи Яндекса), можно воспользоваться утилитой `wb-mqtt-alice`:
 
 ```terminal
-wb-mqtt-alice --unlink-controller
+wb-mqtt-alice unlink-controller
 ```
