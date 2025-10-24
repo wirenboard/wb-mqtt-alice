@@ -19,7 +19,7 @@ def unlink_controller():
         server_address = load_client_config()["server_address"]
         controller_version = get_board_revision()
         key_id = get_key_id(controller_version)
-        if get_status_controller():
+        if get_link_status():
             logger.info("Controller status: linked, proceeding to unlink...")
         else:
             logger.info("Controller status: unlinked, not required.")
@@ -40,7 +40,7 @@ def unlink_controller():
     except Exception as e:
         logger.error("Failed to unlink: %r,", e, exc_info=True)
 
-def get_status_controller():
+def get_link_status():
     try:
         server_address = load_client_config()["server_address"]
         controller_version = get_board_revision()
@@ -77,7 +77,7 @@ def main():
         sys.exit(0)
     if args.command == "get-link-status":
         logger.info("Get link status controller...")
-        get_status_controller()
+        get_link_status()
         sys.exit(0)
 if __name__ == "__main__":
     main()
