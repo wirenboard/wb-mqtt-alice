@@ -2,6 +2,8 @@
 
 **Интеграция работает только при использовании русского языка в веб-интерфейсе контроллера.**
 
+Клиент активируется только при добавлении через webui конфигуратор хотябы одного устройства, иначе клиент не активен.
+
 [Официальная документация](https://wiki.wirenboard.com/wiki/Yandex-smart-home)
 
 Кратко о назначении клиента:
@@ -51,7 +53,7 @@ apt install wb-mqtt-alice
 Для просмотра логов сервиса удобно использовать `journalctl`:
 
 ```terminal
-journalctl -u wb-mqtt-alice-client.service -f
+journalctl -u wb-mqtt-alice-client -f
 ```
 
 ## Отвязка контроллера
@@ -60,4 +62,10 @@ journalctl -u wb-mqtt-alice-client.service -f
 
 ```terminal
 wb-mqtt-alice unlink-controller
+```
+
+Чтобы узнать статус привязки контоллера, можно воспользоваться командой:
+
+```terminal
+wb-mqtt-alice get-link-status
 ```
