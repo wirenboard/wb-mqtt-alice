@@ -91,7 +91,7 @@ def get_link_status():
 
         logger.debug("Get-link response status=%s data=%r", status, data)
 
-        if status >= 400:
+        if status > 400:
             logger.error("Registration request failed: %r", response)
             print("Get link status result: failed (server error)")
             return False
