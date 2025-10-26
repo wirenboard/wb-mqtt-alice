@@ -23,6 +23,8 @@ import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional
+import http.client
+import socket
 
 import paho.mqtt.client as mqtt_client
 import socketio
@@ -42,9 +44,9 @@ SOCKETIO_PATH = "/socket.io"
 # Timeouts
 READ_TOPIC_TIMEOUT = 1.0
 RECONNECT_DELAY_INITIAL = 2
-RECONNECT_DELAY_MAX = 30
+RECONNECT_DELAY_MAX = 60
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
+logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,7 @@ class AppContext:
         self.controller_sn: Optional[str] = None
         self.time_rate_sender: Optional[AliceDeviceStateSender] = None
         self.client_pkg_ver: Optional[str] = None
+        self.sio_connected_at: Optional[float] = None  # ts after sock.connect()
 
 
 ctx = AppContext()
@@ -85,14 +88,18 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
     from any thread (async or not).
     """
     if not ctx.sio:
-        logger.warning("Socket.IO client not initialized, skipping emit %r", event)
+        logger.warning(
+            "Emit blocked: Socket.IO client not init (event = %r)",
+            event
+        )
         logger.debug("            Payload: %r", json.dumps(data))
         return None
 
+    eio_state = getattr(ctx.sio.eio, "state", "unknown")
     if not ctx.sio.connected or getattr(ctx.sio.eio, "state", None) != "connected":
         logger.warning(
-            "Socket.IO not ready (state: %s), skipping emit %r",
-            getattr(ctx.sio.eio, "state", "unknown"),
+            "Emit blocked: Socket.IO not ready (state = %s, event = %r)",
+            eio_state,
             event,
         )
         logger.debug("            Payload: %r", json.dumps(data))
@@ -100,8 +107,18 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
 
     logger.debug("Connected status: %r", ctx.sio.connected)
 
-    if not hasattr(ctx.sio, "namespaces") or "/" not in ctx.sio.namespaces:
-        logger.warning("Namespace not ready, skipping emit %r", event)
+    ns_list = getattr(ctx.sio, "namespaces", {})
+    if not hasattr(ctx.sio, "namespaces") or "/" not in ns_list:
+        logger.warning(
+            "Emit blocked: namespace '/' not ready "
+            "(event=%r, eio_state=%r, connected=%r, since_connect=%.3fs, namespaces=%r)",
+            event,
+            eio_state,
+            ctx.sio.connected,
+            (time.monotonic() - ctx.sio_connected_at) if ctx.sio_connected_at else -1.0,
+            list(ns_list.keys()) if isinstance(ns_list, dict) else ns_list,
+        )
+        logger.debug("            Payload: %r", json.dumps(data))
         return None
 
     # BUG: Additional check for version SocketIO 5.0.3 (may delete when upgrade)
@@ -170,20 +187,36 @@ async def publish_to_mqtt(topic: str, payload: str) -> None:
 # ---------------------------------------------------------------------
 
 
+def subscribe_registry_topics() -> None:
+    """
+    Subscribe MQTT client to all topics from registry
+    Called only after full initialization (Socket.IO connected, etc.)
+    
+    NOTE: This need only for notify yandex API,
+          but not needed for commands from Yandex
+    """
+
+    if ctx.mqtt_client is None:
+        logger.error("Cannot subscribe: MQTT client is None")
+        return
+
+    # Check if registry is ready
+    if ctx.registry is None or not hasattr(ctx.registry, "topic2info"):
+        logger.error("Cannot subscribe: MQTT Registry not ready")
+        return None
+
+    # subscribe to every topic from registry
+    for t in ctx.registry.topic2info.keys():
+        ctx.mqtt_client.subscribe(t, qos=0)
+        logger.debug("MQTT Subscribed to %r", t)
+
+
 def mqtt_on_connect(client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
     if rc != 0:
         logger.error("MQTT Connection failed with code: %r", rc)
         return None
 
-    # Check if registry is ready
-    if ctx.registry is None or not hasattr(ctx.registry, "topic2info"):
-        logger.error("MQTT Registry not ready, no topics to subscribe")
-        return None
-
-    # subscribe to every topic from registry
-    for t in ctx.registry.topic2info.keys():
-        client.subscribe(t, qos=0)
-        logger.debug("MQTT Subscribed to %r", t)
+    logger.info("MQTT connected - no subscriptions on this moment")
 
 
 def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
@@ -213,7 +246,13 @@ def mqtt_on_message(client: mqtt_client.Client, userdata: Any, message: mqtt_cli
     logger.debug("       - Message: %r", payload_str)
 
     # add message to wb_alice_device_state_sender
-    asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.add_message(topic_str, payload_str), ctx.main_loop)
+    if ctx.time_rate_sender:
+        asyncio.run_coroutine_threadsafe(
+            ctx.time_rate_sender.add_message(topic_str, payload_str),
+            ctx.main_loop
+        )
+    else:
+        logger.debug("time_rate_sender is not ready, drop message from %r", topic_str)
 
 
 def generate_client_id(prefix: str = "wb-alice-client") -> str:
@@ -239,10 +278,13 @@ def setup_mqtt_client() -> mqtt_client.Client:
 # SocketIO callbacks
 # ---------------------------------------------------------------------
 
-
 async def connect() -> None:
-    logger.info("Success connected to Socket.IO server!")
-    await ctx.sio.emit("message", {"controller_sn": ctx.controller_sn, "status": "online"})
+    logger.info("Success connected to Socket.IO server! namespace='/' ready")
+
+    try:
+        await ctx.sio.emit("message", {"controller_sn": ctx.controller_sn, "status": "online"})
+    except Exception as e:
+        logger.warning("Failed to send 'online' status after connect: %r", e)
 
 
 async def disconnect() -> None:
@@ -267,7 +309,23 @@ async def connect_error(data: Dict[str, Any]) -> None:
     """
     Called when initial connection to server fails
     """
-    logger.warning("Connection refused by server: %r", data)
+    # Connection was refused by server (e.g. controller not registered)
+    reason = str(data).strip()
+    logger.error("Yandex Alice integration connection refused by server")
+    logger.error("Please link conrtoller, then restart service manually:")
+    logger.error("  # systemctl restart wb-mqtt-alice-client")
+
+    # Stop state sender if running
+    if ctx.time_rate_sender and ctx.time_rate_sender.running:
+        try:
+            await ctx.time_rate_sender.stop()
+            logger.info("Stopped Alice state sender due to connect_error")
+        except Exception as e:
+            logger.debug("Failed to stop sender: %r", e)
+
+    # Trigger clean shutdown
+    if ctx.stop_event and not ctx.stop_event.is_set():
+        ctx.stop_event.set()
 
 
 async def any_unprocessed_event(event: str, sid: str, data: Any) -> None:
@@ -384,7 +442,7 @@ async def on_alice_devices_action(data: Dict[str, Any]) -> Dict[str, Any]:
     logger.debug("Full payload:")
     logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
 
-    request_id: str = data.get("request_id", "unknown")
+    request_id: str = data.get("request_id", "unknown")    
     devices_in: List[Dict[str, Any]] = data.get("payload", {}).get("devices", [])
     devices_info: List[Dict[str, Any]] = []
 
@@ -496,6 +554,117 @@ def read_config(filename: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def test_nginx_http_response(
+    host: str = 'localhost',
+    port: int = 8042,
+    timeout: int = 5
+) -> tuple[bool, Optional[int], float, str]:
+    """
+    Test connection to server via local nginx proxy before Socket.IO connect
+
+    Return tuple:
+      ok: bool  # True only if we got the expected 422 response
+      http_status: Optional[int]
+      elapsed_s: float  # Request duration in seconds
+      msg: str
+    """
+    method = "POST"
+    path = "/request-registration"
+    
+    start_t = time.perf_counter()
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=timeout)
+        
+        # Send empty body to get 422 status code
+        conn.request(method, path)
+        response = conn.getresponse()
+    
+        status = response.status
+        reason = response.reason
+
+        raw_body = response.read()
+        conn.close()
+        elapsed_s = time.perf_counter() - start_t        
+        
+        logger.debug(
+            "HTTP probe response: %s %s -> %s %s (%.3fs), raw_body=%r",
+            method, path, status, reason, elapsed_s, raw_body
+        )
+        
+        # We need get correct answer:
+        # 422 - server work correctly, but see empty body
+        if status == 422:
+            return True, status, elapsed_s, f"Nginx: {status}"
+
+        # Any other status means proxy answered, but unexpected state.
+        return False, status, elapsed_s, f"Nginx unexpected status: {status}"
+        
+    except socket.timeout:    
+        elapsed_s = time.perf_counter() - start_t
+        return False, None, elapsed_s, f"TIMEOUT (>{timeout}s) - proxy or DNS resolution issue"
+
+    except ConnectionRefusedError:
+        elapsed_s = time.perf_counter() - start_t
+        return False, None, elapsed_s, "Connection refused"
+        
+    except Exception as e:
+        elapsed_s = time.perf_counter() - start_t
+        return False, None, elapsed_s, f"Error: {type(e).__name__}: {e}"
+
+async def probe_nginx_until_stable(
+    *,
+    max_attempts: int = 5,
+    acceptable_latency_s: float = 1.5,
+    per_attempt_timeout_s: int = 10,
+    sleep_between_attempts_s: float = 10,
+) -> bool:
+    """
+    Probe local nginx multiple times before opening the long-lived Socket.IO
+    connection
+
+    Rationale:
+    - After nginx reload or DNS TTL expiry, the very first upstream request
+      can block 6–20s while DNS/TLS warms up
+    - If we call sio.connect() in that window, it may hit its 10s timeout
+      and we treat startup as failed
+    - So we "pre-flight" nginx here: POST /request-registration, expect fast
+      HTTP 422 (< acceptable_latency_s). We retry a few times until it's fast
+
+    Returns:
+        True  -> nginx responded with expected 422 and acceptable latency
+        False -> nginx is slow/broken even after retries (error is already logged here)
+    """
+    logger.debug("Testing HTTP via proxy, warming up DNS/TLS path...")
+
+    last_status_code: Optional[int] = None
+    last_elapsed_time: Optional[float] = None
+    last_msg: Optional[str] = None
+
+    for attempt in range(1, max_attempts + 1):
+        http_ok, status_code, elapsed_time, http_msg = test_nginx_http_response(
+            timeout=per_attempt_timeout_s
+        )
+
+        last_status_code = status_code
+        last_elapsed_time = elapsed_time
+        last_msg = http_msg
+
+        if http_ok and elapsed_time <= acceptable_latency_s:
+            # nginx is alive, correct upstream, and now it's "warm" (fast)
+            return True
+
+        await asyncio.sleep(sleep_between_attempts_s)
+
+    logger.error(
+        "Aborting init: Nginx probe FAILED before Socket.IO connect "
+        "(last_latency=%.3fs, last_status=%r, last_info=%r)",
+        last_elapsed_time,
+        last_status_code,
+        last_msg,
+    )
+    return False
+
+
 async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any]) -> bool:
     """
     Connect to SocketIO server using provided configuration
@@ -517,11 +686,14 @@ async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any])
         return False
     logger.info("Target SocketIO server: %r", server_address)
     logger.info("Client version: %r", ctx.client_pkg_ver)
-    logger.info("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
+    logger.debug("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
 
-    logger.info("Waiting for nginx proxy to be ready...")
+    logger.debug("Waiting for nginx proxy to be ready...")
     if not await wait_for_nginx_ready():
         logger.error("Nginx proxy not ready - exiting")
+        return False
+
+    if not await probe_nginx_until_stable():
         return False
 
     try:
@@ -537,13 +709,19 @@ async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any])
             ),
             timeout=10.0)
         logger.info("Socket.IO connected successfully via proxy")
+        # record timestamp when low-level connect finished
+        ctx.sio_connected_at = time.monotonic()
+
         return True
 
-    except (socketio.exceptions.ConnectionError, asyncio.TimeoutError) as e:
-        logger.error("Initial Socket.IO connection failed: %r", e)
+    except socketio.exceptions.ConnectionError as e:
+        logger.exception("Socket.IO Connection Failed: %r", str(e))
+        return False
+    except asyncio.TimeoutError:
+        logger.exception("Socket.IO Connection Timeout (>10s) - server too slow")
         return False
     except Exception as e:
-        logger.exception("Unexpected exception during connection: %r", e)
+        logger.exception("Unexpected exception during connection - %r: %r", type(e).__name__, str(e))
         return False
 
 
@@ -602,8 +780,13 @@ async def graceful_shutdown() -> None:
     """
     logger.info("Starting graceful shutdown...")
 
+    # NOTE: Shutdown sequence:
+    #       - First stop time_rate_sender so we stop generating new outbound updates
+    #       - Always shutdown Socket.IO connections last
+    #         This need becoase time_rate_sender use mqtt and mqtt use need use Socket.IO connections
+
     # Stop AliceDeviceEventRate
-    if ctx.time_rate_sender.running:
+    if ctx.time_rate_sender and ctx.time_rate_sender.running:
         logger.info("Stopping AliceDeviceEventRate...")
         await ctx.time_rate_sender.stop()
         await asyncio.sleep(0.1)
@@ -691,6 +874,17 @@ async def main() -> int:
         await ctx.stop_event.wait()
         return 0
     config = read_config(SERVER_CONFIG_PATH)
+
+    # NOTE: Initialization sequence:
+    #       - First create registry
+    #         Any actions from Yandex need registry ready to map "device -> MQTT topic"
+    #       - Next connect to local MQTT brocker
+    #         We verify broker is alive and we can publish commands when gen Yandex action
+    #         DO NOT subscribe yet on this moment
+    #       - Init Socket.IO connections
+    #         When fully ready reciave commands from yandex
+    #         Do it now, becoase mqtt and time_rate_sender need use already upped connection
+
     try:
         ctx.registry = DeviceRegistry(
             cfg_path=DEVICE_PATH,
@@ -702,10 +896,6 @@ async def main() -> int:
         logger.error("Failed to create registry: %r", e)
         logger.info("Continuing without device configuration")
         ctx.registry = None
-
-    # init and start AliceDeviceStateSender
-    ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
-    asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.start(), ctx.main_loop)
 
     # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
     ctx.mqtt_client = setup_mqtt_client()
@@ -723,8 +913,8 @@ async def main() -> int:
         engineio_logger=is_debug_log_enabled,
         reconnection=True,  # auto-reconnect ON
         reconnection_attempts=0,  # 0 = infinite retries
-        reconnection_delay=2,  # first delay 2 s
-        reconnection_delay_max=30,  # cap at 30 s
+        reconnection_delay=RECONNECT_DELAY_INITIAL,  # first recconect delay
+        reconnection_delay_max=RECONNECT_DELAY_MAX,
         randomization_factor=0.5,  # jitter
     )
     set_emit_callback(_emit_async)
@@ -740,6 +930,12 @@ async def main() -> int:
 
     # Store the sio_task reference for graceful shutdown
     ctx.sio_task = asyncio.create_task(ctx.sio.wait())
+
+    # init and start AliceDeviceStateSender
+    ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
+    asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.start(), ctx.main_loop)
+    subscribe_registry_topics()
+    logger.info("Client initialization complete, ready to handle requests")
 
     # Wait for shutdown signal
     await ctx.stop_event.wait()
