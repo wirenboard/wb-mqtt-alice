@@ -7,24 +7,19 @@ sys.path.insert(0, '/usr/lib/wb-mqtt-alice')
 
 import logging
 from logging.handlers import SysLogHandler
+
 handler = SysLogHandler(address='/dev/log', facility=SysLogHandler.LOG_USER)
-# жёсткий префикс — journalctl -t wb-mqtt-alice-cli будет распознавать
-formatter = logging.Formatter('wb-mqtt-alice-cli: %(message)s')
+# use logger name as prefix — journald recognizes it as SYSLOG_IDENTIFIER
+formatter = logging.Formatter('%(name)s: %(message)s')
 handler.setFormatter(formatter)
 
-# root — на всякий случай
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 if not any(isinstance(h, SysLogHandler) for h in root_logger.handlers):
     root_logger.addHandler(handler)
 
-# явный handler для именованного логгера
 logger = logging.getLogger("wb-mqtt-alice-cli")
 logger.setLevel(logging.INFO)
-if handler not in logger.handlers:
-    logger.addHandler(handler)
-logger.propagate = False
-
 
 
 from wb_mqtt_alice_cli import main
