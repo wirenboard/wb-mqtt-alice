@@ -28,7 +28,6 @@ def print_message(message: str, level:int, args: tuple = ()):
 
 def unlink_controller():
     """Unlink controller from yandex account."""
-    print(type(logging.INFO))
     print_message("Unlinking controller from yandex account...", level=logging.INFO)
     try:
         cfg = load_client_config()
