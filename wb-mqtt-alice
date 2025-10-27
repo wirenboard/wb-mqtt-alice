@@ -4,9 +4,10 @@ import sys
 
 sys.path.insert(0, '/usr/lib/wb-mqtt-alice')
 
-
 import logging
 from logging.handlers import SysLogHandler
+
+from constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
 
 handler = SysLogHandler(address='/dev/log', facility=SysLogHandler.LOG_USER)
 # use logger name as prefix — journald recognizes it as SYSLOG_IDENTIFIER
@@ -18,7 +19,7 @@ root_logger.setLevel(logging.INFO)
 if not any(isinstance(h, SysLogHandler) for h in root_logger.handlers):
     root_logger.addHandler(handler)
 
-logger = logging.getLogger("wb-mqtt-alice-cli")
+logger = logging.getLogger(WB_MQTT_ALICE_CLI_LOGGER_NAME)
 logger.setLevel(logging.INFO)
 
 

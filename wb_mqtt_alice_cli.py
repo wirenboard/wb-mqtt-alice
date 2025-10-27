@@ -5,8 +5,9 @@ import logging
 import sys
 from fetch_url import fetch_url
 from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
+from constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
 
-logger = logging.getLogger("wb-mqtt-alice-cli")
+logger = logging.getLogger(WB_MQTT_ALICE_CLI_LOGGER_NAME)
 logger.setLevel(logging.INFO)
 
 def print_message(message: str, level:int, args: tuple = ()):
