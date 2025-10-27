@@ -9,9 +9,27 @@ from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_conf
 logger = logging.getLogger("wb-mqtt-alice-cli")
 logger.setLevel(logging.INFO)
 
+def print_message(message: str, level:int, args: tuple = ()):
+    """Utility function to print messages with parameters."""
+    if level == logging.DEBUG:
+        logger.debug(message, *args)
+        return
+    if level == logging.INFO:
+        logger.info(message, *args)
+    elif level == logging.WARNING:
+        logger.warning(message, *args)
+    elif level == logging.ERROR:
+        logger.error(message, *args)
+        # cut message for user console output
+        args = {}
+        message = message.replace("%r", "")
+    print(message % args if args else message)
+
 
 def unlink_controller():
-    logger.info("Unlinking controller from yandex account...")
+    """Unlink controller from yandex account."""
+    print(type(logging.INFO))
+    print_message("Unlinking controller from yandex account...", level=logging.INFO)
     try:
         cfg = load_client_config()
         server_address = cfg.get("server_address")
@@ -19,15 +37,11 @@ def unlink_controller():
         key_id = get_key_id(controller_version)
 
         if not server_address:
-            logger.error("No server_address in config")
-            print("Unlink action result: failed (no server address)")
+            print_message("Unlink action result: failed (no server address)", level=logging.ERROR)
             return
 
-        if get_link_status():
-            logger.info("Controller status: linked, proceeding to unlink...")
-        else:
-            logger.info("Controller status: unlinked, not required.")
-            print("Unlink action result: not needed")
+        if not get_link_status():
+            print_message("Unlink action result: not required", level=logging.INFO)
             return
 
         response = fetch_url(
@@ -37,8 +51,7 @@ def unlink_controller():
 
         # validate response shape
         if not isinstance(response, dict):
-            logger.error("Invalid response from server: %r", response)
-            print("Unlink action result: failed (invalid response)")
+            print_message("Unlink action result: failed %r", level=logging.ERROR, args=(response,))
             return
 
         status = response.get("status_code") or 0
@@ -47,23 +60,19 @@ def unlink_controller():
         logger.debug("Unlink response status=%s data=%r", status, data)
 
         if status == 404 and isinstance(data, dict) and data.get("detail") == "Controller not found":
-            logger.info("Unlink action result: successful.")
-            print("Unlink action result: successful")
+            print_message("Unlink action result: successful", level=logging.INFO)
             return
         if status >= 400:
-            logger.error("Unlink request failed: %r", response)
-            print("Unlink action result: failed (server error)")
+            print_message("Unlink request failed %r", level=logging.ERROR, args=(response,))
             return
-
-        logger.info("Controller unlinked successfully")
-        print("Unlink action result: successful")
-    except Exception:
-        logger.exception("Failed to unlink")
-        print("Unlink action result: failed (exception)")
+        print_message("Unlink action result: successful", level=logging.INFO)
+    except Exception as e:
+        print_message("Failed to unlink controller %r", level=logging.ERROR, args=(e,))
 
 
 def get_link_status():
-    logger.info("Get link status controller...")
+    """Returns False if controller is unlinked, otherwise returns True for continue unlinking."""
+    print_message("Get link status...", level=logging.INFO)
     try:
         cfg = load_client_config()
         server_address = cfg.get("server_address")
@@ -71,8 +80,7 @@ def get_link_status():
         key_id = get_key_id(controller_version)
 
         if not server_address:
-            logger.error("No server_address in config")
-            print("Get link status result: failed (no server address)")
+            print_message("Get link status result: failed (no server address)", level=logging.ERROR)
             return False
 
         response = fetch_url(
@@ -82,40 +90,31 @@ def get_link_status():
         )
 
         if not isinstance(response, dict):
-            logger.error("Invalid response from server: %r", response)
-            print("Get link status result: failed (invalid response)")
-            return False
+            print_message("Get link status result: failed %r", level=logging.ERROR, args=(response,))
+            return True
 
         status = response.get("status_code") or 0
         data = response.get("data") or {}
-
-        logger.debug("Get-link response status=%s data=%r", status, data)
-
         if status > 400:
-            logger.error("Registration request failed: %r", response)
-            print("Get link status result: failed (server error)")
-            return False
+            print_message("Get link status result: failed (server error %r)", level=logging.ERROR, args=(response,))
+            return True
 
         # Controller is not linked if registration_url present or data is empty
         if not data or ("registration_url" in data):
-            print("Current link status: not linked")
-            logger.info("Controller not linked")
+            print_message("Current link status: not linked", level=logging.INFO)
             return False
 
         # Controller linked if detail exists and is truthy
         if isinstance(data, dict) and data.get("detail"):
-            print("Current link status: linked")
-            logger.debug("Controller linked")
+            print_message("Current link status: linked", level=logging.INFO)
             return True
 
         # fallback
-        logger.debug("Unexpected registration response data: %r", data)
-        print("Current link status: unknown")
-        return False
-    except Exception:
-        logger.exception("Failed to get link status")
-        print("Failed to get link status")
-        return False
+        print_message("Current link status: unknown error %r", level=logging.ERROR, args=(data,))
+        return True
+    except Exception as e:
+        print_message("Failed to get link status %r", level=logging.ERROR, args=(e,))
+        return True
 
 
 def main():
