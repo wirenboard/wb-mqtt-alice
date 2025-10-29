@@ -18,7 +18,6 @@ logger.setLevel(logging.INFO)
 def unlink_controller():
     """Unlink controller from yandex account."""
     logger.info("Unlinking controller from yandex account...")
-    print("Unlinking controller from yandex account...")
     try:
         cfg = load_client_config()
         server_address = cfg.get("server_address")
@@ -67,7 +66,6 @@ def unlink_controller():
 def get_link_status():
     """Returns False if controller is unlinked, otherwise returns True for continue unlinking."""
     logger.info("%s...", GET_LINK_STATUS_PREF)
-    print("%s..." % GET_LINK_STATUS_PREF)
     try:
         cfg = load_client_config()
         server_address = cfg.get("server_address")
