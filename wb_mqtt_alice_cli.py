@@ -13,7 +13,7 @@ from constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
 class ExitCode(IntEnum):
     # Common linux codes (0-9)
     GEN_SUCCESS = 0 # Generic success for any command
-    GEN_ERROR = 1  # Unexpected errors
+    GEN_ERROR = 1  # Unexpected errors (no internet, server not reachable, etc)
     INIT_ERROR = 2  # Initialization errors (Not correct argument and etc)
 
     # Get status command (10-19)
@@ -57,10 +57,14 @@ def unlink_controller():
 
         exit_code = get_link_status()
         # If controller already not linked, nothing to do
+        if exit_code == ExitCode.GEN_ERROR:
+            logger.error("%s failed (cannot get link status)", "Request action result:")
+            print("%s failed (cannot get link status)" % "Request action result:")
+            return ExitCode.GEN_ERROR
         if exit_code == ExitCode.STATUS_NOT_LINKED:
             logger.info("%s not required", UNLINK_ACTION_RESULT_PREF)
             print("%s not required" % UNLINK_ACTION_RESULT_PREF)
-            return ExitCode.ALREADY_UNLINKED
+            return ExitCode.GEN_SUCCESS
 
         # Proceed only if controller is reported as linked
         if exit_code != ExitCode.STATUS_LINKED:
@@ -85,7 +89,11 @@ def unlink_controller():
             logger.info("%s successful", UNLINK_ACTION_RESULT_PREF)
             print("%s successful" % UNLINK_ACTION_RESULT_PREF)
             return ExitCode.ALREADY_UNLINKED
-        if not status_code or status_code > HTTPStatus.BAD_REQUEST:
+        if status_code == 0:
+            logger.error("%s unlink request failed (no internet, server not reachable, etc)", UNLINK_ACTION_RESULT_PREF)
+            print("%s unlink request failed (no internet, server not reachable, etc)" % UNLINK_ACTION_RESULT_PREF)
+            return ExitCode.GEN_ERROR
+        if status_code > HTTPStatus.BAD_REQUEST:
             logger.error("%s unlink request failed %r", UNLINK_ACTION_RESULT_PREF, response)
             print("%s unlink request failed (server error %s)" % (UNLINK_ACTION_RESULT_PREF, status_code))
             return ExitCode.UNLINK_FAILED
@@ -129,7 +137,11 @@ def get_link_status():
             return ExitCode.GET_REG_LINK_FAILED
 
         status_code = int(response.get("status_code") or 0)
-        if not status_code or status_code > HTTPStatus.BAD_REQUEST:
+        if status_code == 0:
+            logger.error("%s unlink request failed (no internet, server not reachable, etc)", CURRENT_LINK_STATUS_PREF)
+            print("%s unlink request failed (no internet, server not reachable, etc)" % CURRENT_LINK_STATUS_PREF)
+            return ExitCode.GEN_ERROR
+        if status_code > HTTPStatus.BAD_REQUEST:
             # there is no HTTPStatus for status code 0, so treat it as an error
             print("%s failed (server returned error %r)" % (CURRENT_LINK_STATUS_PREF, status_code))
             logger.error("%s failed (server returned error %r)", CURRENT_LINK_STATUS_PREF, status_code)
