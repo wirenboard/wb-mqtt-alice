@@ -198,10 +198,10 @@ def main():
     )
 
     subparsers.add_parser(
-        'unlink-controller', help='Unlink controller from Yandex account'
+        'unlink-controller'.ljust(30), help='Unlink controller from Yandex account'
     )
     subparsers.add_parser(
-        'get-link-status', help='Check if controller is linked to Yandex account'
+        'get-link-status'.ljust(30), help='Check if controller is linked to Yandex account'
     )
 
     args = parser.parse_args()
