@@ -175,7 +175,7 @@ def main():
     parser = argparse.ArgumentParser(
     prog='wb-mqtt-alice',
     description='Manage Yandex Alice integration for Wiren Board controllers',
-    usage='wb-mqtt-alice [-h] <command>',
+    usage='wb-mqtt-alice [-h] <command>',  #  need for to hide "..." in end of  string
     add_help=False,
     epilog="""
 Example:
