@@ -172,10 +172,38 @@ def get_link_status():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Args parsing for wb-mqtt-alice-client-cli")
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    subparsers.add_parser('unlink-controller', help='Unlink controller from yandex account')
-    subparsers.add_parser('get-link-status', help='Get link status controller')
+
+    parser = argparse.ArgumentParser(
+        prog='wb-mqtt-alice',
+        description='Manage Yandex Alice integration for Wiren Board controllers',
+        add_help=False,
+        epilog="""
+
+        Example:
+        wb-mqtt-alice unlink-controller
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument(
+        '-h', '--help',
+        action='help',
+        help='Show this help message and exit'
+    )
+
+    subparsers = parser.add_subparsers(
+        dest='command',
+        metavar='<command>',
+        title='Available commands'
+    )
+
+    subparsers.add_parser(
+        'unlink-controller', help='Unlink controller from Yandex account'
+    )
+    subparsers.add_parser(
+        'get-link-status', help='Check if controller is linked to Yandex account'
+    )
+
     args = parser.parse_args()
     if args.command == "unlink-controller":
         return int(unlink_controller())
