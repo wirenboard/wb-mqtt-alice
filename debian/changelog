@@ -1,3 +1,12 @@
+wb-mqtt-alice (0.5.3) stable; urgency=medium
+
+  * Fix client message about controller unlinked from server
+  * Remove "--" from command unlink-controller
+  * Add command get-link-status
+  * Refactored README: improved installation instructions and clarified usage examples
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Fri, 31 Oct 2025 09:00:00 +0300
+
 wb-mqtt-alice (0.5.2) stable; urgency=medium
 
   * Fix client start after upgdate packet to new version

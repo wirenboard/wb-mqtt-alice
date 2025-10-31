@@ -21,3 +21,5 @@ CLIENT_CONFIG_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
 # Board info paths
 BOARD_REVISION_PATH = "/proc/device-tree/wirenboard/board-revision"
 BOARD_MODEL_PATH = "/proc/device-tree/model"
+# For logging to syslog/journald with name "wb-mqtt-alice-cli"
+WB_MQTT_ALICE_CLI_LOGGER_NAME = "wb-mqtt-alice-cli"

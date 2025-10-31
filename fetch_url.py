@@ -1,6 +1,8 @@
 import subprocess
 import json
 from pathlib import Path
+from collections.abc import Iterable
+from typing import Optional
 
 BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
 
@@ -13,6 +15,7 @@ def fetch_url(
     data=None,
     headers=None,
     timeout=10,
+    retry_opts: Optional[Iterable[str]] = None,
     ):
     """
     Performs an authenticated POST request via curl with a hardware key.
@@ -50,10 +53,22 @@ def fetch_url(
     if headers is None:
         headers = {"Content-Type": "application/json"}
 
+    if not retry_opts:
+        retry_opts = [
+            "--connect-timeout",
+            "7",
+            "--retry",
+            "5",
+            "--retry-delay",
+            "2",
+            "--retry-all-errors",
+        ]
+
     # Create a curl command
     cmd = [
         "curl",
         "-X", "POST",
+        *retry_opts,
         "--cert", cert_path,
         "--engine", engine,
         "--key-type", key_type,
