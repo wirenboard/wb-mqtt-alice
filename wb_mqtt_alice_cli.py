@@ -58,8 +58,8 @@ def unlink_controller():
         exit_code = get_link_status()
         # If controller already not linked, nothing to do
         if exit_code == ExitCode.GEN_ERROR:
-            logger.error("%s failed (cannot get link status)", "Request action result:")
-            print("%s failed (cannot get link status)" % "Request action result:")
+            logger.error("%s skipped", UNLINK_ACTION_RESULT_PREF)
+            print("%s skipped" % UNLINK_ACTION_RESULT_PREF)
             return ExitCode.GEN_ERROR
         if exit_code == ExitCode.STATUS_NOT_LINKED:
             logger.info("%s not required", UNLINK_ACTION_RESULT_PREF)
@@ -90,8 +90,8 @@ def unlink_controller():
             print("%s successful" % UNLINK_ACTION_RESULT_PREF)
             return ExitCode.ALREADY_UNLINKED
         if status_code == 0:
-            logger.error("%s unlink request failed (no internet, server not reachable, etc)", UNLINK_ACTION_RESULT_PREF)
-            print("%s unlink request failed (no internet, server not reachable, etc)" % UNLINK_ACTION_RESULT_PREF)
+            logger.error("%s failed (no internet, server not reachable, etc)", UNLINK_ACTION_RESULT_PREF)
+            print("%s failed (no internet, server not reachable, etc)" % UNLINK_ACTION_RESULT_PREF)
             return ExitCode.GEN_ERROR
         if status_code > HTTPStatus.BAD_REQUEST:
             logger.error("%s unlink request failed %r", UNLINK_ACTION_RESULT_PREF, response)
@@ -138,8 +138,8 @@ def get_link_status():
 
         status_code = int(response.get("status_code") or 0)
         if status_code == 0:
-            logger.error("%s unlink request failed (no internet, server not reachable, etc)", CURRENT_LINK_STATUS_PREF)
-            print("%s unlink request failed (no internet, server not reachable, etc)" % CURRENT_LINK_STATUS_PREF)
+            logger.error("%s failed (no internet, server not reachable, etc)", CURRENT_LINK_STATUS_PREF)
+            print("%s failed (no internet, server not reachable, etc)" % CURRENT_LINK_STATUS_PREF)
             return ExitCode.GEN_ERROR
         if status_code > HTTPStatus.BAD_REQUEST:
             # there is no HTTPStatus for status code 0, so treat it as an error
