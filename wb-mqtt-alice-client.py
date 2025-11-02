@@ -82,6 +82,13 @@ class AppContext:
 ctx = AppContext()
 
 
+def _log_emit_exception(event: str, future: asyncio.Future) -> None:
+    """Log exception from emit future if any occurred"""
+    exc = future.exception()
+    if exc:
+        logger.error("Emit %r failed: %r", event, exc, exc_info=True)
+
+
 def _emit_async(event: str, data: Dict[str, Any]) -> None:
     """
     Safely schedules a Socket.IO event to be emitted
@@ -147,14 +154,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
 
         if ctx.main_loop.is_running():
             fut = asyncio.run_coroutine_threadsafe(ctx.sio.emit(event, data), ctx.main_loop)
-
-            # Log if the future raises an exception
-            def log_emit_exception(f: asyncio.Future):
-                exc = f.exception()
-                if exc:
-                    logger.error("Emit %r failed: %r", event, exc, exc_info=True)
-
-            fut.add_done_callback(log_emit_exception)
+            fut.add_done_callback(lambda f: _log_emit_exception(event, f))
         else:
             logger.error("ctx.main_loop is not running - cannot emit %r", event)
 
@@ -281,6 +281,14 @@ def setup_mqtt_client() -> mqtt_client.Client:
 async def connect() -> None:
     logger.info("Success connected to Socket.IO server! namespace='/' ready")
 
+    # NOTE: ctx.sio.sid is the Socket.IO session id for the default namespace "/"
+    sio_sid = getattr(ctx.sio, "sid", None)
+    logger.info("Socket.IO session id (sid): %r", sio_sid)
+
+    # Optional (debug): engine.io session id, may help in low-level troubleshooting
+    eio_sid = getattr(getattr(ctx.sio, "eio", None), "sid", None)
+    logger.debug("Engine.IO session id (eio.sid): %r", eio_sid)
+
     try:
         await ctx.sio.emit("message", {"controller_sn": ctx.controller_sn, "status": "online"})
     except Exception as e:
@@ -305,17 +313,20 @@ async def error(data: Any) -> None:
     logger.debug("SocketIO server error: %r", data)
 
 
-async def connect_error(data: Dict[str, Any]) -> None:
+# NOTE: In actual Socket.IO versions - argument is "Dict[str, Any]",
+#       but in old versions what we use - this is "str" -> now set "Any" type
+async def connect_error(data: Any) -> None:
     """
     Called when initial connection to server fails
     """
     # Connection was refused by server (e.g. controller not registered)
-    reason = str(data).strip()
-    logger.error("Yandex Alice integration connection refused by server")
-    logger.error("Please link conrtoller, then restart service manually:")
-    logger.error("  # systemctl restart wb-mqtt-alice-client")
+    logger.error(
+        "Yandex Alice integration connection refused by server, stopping client..."
+    )
+    reason_raw = str(data).strip()
+    logger.error("Message from server: %r", reason_raw)
 
-    # Stop state sender if running
+    # Stop the client — it cannot operate without a valid connection to the server
     if ctx.time_rate_sender and ctx.time_rate_sender.running:
         try:
             await ctx.time_rate_sender.stop()
@@ -616,7 +627,7 @@ async def probe_nginx_until_stable(
     max_attempts: int = 5,
     acceptable_latency_s: float = 1.5,
     per_attempt_timeout_s: int = 10,
-    sleep_between_attempts_s: float = 10,
+    sleep_between_attempts_s: float = 7, # [Chip work 0.1s - TTL may be 30s]
 ) -> bool:
     """
     Probe local nginx multiple times before opening the long-lived Socket.IO
