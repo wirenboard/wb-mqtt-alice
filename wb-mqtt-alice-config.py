@@ -13,9 +13,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
+from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH, INTEGRATION_CONFIG_PATH
 from fetch_url import fetch_url
-from models import Capability, Config, Device, Property, Room, RoomID
+from models import Capability, Config, Device, Property, Room, RoomID, IntegrationConfig
 from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
 
 # FastAPI initialization
@@ -104,6 +104,33 @@ def load_config() -> Config:
         save_devices_config(config)
         logger.error("Error reading configuration file: %r", e)
         return config
+
+
+def load_integration_config() -> IntegrationConfig:
+    """Load integration configuration from file"""
+
+    logger.debug("Reading integration configuration file...")
+    try:
+        config = IntegrationConfig(**json.loads(Path(INTEGRATION_CONFIG_PATH).read_text(encoding="utf-8")))
+        return config
+    except Exception as e:
+        logger.warning("Creating default integration configuration file...")
+        config = IntegrationConfig(client_enabled=False)
+        save_integration_config(config)
+        return config
+
+
+def save_integration_config(config: IntegrationConfig) -> None:
+    """Save integration configuration to file"""
+    logger.debug("Saving integration configuration file...")
+    try:
+        Path(INTEGRATION_CONFIG_PATH).write_text(
+            json.dumps(config.dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+    except Exception as e:
+        logger.error("Error saving integration configuration file: %r", e)
+        raise
 
 
 def save_devices_config(config: Config) -> None:
@@ -726,6 +753,70 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     finalize_config_change(config, force_client_reload=True)
 
     return response
+
+
+@app.post("/integrations/alice/enable", status_code=HTTPStatus.OK)
+async def enable_integration(request: Request):
+    """Enable Yandex Alice integration"""
+
+    language = get_language(request)
+    integration_config = load_integration_config()
+
+    request_data = await request.json()
+    requested_status = request_data.get("enabled", False)
+
+    # Check controller linked status before enabling integration
+    if requested_status:
+        # Use fetch_url to check current link status
+        try:
+            response = fetch_url(
+                url=f"https://{server_address}/request-registration",
+                data={"controller_version": f"{controller_version}"},
+                key_id=key_id,
+            )
+
+            # Validate response
+            if not isinstance(response, dict):
+                logger.error("Invalid response from server: %r", response)
+                raise HTTPException(
+                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                    detail=get_translation("server_unavailable", language),
+                )
+
+            data = response.get("data", {})
+
+            # Controller not linked if registration_url present or data empty
+            if not data or ("registration_url" in data):
+                raise HTTPException(
+                    status_code=HTTPStatus.PRECONDITION_FAILED,
+                    detail=get_translation("controller_not_linked", language),
+                )
+
+            # Controller linked if detail exists
+            if not (isinstance(data, dict) and data.get("detail")):
+                raise HTTPException(
+                    status_code=HTTPStatus.PRECONDITION_FAILED,
+                    detail=get_translation("controller_status_unknown", language),
+                )
+
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
+        except Exception as e:
+            logger.error("Failed to check controller link status: %r", e)
+            raise HTTPException(
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                detail=get_translation("server_check_failed", language),
+            )
+
+    # Update integration config
+    integration_config.client_enabled = requested_status
+    save_integration_config(integration_config)
+
+    # Optionally restart client if integration enabled and controller linked
+    if requested_status:
+        force_client_reload_config()
+
+    return {"message": get_translation("integration_enabled", language)}
 
 
 @app.exception_handler(Exception)

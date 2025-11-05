@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.6.0) stable; urgency=medium
+
+  * Add endpoint to activate integration with Alice
+  * Move integration configuration file to /etc/wb-mqtt-alice.conf
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Thu, 06 Nov 2025 03:00:00 +0300
+
 wb-mqtt-alice (0.5.3) stable; urgency=medium
 
   * Fix client message about controller unlinked from server

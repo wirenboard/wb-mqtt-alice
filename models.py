@@ -63,3 +63,6 @@ class Config(BaseModel):
     devices: Dict[str, Device]
     link_url: Optional[str] = None
     unlink_url: Optional[str] = None
+
+class IntegrationConfig(BaseModel):
+    client_enabled: bool = False
