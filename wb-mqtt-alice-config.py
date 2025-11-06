@@ -231,9 +231,9 @@ def sync_client_enabled_status(config: Config) -> bool:
         bool: True if status was changed and client needs restart
 
     Example:
-        - No devices, registered: False
-        - Has devices, not registered: False  
-        - Has devices, registered: True
+        - Not integrations flagged, registered: False
+        - integrations flagged, not registered: False
+        - integrations flagged, registered: True
     """
     integration_config = load_integration_config()
 
