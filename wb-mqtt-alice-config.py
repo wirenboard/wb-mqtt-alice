@@ -235,28 +235,19 @@ def sync_client_enabled_status(config: Config) -> bool:
         - Has devices, not registered: False  
         - Has devices, registered: True
     """
-    client_config = load_client_config()
+    integration_config = load_integration_config()
 
-    old_status = client_config.get("client_enabled")
+    old_status = integration_config.client_enabled
     new_status = should_enable_client(config)
     if old_status == new_status:
         return False  # No need to sync client "enabled" state
 
-    client_config["client_enabled"] = new_status
-    try:
-        Path(CLIENT_CONFIG_PATH).write_text(
-            json.dumps(client_config, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except Exception as e:
-        logger.error("Error saving yandex devices configuration file: %r", e)
-        raise
+    integration_config.client_enabled = new_status
+    save_integration_config(integration_config)
 
     logger.info(
-        "Client status changed: %s -> %s (devices: %d, registered: %s)",
-        old_status, new_status, 
-        len(config.devices), 
-        bool(config.unlink_url)
+        "Client status changed: %s -> %s (registered: %s)",
+        old_status, new_status, bool(integration_config.client_enabled)
     )
     return True
 
@@ -359,12 +350,13 @@ def should_enable_client(config: Config) -> bool:
         - True if client should be enabled
         - False otherwise
     """
-    devices_qty = len(config.devices)
-    has_devices = devices_qty > 0
+    
+    integration_config = load_integration_config()
+    is_integration_enabled = integration_config.client_enabled
     is_registered = bool(config.unlink_url)
 
-    if not has_devices:
-        logger.debug("Client should be disabled: no devices configured")
+    if not is_integration_enabled:
+        logger.debug("Client should be disabled: integration not enabled")
         return False
     
     if not is_registered:
@@ -372,8 +364,7 @@ def should_enable_client(config: Config) -> bool:
         return False
 
     logger.debug(
-        "Client should be enabled: %d device(s) configured, controller registered",
-        devices_qty
+        "Client should be enabled: integration enabled, controller registered"
     )
     return True
 
@@ -421,7 +412,7 @@ def sync_registration_status(config: Config) -> Config:
     return config
 
 
-async def restore_client_status_if_needed(config: Config) -> None:
+async def restore_client_status_if_needed(config: IntegrationConfig) -> None:
     """
     Restore client enabled status based on current configuration state
     
