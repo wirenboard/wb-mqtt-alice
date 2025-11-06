@@ -8,10 +8,12 @@ import uuid
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
+import tempfile
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH, INTEGRATION_CONFIG_PATH
 from fetch_url import fetch_url
@@ -108,28 +110,70 @@ def load_config() -> Config:
 
 def load_integration_config() -> IntegrationConfig:
     """Load integration configuration from file"""
-
     logger.debug("Reading integration configuration file...")
+
+    config_path = Path(INTEGRATION_CONFIG_PATH)
+    # File doesn't exist — create default
+    if not config_path.exists():
+        logger.info("Integration config not found, creating default...")
+        default_integration_config = IntegrationConfig(client_enabled=False)
+        save_integration_config(default_integration_config)
+        return default_integration_config
+
+    # File exists — try to load
     try:
-        config = IntegrationConfig(**json.loads(Path(INTEGRATION_CONFIG_PATH).read_text(encoding="utf-8")))
-        return config
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        loaded_integration_config = IntegrationConfig(**data)
+        return loaded_integration_config
+    except (json.JSONDecodeError, ValidationError) as e:
+        # Invalid JSON or schema — recreate with default
+        logger.warning(
+            "Integration config is invalid (%s: %r), recreating with defaults...",
+            type(e).__name__, e
+        )
+        default_integration_config = IntegrationConfig(client_enabled=False)
+        save_integration_config(default_integration_config)
+        return default_integration_config
     except Exception as e:
-        logger.warning("Creating default integration configuration file...")
-        config = IntegrationConfig(client_enabled=False)
-        save_integration_config(config)
-        return config
+        # Unexpected error (permissions, etc) — reraise
+        logger.error("Failed to load integration config: %r", e)
+        raise
 
 
 def save_integration_config(config: IntegrationConfig) -> None:
-    """Save integration configuration to file"""
-    logger.debug("Saving integration configuration file...")
+    """Save integration configuration to file (atomic write)"""
+    logger.info("Saving integration configuration file...")
+
+    config_path = Path(INTEGRATION_CONFIG_PATH)
+    tmp_path = None
     try:
-        Path(INTEGRATION_CONFIG_PATH).write_text(
-            json.dumps(config.dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        # Ensure parent directory exists
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Serialize and validate
+        content = json.dumps(config.dict(), ensure_ascii=False, indent=2)
+
+        # Atomic write: write to temp file, then rename
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            dir=config_path.parent,
+            delete=False,
+            prefix='.tmp_integration_',
+            suffix='.json'
+        ) as tmp_file:
+            tmp_file.write(content)
+            tmp_path = Path(tmp_file.name)
+
+        # Atomic rename (overwrites target on POSIX)
+        tmp_path.replace(config_path)
+        logger.debug("Integration config saved successfully")
+
     except Exception as e:
         logger.error("Error saving integration configuration file: %r", e)
+        # Clean up temp file if exists
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
         raise
 
 
@@ -805,7 +849,7 @@ async def enable_integration(request: Request):
             logger.error("Failed to check controller link status: %r", e)
             raise HTTPException(
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                detail=get_translation("server_check_failed", language),
+                detail=get_translation("server_unavailable", language),
             )
 
     # Update integration config
