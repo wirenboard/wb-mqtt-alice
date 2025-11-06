@@ -140,7 +140,7 @@ def load_integration_config() -> IntegrationConfig:
         raise
 
 
-def save_integration_config(config: IntegrationConfig) -> None:
+def save_integration_config(integration_config: IntegrationConfig) -> None:
     """Save integration configuration to file (atomic write)"""
     logger.info("Saving integration configuration file...")
 
@@ -151,7 +151,7 @@ def save_integration_config(config: IntegrationConfig) -> None:
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Serialize and validate
-        content = json.dumps(config.dict(), ensure_ascii=False, indent=2)
+        content = json.dumps(integration_config.dict(), ensure_ascii=False, indent=2)
 
         # Atomic write: write to temp file, then rename
         with tempfile.NamedTemporaryFile(
