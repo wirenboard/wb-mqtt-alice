@@ -343,7 +343,7 @@ def should_enable_client(config: Config) -> bool:
     Check the minimum conditions for enabling the client
 
     Both conditions must be met for client to be enabled:
-    - Has at least one device configured
+    - Integrations flagged
     - Controller is registered (unlink_url is set)
     
     Returns:
@@ -412,7 +412,7 @@ def sync_registration_status(config: Config) -> Config:
     return config
 
 
-async def restore_client_status_if_needed(config: IntegrationConfig) -> None:
+async def restore_client_status_if_needed(config: Config) -> None:
     """
     Restore client enabled status based on current configuration state
     
