@@ -27,7 +27,7 @@ app = FastAPI(
 )
 
 # Setting up the logger
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s %(name)s — %(funcName) -  %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
@@ -822,6 +822,9 @@ async def enable_integration(request: Request):
 
             # Controller not linked if registration_url present or data empty
             if not data or ("registration_url" in data):
+                # Update integration config
+                integration_config.client_enabled = requested_status
+                save_integration_config(integration_config)
                 raise HTTPException(
                     status_code=HTTPStatus.PRECONDITION_FAILED,
                     detail=get_translation("controller_not_linked", language),
@@ -829,6 +832,9 @@ async def enable_integration(request: Request):
 
             # Controller linked if detail exists
             if not (isinstance(data, dict) and data.get("detail")):
+                # Update integration config
+                integration_config.client_enabled = requested_status
+                save_integration_config(integration_config)
                 raise HTTPException(
                     status_code=HTTPStatus.PRECONDITION_FAILED,
                     detail=get_translation("controller_status_unknown", language),
@@ -852,6 +858,15 @@ async def enable_integration(request: Request):
         force_client_reload_config()
 
     return {"message": get_translation("integration_enabled", language)}
+
+
+@app.get("/integrations/alice/enable", status_code=HTTPStatus.OK)
+def get_enable_integration(request: Request):
+    """Return status of Yandex Alice integration"""
+
+    integration_config = load_integration_config()
+
+    return {"enabled": integration_config.client_enabled}
 
 
 @app.exception_handler(Exception)
