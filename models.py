@@ -66,3 +66,4 @@ class Config(BaseModel):
 
 class IntegrationConfig(BaseModel):
     client_enabled: bool = False
+    reconnection_interval: int = 20  # minutes
