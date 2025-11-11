@@ -18,7 +18,7 @@ CONFIG_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
 DEVICE_PATH = "/etc/wb-mqtt-alice-devices.conf"
 CONFIG_EVENTS_RATE_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-event-rates.json"
 CLIENT_CONFIG_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
-INTEGRATION_CONFIG_PATH = "/etc/wb-mqtt-alice.conf"
+INTEGRATION_CONFIG_PATH = "/etc/wb-mqtt-alice-config.conf"
 # Board info paths
 BOARD_REVISION_PATH = "/proc/device-tree/wirenboard/board-revision"
 BOARD_MODEL_PATH = "/proc/device-tree/model"
