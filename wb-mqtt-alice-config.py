@@ -345,20 +345,21 @@ def should_enable_client(config: Config) -> bool:
     Both conditions must be met for client to be enabled:
     - Integrations flagged
     - Controller is registered (unlink_url is set)
-    
+    Args:
+        config: Configuration object
     Returns:
         - True if client should be enabled
         - False otherwise
     """
-    
-    integration_config = load_client_config()
-    is_integration_enabled = integration_config.client_enabled
-    is_registered = bool(config.unlink_url)
 
-    if not is_integration_enabled:
+    client_config = load_client_config()
+
+    if not client_config.client_enabled:
         logger.debug("Client should be disabled: integration not enabled")
         return False
-    
+
+    is_registered = bool(config.unlink_url)
+
     if not is_registered:
         logger.debug("Client should be disabled: controller not registered (no unlink_url)")
         return False
