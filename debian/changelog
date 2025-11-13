@@ -6,6 +6,12 @@ wb-mqtt-alice (0.6.0) stable; urgency=medium
 
  -- Victor Fedorov <victor.fedorov@wirenboard.com>  Thu, 06 Nov 2025 03:00:00 +0300
 
+wb-mqtt-alice (0.5.4) stable; urgency=medium
+
+  * Change default rates for yandex capabilities(on_off) and properties(float)
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Wed, 12 Nov 2025 13:00:00 +0300
+
 wb-mqtt-alice (0.5.3) stable; urgency=medium
 
   * Fix client message about controller unlinked from server
