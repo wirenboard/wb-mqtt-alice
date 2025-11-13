@@ -6,7 +6,7 @@ import sys
 from enum import IntEnum
 from http import HTTPStatus
 from fetch_url import fetch_url
-from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
+from wb_mqtt_load_config import get_board_revision, get_key_id, load_server_config
 from constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
 
 # Exit codes for get_link_status / CLI
@@ -45,7 +45,7 @@ def unlink_controller():
     """Unlink controller from yandex account."""
     logger.info("Unlinking controller from yandex account...")
     try:
-        cfg = load_client_config()
+        cfg = load_server_config()
         server_address = cfg.get("server_address")
         controller_version = get_board_revision()
         key_id = get_key_id(controller_version)
@@ -115,7 +115,7 @@ def get_link_status():
     """
     logger.info("%s...", GET_LINK_STATUS_PREF)
     try:
-        cfg = load_client_config()
+        cfg = load_server_config()
         server_address = cfg.get("server_address")
         controller_version = get_board_revision()
         key_id = get_key_id(controller_version)

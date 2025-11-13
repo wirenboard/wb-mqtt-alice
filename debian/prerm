@@ -1,0 +1,61 @@
+#!/bin/bash
+# filepath: debian/prerm
+
+set -e
+
+# Paths
+OLD_CONF="/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
+NEW_CONF="/etc/wb-mqtt-alice-client.conf"
+
+# Function to extract client_enabled value from JSON config
+get_client_enabled() {
+    local conf_file="$1"
+    python3 -c "
+import json
+try:
+    with open('$conf_file', 'r') as f:
+        config = json.load(f)
+    print(config.get('client_enabled', False))
+except:
+    print(False)
+"
+}
+
+# Function to update client_enabled in JSON config
+set_client_enabled() {
+    local conf_file="$1"
+    local value="$2"
+    python3 -c "
+import json
+try:
+    with open('$conf_file', 'r') as f:
+        config = json.load(f)
+except FileNotFoundError:
+    config = {}
+config['client_enabled'] = bool($value)
+with open('$conf_file', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+}
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Migrate client_enabled from old to new config before removal
+        if [ -f "$OLD_CONF" ]; then
+            VALUE=$(get_client_enabled "$OLD_CONF")
+            set_client_enabled "$NEW_CONF" "$VALUE"
+            # Remove old file
+            rm -f "$OLD_CONF"
+        fi
+        ;;
+    failed-upgrade)
+        ;;
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

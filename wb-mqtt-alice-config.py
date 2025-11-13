@@ -15,10 +15,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH, INTEGRATION_CONFIG_PATH
+from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from fetch_url import fetch_url
-from models import Capability, Config, Device, Property, Room, RoomID, IntegrationConfig
-from wb_mqtt_load_config import get_board_revision, get_key_id, load_client_config
+from models import Capability, Config, Device, Property, Room, RoomID, ClientConfig
+from wb_mqtt_load_config import get_board_revision, get_key_id, load_server_config
 
 # FastAPI initialization
 app = FastAPI(
@@ -66,10 +66,10 @@ def init_globals():
         key_id = get_key_id(controller_version)
         config = load_config()
         
-        client_cfg = load_client_config()
-        server_address = client_cfg.get("server_address")
+        server_cfg = load_server_config()
+        server_address = server_cfg.get("server_address")
         if not server_address:
-            raise ValueError("Missing 'server_address' in client config")
+            raise ValueError("Missing 'server_address' in server config")
 
         setting = load_setting()
         translations = setting.get("translations", {})
@@ -108,50 +108,50 @@ def load_config() -> Config:
         return config
 
 
-def load_integration_config() -> IntegrationConfig:
-    """Load integration configuration from file"""
-    logger.debug("Reading integration configuration file...")
+def load_client_config() -> ClientConfig:
+    """Load client configuration from file"""
+    logger.debug("Reading client configuration file...")
 
-    config_path = Path(INTEGRATION_CONFIG_PATH)
+    config_path = Path(CLIENT_CONFIG_PATH)
     # File doesn't exist — create default
     if not config_path.exists():
-        logger.info("Integration config not found, creating default...")
-        default_integration_config = IntegrationConfig(client_enabled=False)
-        save_integration_config(default_integration_config)
-        return default_integration_config
+        logger.info("Client config not found, creating default...")
+        default_client_config = ClientConfig(client_enabled=False)
+        save_client_config(default_client_config)
+        return default_client_config
 
     # File exists — try to load
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
-        loaded_integration_config = IntegrationConfig(**data)
-        return loaded_integration_config
+        loaded_client_config = ClientConfig(**data)
+        return loaded_client_config
     except (json.JSONDecodeError, ValidationError) as e:
         # Invalid JSON or schema — recreate with default
         logger.warning(
-            "Integration config is invalid (%s: %r), recreating with defaults...",
+            "Client config is invalid (%s: %r), recreating with defaults...",
             type(e).__name__, e
         )
-        default_integration_config = IntegrationConfig(client_enabled=False)
-        save_integration_config(default_integration_config)
-        return default_integration_config
+        default_client_config = ClientConfig(client_enabled=False)
+        save_client_config(default_client_config)
+        return default_client_config
     except Exception as e:
         # Unexpected error (permissions, etc) — reraise
-        logger.error("Failed to load integration config: %r", e)
+        logger.error("Failed to load client config: %r", e)
         raise
 
 
-def save_integration_config(integration_config: IntegrationConfig) -> None:
-    """Save integration configuration to file (atomic write)"""
-    logger.info("Saving integration configuration file...")
+def save_client_config(client_config: ClientConfig) -> None:
+    """Save client configuration to file (atomic write)"""
+    logger.info("Saving client configuration file...")
 
-    config_path = Path(INTEGRATION_CONFIG_PATH)
+    config_path = Path(CLIENT_CONFIG_PATH)
     tmp_path = None
     try:
         # Ensure parent directory exists
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Serialize and validate
-        content = json.dumps(integration_config.dict(), ensure_ascii=False, indent=2)
+        content = json.dumps(client_config.dict(), ensure_ascii=False, indent=2)
 
         # Atomic write: write to temp file, then rename
         with tempfile.NamedTemporaryFile(
@@ -159,7 +159,7 @@ def save_integration_config(integration_config: IntegrationConfig) -> None:
             encoding='utf-8',
             dir=config_path.parent,
             delete=False,
-            prefix='.tmp_integration_',
+            prefix='.tmp_config_',
             suffix='.json'
         ) as tmp_file:
             tmp_file.write(content)
@@ -167,10 +167,10 @@ def save_integration_config(integration_config: IntegrationConfig) -> None:
 
         # Atomic rename (overwrites target on POSIX)
         tmp_path.replace(config_path)
-        logger.debug("Integration config saved successfully")
+        logger.debug("Client config saved successfully")
 
     except Exception as e:
-        logger.error("Error saving integration configuration file: %r", e)
+        logger.error("Error saving client configuration file: %r", e)
         # Clean up temp file if exists
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -235,19 +235,19 @@ def sync_client_enabled_status(config: Config) -> bool:
         - integrations flagged, not registered: False
         - integrations flagged, registered: True
     """
-    integration_config = load_integration_config()
+    client_config = load_client_config()
 
-    old_status = integration_config.client_enabled
+    old_status = client_config.client_enabled
     new_status = should_enable_client(config)
     if old_status == new_status:
         return False  # No need to sync client "enabled" state
 
-    integration_config.client_enabled = new_status
-    save_integration_config(integration_config)
+    client_config.client_enabled = new_status
+    save_client_config(client_config)
 
     logger.info(
         "Client status changed: %s -> %s (registered: %s)",
-        old_status, new_status, bool(integration_config.client_enabled)
+        old_status, new_status, bool(client_config.client_enabled)
     )
     return True
 
@@ -351,7 +351,7 @@ def should_enable_client(config: Config) -> bool:
         - False otherwise
     """
     
-    integration_config = load_integration_config()
+    integration_config = load_client_config()
     is_integration_enabled = integration_config.client_enabled
     is_registered = bool(config.unlink_url)
 
@@ -795,7 +795,7 @@ async def enable_integration(request: Request):
     """Enable Yandex Alice integration"""
 
     language = get_language(request)
-    integration_config = load_integration_config()
+    client_config = load_client_config()
 
     request_data = await request.json()
     requested_status = request_data.get("enabled", False)
@@ -823,8 +823,8 @@ async def enable_integration(request: Request):
             # Controller not linked if registration_url present or data empty
             if not data or ("registration_url" in data):
                 # Update integration config
-                integration_config.client_enabled = requested_status
-                save_integration_config(integration_config)
+                client_config.client_enabled = requested_status
+                save_client_config(client_config)
                 raise HTTPException(
                     status_code=HTTPStatus.PRECONDITION_FAILED,
                     detail=get_translation("controller_not_linked", language),
@@ -833,8 +833,8 @@ async def enable_integration(request: Request):
             # Controller linked if detail exists
             if not (isinstance(data, dict) and data.get("detail")):
                 # Update integration config
-                integration_config.client_enabled = requested_status
-                save_integration_config(integration_config)
+                client_config.client_enabled = requested_status
+                save_client_config(client_config)
                 raise HTTPException(
                     status_code=HTTPStatus.PRECONDITION_FAILED,
                     detail=get_translation("controller_status_unknown", language),
@@ -850,8 +850,8 @@ async def enable_integration(request: Request):
             )
 
     # Update integration config
-    integration_config.client_enabled = requested_status
-    save_integration_config(integration_config)
+    client_config.client_enabled = requested_status
+    save_client_config(client_config)
 
     # Optionally restart client if integration enabled and controller linked
     if requested_status:
@@ -864,9 +864,9 @@ async def enable_integration(request: Request):
 def get_enable_integration(request: Request):
     """Return status of Yandex Alice integration"""
 
-    integration_config = load_integration_config()
+    client_config = load_client_config()
 
-    return {"enabled": integration_config.client_enabled}
+    return {"enabled": client_config.client_enabled}
 
 
 @app.exception_handler(Exception)

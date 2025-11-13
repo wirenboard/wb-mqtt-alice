@@ -64,6 +64,7 @@ class Config(BaseModel):
     link_url: Optional[str] = None
     unlink_url: Optional[str] = None
 
-class IntegrationConfig(BaseModel):
+class ClientConfig(BaseModel):
     client_enabled: bool = False
-    reconnection_interval: int = 20  # minutes
+    reconnection_interval_min: int = 20  # minutes
+    log_level: str = "info"
