@@ -27,7 +27,7 @@ app = FastAPI(
 )
 
 # Setting up the logger
-logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s %(name)s — %(funcName)s -  %(message)s", force=True)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
