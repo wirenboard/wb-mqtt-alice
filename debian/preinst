@@ -9,6 +9,9 @@ MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
 
 case "$1" in
     install|upgrade)
+        # Create directory for migration flag if it doesn't exist
+        mkdir -p /var/lib
+        
         # Save client_enabled value if old file exists
         if [ -f "$OLD_CONF" ]; then
             python3 -c "
