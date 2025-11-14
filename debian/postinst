@@ -7,19 +7,21 @@ set -e
 NEW_CONF="/etc/wb-mqtt-alice-client.conf"
 MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
 
-# Function to update client_enabled in JSON config
+# Function to update client_enabled in JSON config while preserving other fields
 set_client_enabled() {
     local conf_file="$1"
     local value="$2"
     python3 -c "
 import json
+# Read existing config (with all fields)
 try:
     with open('$conf_file', 'r') as f:
         config = json.load(f)
 except FileNotFoundError:
     config = {}
-# Convert string 'True'/'False' to boolean
+# Update ONLY client_enabled field
 config['client_enabled'] = ('$value' == 'True')
+# Write back with all fields preserved
 with open('$conf_file', 'w') as f:
     json.dump(config, f, indent=2)
 "
