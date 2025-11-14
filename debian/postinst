@@ -6,52 +6,16 @@ set -e
 # Paths
 NEW_CONF="/etc/wb-mqtt-alice-client.conf"
 MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
-
-# Function to update client_enabled in JSON config while preserving other fields
-set_client_enabled() {
-    local conf_file="$1"
-    local value="$2"
-    python3 -c "
-import json
-
-# Default configuration with all required fields
-defaults = {
-    'client_enabled': False,
-    'reconnection_interval_min': 20,
-    'log_level': 'info'
-}
-
-# Read existing config (if any)
-try:
-    with open('$conf_file', 'r') as f:
-        config = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    config = {}
-
-# Merge with defaults (preserve existing values, add missing fields)
-for key, default_value in defaults.items():
-    if key not in config:
-        config[key] = default_value
-
-# Update ONLY client_enabled field with migrated value
-config['client_enabled'] = ('$value' == 'True')
-
-# Write back with all fields
-with open('$conf_file', 'w') as f:
-    json.dump(config, f, indent=2)
-"
-}
+MIGRATION_SCRIPT="/usr/lib/wb-mqtt-alice/wb_alice_migrate_client_config.py"
 
 case "$1" in
     configure)
         # Apply migration if flag file exists
         if [ -f "$MIGRATION_FLAG" ]; then
             VALUE=$(cat "$MIGRATION_FLAG")
-            set_client_enabled "$NEW_CONF" "$VALUE"
+            python3 "$MIGRATION_SCRIPT" "$NEW_CONF" "$VALUE"
             # Clean up migration flag
             rm -f "$MIGRATION_FLAG"
-        else
-            echo "[postinst] No migration flag found, skipping migration"
         fi
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
