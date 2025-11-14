@@ -832,12 +832,12 @@ async def graceful_shutdown() -> None:
             logger.warning("Error during Socket.IO disconnect: %r", e)
 
     # Cancel Socket.IO wait task if still running
-    sio_task = getattr(ctx, "sio_task", None)
-    if sio_task and not sio_task.done():
+    sio_monitor_task = getattr(ctx, "sio_monitor_task", None)
+    if sio_monitor_task and not sio_monitor_task.done():
         logger.info("Cancelling Socket.IO wait task...")
-        sio_task.cancel()
+        sio_monitor_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await sio_task
+            await sio_monitor_task
 
     # Stop MQTT client
     if ctx.mqtt_client:
@@ -863,6 +863,28 @@ async def graceful_shutdown() -> None:
             logger.warning("Some tasks did not cancel within timeout")
 
     logger.info("Graceful shutdown completed")
+
+
+async def monitor_sio() -> None:
+    """
+    Monitor SocketIO client lifetime
+    """
+    if ctx.sio is None:
+        logger.error("monitor_sio() called but ctx.sio is None")
+        return
+
+    try:
+        await ctx.sio.wait()
+    except Exception as e:
+        logger.exception("SocketIO wait() failed with exception: %r", e)
+
+    logger.error(
+        "SocketIO client disconnected from server AND "
+        "internal SocketIO mechanism does not try to reconnect anymore"
+    )
+    if not ctx.stop_event.is_set():
+        logger.error("SocketIO permanently disconnected, stopping client")
+        ctx.stop_event.set()
 
 
 async def main() -> int:
@@ -939,10 +961,10 @@ async def main() -> int:
         logger.error("Failed to establish initial connection - exiting")
         return 1  # Need exit with error for restart
 
-    # Store the sio_task reference for graceful shutdown
-    ctx.sio_task = asyncio.create_task(ctx.sio.wait())
+    # Store the sio_monitor_task reference for graceful shutdown
+    ctx.sio_monitor_task = asyncio.create_task(monitor_sio())
 
-    # init and start AliceDeviceStateSender
+    # Init and start AliceDeviceStateSender only after connect SocketIO
     ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
     asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.start(), ctx.main_loop)
     subscribe_registry_topics()
