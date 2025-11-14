@@ -84,7 +84,7 @@ def get_controller_sn():
     logger.debug("Reading controller SN...")
     try:
         controller_sn = SHORT_SN_PATH.read_text().strip()
-        logger.debug("Сontroller SN: %r", controller_sn)
+        logger.debug("Controller SN: %r", controller_sn)
         return controller_sn
     except FileNotFoundError:
         logger.error("Controller SN file not found! Check the path: %r", SHORT_SN_PATH)
