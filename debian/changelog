@@ -1,7 +1,8 @@
 wb-mqtt-alice (0.6.0) stable; urgency=medium
 
-  * Add endpoint to activate integration with Alice
-  * Move integration configuration file to /etc/wb-mqtt-alice.conf
+  * Add endpoint to activate integration with Alice (POST, GET)
+  * Move integration configuration file to /etc/wb-mqtt-alice-client.conf
+  * Rename wb-mqtt-alice-client.conf to wb-mqtt-alice-server.conf
 
  -- Victor Fedorov <victor.fedorov@wirenboard.com>  Thu, 06 Nov 2025 03:00:00 +0300
 
