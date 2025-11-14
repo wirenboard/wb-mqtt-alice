@@ -32,7 +32,8 @@ try:
         config = json.load(f)
 except FileNotFoundError:
     config = {}
-config['client_enabled'] = bool($value)
+# Convert string 'True'/'False' to boolean
+config['client_enabled'] = ('$value' == 'True')
 with open('$conf_file', 'w') as f:
     json.dump(config, f, indent=2)
 "
