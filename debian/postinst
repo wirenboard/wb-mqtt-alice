@@ -32,9 +32,19 @@ case "$1" in
         # Apply migration if flag file exists
         if [ -f "$MIGRATION_FLAG" ]; then
             VALUE=$(cat "$MIGRATION_FLAG")
+            echo "[postinst] Migration flag found, value: $VALUE"
+            echo "[postinst] File before migration:"
+            cat "$NEW_CONF" || echo "[postinst] File does not exist!"
+            
             set_client_enabled "$NEW_CONF" "$VALUE"
+            
+            echo "[postinst] File after migration:"
+            cat "$NEW_CONF"
+            
             # Clean up migration flag
             rm -f "$MIGRATION_FLAG"
+        else
+            echo "[postinst] No migration flag found, skipping migration"
         fi
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
