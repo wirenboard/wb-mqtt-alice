@@ -16,7 +16,6 @@
 !/debian/*service
 !/debian/*preinst
 !/debian/*postinst
-!/debian/*conffiles
 
 # IDE files
 .vscode
