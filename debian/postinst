@@ -13,15 +13,30 @@ set_client_enabled() {
     local value="$2"
     python3 -c "
 import json
-# Read existing config (with all fields)
+
+# Default configuration with all required fields
+defaults = {
+    'client_enabled': False,
+    'reconnection_interval_min': 20,
+    'log_level': 'info'
+}
+
+# Read existing config (if any)
 try:
     with open('$conf_file', 'r') as f:
         config = json.load(f)
-except FileNotFoundError:
+except (FileNotFoundError, json.JSONDecodeError):
     config = {}
-# Update ONLY client_enabled field
+
+# Merge with defaults (preserve existing values, add missing fields)
+for key, default_value in defaults.items():
+    if key not in config:
+        config[key] = default_value
+
+# Update ONLY client_enabled field with migrated value
 config['client_enabled'] = ('$value' == 'True')
-# Write back with all fields preserved
+
+# Write back with all fields
 with open('$conf_file', 'w') as f:
     json.dump(config, f, indent=2)
 "
