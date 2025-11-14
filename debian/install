@@ -1,4 +1,3 @@
-wb-mqtt-alice-client.conf /etc/
 wb-mqtt-alice-devices.conf /etc/
 wb-mqtt-alice-devices.conf.example /etc/
 wb-mqtt-alice-webui.conf /usr/lib/wb-mqtt-alice/
