@@ -4,22 +4,8 @@
 set -e
 
 # Paths
-OLD_CONF="/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
 NEW_CONF="/etc/wb-mqtt-alice-client.conf"
-
-# Function to extract client_enabled value from JSON config
-get_client_enabled() {
-    local conf_file="$1"
-    python3 -c "
-import json
-try:
-    with open('$conf_file', 'r') as f:
-        config = json.load(f)
-    print(config.get('client_enabled', 'False'))
-except:
-    print('False')
-"
-}
+MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
 
 # Function to update client_enabled in JSON config
 set_client_enabled() {
@@ -41,12 +27,12 @@ with open('$conf_file', 'w') as f:
 
 case "$1" in
     configure)
-        # Migrate client_enabled from old to new config if old file exists
-        if [ -f "$OLD_CONF" ]; then
-            VALUE=$(get_client_enabled "$OLD_CONF")
+        # Apply migration if flag file exists
+        if [ -f "$MIGRATION_FLAG" ]; then
+            VALUE=$(cat "$MIGRATION_FLAG")
             set_client_enabled "$NEW_CONF" "$VALUE"
-            # Remove old file after successful migration
-            rm -f "$OLD_CONF"
+            # Clean up migration flag
+            rm -f "$MIGRATION_FLAG"
         fi
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
