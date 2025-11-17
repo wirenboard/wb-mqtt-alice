@@ -27,13 +27,13 @@ import http.client
 import socket
 
 import paho.mqtt.client as mqtt_client
-import socketio
 
 from constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CONFIG_PATH
 from device_registry import DeviceRegistry
 from wb_alice_device_state_sender import AliceDeviceStateSender
 from yandex_handlers import send_to_yandex_state, set_emit_callback
 from socketio_handlers import SocketIOHandlers
+from socketio_manager import SocketIOConnectionManager
 
 # Configuration constants
 MQTT_HOST = "localhost"
@@ -51,14 +51,6 @@ logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s", fo
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
-logger.debug("socketio module path: %r", socketio.__file__)
-from importlib.metadata import PackageNotFoundError, version
-
-try:
-    logger.debug("python-socketio version: %r", version("python-socketio"))
-except PackageNotFoundError:
-    logger.warning("python-socketio is not installed.")
-
 
 class AppContext:
     def __init__(self):
@@ -67,18 +59,17 @@ class AppContext:
         Global asyncio event loop, used to safely schedule coroutines from non-async
         threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
           - stop_event - Event that signals the main loop to wake up and initiate shutdown
-          - sio - SocketIO async client instance for handling real-time communication
+          - sio_manager - SocketIO connection manager for handling real-time communication
 
         """
         self.stop_event: Optional[asyncio.Event] = None
-        self.sio: Optional[socketio.AsyncClient] = None
+        self.sio_manager: Optional[SocketIOConnectionManager] = None
         self.sio_handlers: Optional[SocketIOHandlers] = None
         self.registry: Optional[DeviceRegistry] = None
         self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
         self.time_rate_sender: Optional[AliceDeviceStateSender] = None
         self.client_pkg_ver: Optional[str] = None
-        self.sio_connected_at: Optional[float] = None  # ts after sock.connect()
 
 
 ctx = AppContext()
@@ -96,7 +87,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
     Safely schedules a Socket.IO event to be emitted
     from any thread (async or not).
     """
-    if not ctx.sio:
+    if not ctx.sio_manager or not ctx.sio_manager.client:
         logger.warning(
             "Emit blocked: Socket.IO client not init (event = %r)",
             event
@@ -104,11 +95,11 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
         logger.debug("            Payload: %r", json.dumps(data))
         return None
 
-    eio_state = getattr(ctx.sio.eio, "state", "unknown")
-    if not ctx.sio.connected or getattr(ctx.sio.eio, "state", None) != "connected":
+    if not ctx.sio_manager.is_connected():
+        conn_info = ctx.sio_manager.get_connection_info()
         logger.warning(
-            "Emit blocked: Socket.IO not ready (state = %s, event = %r)",
-            eio_state,
+            "Emit blocked: Socket.IO not ready (info=%r, event=%r)",
+            conn_info,
             event,
         )
         logger.debug("            Payload: %r", json.dumps(data))
@@ -116,34 +107,13 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
 
     logger.debug("Connected status: %r", ctx.sio.connected)
 
-    ns_list = getattr(ctx.sio, "namespaces", {})
-    if not hasattr(ctx.sio, "namespaces") or "/" not in ns_list:
-        logger.warning(
-            "Emit blocked: namespace '/' not ready "
-            "(event=%r, eio_state=%r, connected=%r, since_connect=%.3fs, namespaces=%r)",
-            event,
-            eio_state,
-            ctx.sio.connected,
-            (time.monotonic() - ctx.sio_connected_at) if ctx.sio_connected_at else -1.0,
-            list(ns_list.keys()) if isinstance(ns_list, dict) else ns_list,
-        )
-        logger.debug("            Payload: %r", json.dumps(data))
-        return None
-
-    # BUG: Additional check for version SocketIO 5.0.3 (may delete when upgrade)
-    if hasattr(ctx.sio.eio, "write_loop_task") and ctx.sio.eio.write_loop_task is None:
-        logger.warning(
-            "Write loop task is None, connection unstable - skipping emit %r",
-            event,
-        )
-        return None
-
     logger.debug("Attempting to emit %r with payload: %r", event, data)
-
+    sio_client = ctx.sio_manager.client
+    
     try:
         # We're in an asyncio thread - safe to call create_task directly
         asyncio.get_running_loop()
-        asyncio.create_task(ctx.sio.emit(event, data))
+        asyncio.create_task(sio_client.emit(event, data))
         logger.debug("Scheduled emit %r via asyncio task", event)
 
     except RuntimeError:
@@ -155,7 +125,9 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
             return None
 
         if ctx.main_loop.is_running():
-            fut = asyncio.run_coroutine_threadsafe(ctx.sio.emit(event, data), ctx.main_loop)
+            fut = asyncio.run_coroutine_threadsafe(
+                sio_client.emit(event, data), ctx.main_loop
+            )
             fut.add_done_callback(lambda f: _log_emit_exception(event, f))
         else:
             logger.error("ctx.main_loop is not running - cannot emit %r", event)
@@ -462,9 +434,9 @@ async def probe_nginx_until_stable(
     return False
 
 
-async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any]) -> bool:
+async def connect_controller(config: Dict[str, Any]) -> bool:
     """
-    Connect to SocketIO server using provided configuration
+    Setup and connect to SocketIO server using provided configuration
     """
     ctx.controller_sn = get_controller_sn()
     if not ctx.controller_sn:
@@ -493,33 +465,48 @@ async def connect_controller(sock: socketio.AsyncClient, config: Dict[str, Any])
     if not await probe_nginx_until_stable():
         return False
 
-    try:
-        # Connect to local Nginx proxy which forwards to actual server
-        # "controller_sn" is passed via SSL certificate when Nginx proxies
-        await asyncio.wait_for(
-            sock.connect(
-                LOCAL_PROXY_URL,
-                socketio_path=SOCKETIO_PATH,
-                headers={
-                    "WB-Client-Pkg-Ver": ctx.client_pkg_ver
-                }
-            ),
-            timeout=10.0)
-        logger.info("Socket.IO connected successfully via proxy")
-        # record timestamp when low-level connect finished
-        ctx.sio_connected_at = time.monotonic()
+    is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
+    ctx.sio_manager = SocketIOConnectionManager(
+        server_url=LOCAL_PROXY_URL,
+        socketio_path=SOCKETIO_PATH,
+        controller_sn=ctx.controller_sn,
+        client_pkg_ver=ctx.client_pkg_ver,
+        reconnection=True,  # auto-reconnect ON
+        reconnection_delay=RECONNECT_DELAY_INITIAL,  # first recconect delay
+        reconnection_delay_max=RECONNECT_DELAY_MAX,
+        debug_logging=is_debug_log_enabled,
+    )
+    sio_client = ctx.sio_manager.create_client()
 
-        return True
+    # Setup handlers before connecting
+    def on_permanent_disconnect_callback():
+        """Callback for unrecoverable connection errors"""
+        logger.error("Permanent disconnect detected, stopping client...")
+        
+        # Stop time_rate_sender
+        if ctx.time_rate_sender and ctx.time_rate_sender.running:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    ctx.time_rate_sender.stop(), ctx.main_loop
+                )
+                logger.info("Stopped Alice state sender due to permanent disconnect")
+            except Exception as e:
+                logger.debug("Failed to stop sender: %r", e)
+        
+        # Trigger clean shutdown
+        if ctx.stop_event and not ctx.stop_event.is_set():
+            ctx.stop_event.set()
+    
+    ctx.sio_handlers = SocketIOHandlers(
+        registry=ctx.registry,
+        controller_sn=ctx.controller_sn,
+        sio_client=sio_client,
+        on_permanent_disconnect=on_permanent_disconnect_callback,
+    )
+    ctx.sio_handlers.bind_sio_handlers_to_client(sio_client)
+    logger.debug("Socket.IO handlers initialized and bound")
 
-    except socketio.exceptions.ConnectionError as e:
-        logger.exception("Socket.IO Connection Failed: %r", str(e))
-        return False
-    except asyncio.TimeoutError:
-        logger.exception("Socket.IO Connection Timeout (>10s) - server too slow")
-        return False
-    except Exception as e:
-        logger.exception("Unexpected exception during connection - %r: %r", type(e).__name__, str(e))
-        return False
+    return await ctx.sio_manager.connect(sio_client)
 
 
 def _log_and_stop(sig: signal.Signals) -> None:
@@ -588,42 +575,9 @@ async def graceful_shutdown() -> None:
         await ctx.time_rate_sender.stop()
         await asyncio.sleep(0.1)
 
-    # Notify server about going offline
-    # This is informative message, not have spesial beckend processing
-    if ctx.sio and ctx.sio.connected:
-        try:
-            logger.info("Notifying server about offline status...")
-            await asyncio.wait_for(
-                ctx.sio.emit("message", {"controller_sn": ctx.controller_sn, "status": "offline"}),
-                timeout=3.0,
-            )
-            # Give server time to process the offline message
-            await asyncio.sleep(0.5)
-        except asyncio.TimeoutError:
-            logger.warning("Timeout while notifying server about offline status")
-        except Exception as e:
-            logger.warning("Failed to notify server about offline status: %r", e)
-
-    logger.info("Properly disconnect from Socket.IO server ...")
-    # When service stop by user and then fast up
-    # We need stop correctly with wait disconnect from server, without it server not connect second controller twice
-    if ctx.sio and ctx.sio.connected:
-        try:
-            logger.info("Disconnecting from Socket.IO server...")
-            await asyncio.wait_for(ctx.sio.disconnect(), timeout=5.0)
-            logger.info("Socket.IO disconnected successfully")
-        except asyncio.TimeoutError:
-            logger.warning("Timeout while disconnecting from Socket.IO server")
-        except Exception as e:
-            logger.warning("Error during Socket.IO disconnect: %r", e)
-
-    # Cancel Socket.IO wait task if still running
-    sio_monitor_task = getattr(ctx, "sio_monitor_task", None)
-    if sio_monitor_task and not sio_monitor_task.done():
-        logger.info("Cancelling Socket.IO wait task...")
-        sio_monitor_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await sio_monitor_task
+    # Disconnect Socket.IO
+    if ctx.sio_manager:
+        await ctx.sio_manager.disconnect()
 
     # Stop MQTT client
     if ctx.mqtt_client:
@@ -649,28 +603,6 @@ async def graceful_shutdown() -> None:
             logger.warning("Some tasks did not cancel within timeout")
 
     logger.info("Graceful shutdown completed")
-
-
-async def monitor_sio() -> None:
-    """
-    Monitor SocketIO client lifetime
-    """
-    if ctx.sio is None:
-        logger.error("monitor_sio() called but ctx.sio is None")
-        return
-
-    try:
-        await ctx.sio.wait()
-    except Exception as e:
-        logger.exception("SocketIO wait() failed with exception: %r", e)
-
-    logger.error(
-        "SocketIO client disconnected from server AND "
-        "internal SocketIO mechanism does not try to reconnect anymore"
-    )
-    if not ctx.stop_event.is_set():
-        logger.error("SocketIO permanently disconnected, stopping client")
-        ctx.stop_event.set()
 
 
 async def main() -> int:
@@ -726,56 +658,13 @@ async def main() -> int:
         logger.error("MQTT connect failed: %r", e)
         return 0  # 0 mean - exit without service restart
 
-    is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
-    ctx.sio = socketio.AsyncClient(
-        logger=is_debug_log_enabled,
-        engineio_logger=is_debug_log_enabled,
-        reconnection=True,  # auto-reconnect ON
-        reconnection_attempts=0,  # 0 = infinite retries
-        reconnection_delay=RECONNECT_DELAY_INITIAL,  # first recconect delay
-        reconnection_delay_max=RECONNECT_DELAY_MAX,
-        randomization_factor=0.5,  # jitter
-    )
+    # Set emit callback for yandex_handlers module
     set_emit_callback(_emit_async)
 
-    # Explicitly set the loop to avoid "attached to a different loop" errors
-    ctx.sio._loop = ctx.main_loop
-
-    # Create and bind Socket.IO handlers
-    def on_permanent_disconnect_callback():
-        """Callback for unrecoverable connection errors"""
-        logger.error("Permanent disconnect detected, stopping client...")
-        
-        # Stop time_rate_sender
-        if ctx.time_rate_sender and ctx.time_rate_sender.running:
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    ctx.time_rate_sender.stop(), ctx.main_loop
-                )
-                logger.info("Stopped Alice state sender due to permanent disconnect")
-            except Exception as e:
-                logger.debug("Failed to stop sender: %r", e)
-        
-        # Trigger clean shutdown
-        if ctx.stop_event and not ctx.stop_event.is_set():
-            ctx.stop_event.set()
-    
-    ctx.sio_handlers = SocketIOHandlers(
-        registry=ctx.registry,
-        controller_sn=ctx.controller_sn,
-        sio_client=ctx.sio,
-        on_permanent_disconnect=on_permanent_disconnect_callback,
-    )
-    ctx.sio_handlers.bind_sio_handlers_to_client(ctx.sio)
-    logger.debug("Socket.IO handlers initialized and bound")
-
     logger.info("Connecting Socket.IO client...")
-    if not await connect_controller(ctx.sio, config):
+    if not await connect_controller(config):
         logger.error("Failed to establish initial connection - exiting")
         return 1  # Need exit with error for restart
-
-    # Store the sio_monitor_task reference for graceful shutdown
-    ctx.sio_monitor_task = asyncio.create_task(monitor_sio())
 
     # Init and start AliceDeviceStateSender only after connect SocketIO
     ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
