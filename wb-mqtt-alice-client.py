@@ -278,7 +278,7 @@ def setup_mqtt_client() -> mqtt_client.Client:
 # SocketIO callbacks
 # ---------------------------------------------------------------------
 
-async def connect() -> None:
+async def on_connect() -> None:
     logger.info("Success connected to Socket.IO server! namespace='/' ready")
 
     # NOTE: ctx.sio.sid is the Socket.IO session id for the default namespace "/"
@@ -295,7 +295,7 @@ async def connect() -> None:
         logger.warning("Failed to send 'online' status after connect: %r", e)
 
 
-async def disconnect() -> None:
+async def on_disconnect() -> None:
     """
     Triggered when SocketIO connection with server is lost
 
@@ -305,17 +305,17 @@ async def disconnect() -> None:
     logger.warning("SocketIO connection lost")
 
 
-async def response(data: Any) -> None:
+async def on_response(data: Any) -> None:
     logger.debug("SocketIO server response: %r", data)
 
 
-async def error(data: Any) -> None:
+async def on_error(data: Any) -> None:
     logger.debug("SocketIO server error: %r", data)
 
 
 # NOTE: In actual Socket.IO versions - argument is "Dict[str, Any]",
 #       but in old versions what we use - this is "str" -> now set "Any" type
-async def connect_error(data: Any) -> None:
+async def on_connect_error(data: Any) -> None:
     """
     Called when initial connection to server fails
     """
@@ -479,11 +479,11 @@ def bind_socketio_handlers(sock: socketio.AsyncClient) -> None:
     Unlike decorators, we use .on() method for better safety - this approach
     helps control all names and objects at any time and in any context
     """
-    sock.on("connect", connect)
-    sock.on("disconnect", disconnect)
-    sock.on("response", response)
-    sock.on("error", error)
-    sock.on("connect_error", connect_error)
+    sock.on("connect", on_connect)
+    sock.on("disconnect", on_disconnect)
+    sock.on("response", on_response)
+    sock.on("error", on_error)
+    sock.on("connect_error", on_connect_error)
     sock.on("alice_devices_list", on_alice_devices_list)
     sock.on("alice_devices_query", on_alice_devices_query)
     sock.on("alice_devices_action", on_alice_devices_action)
