@@ -33,6 +33,7 @@ from constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CON
 from device_registry import DeviceRegistry
 from wb_alice_device_state_sender import AliceDeviceStateSender
 from yandex_handlers import send_to_yandex_state, set_emit_callback
+from socketio_handlers import SocketIOHandlers
 
 # Configuration constants
 MQTT_HOST = "localhost"
@@ -71,6 +72,7 @@ class AppContext:
         """
         self.stop_event: Optional[asyncio.Event] = None
         self.sio: Optional[socketio.AsyncClient] = None
+        self.sio_handlers: Optional[SocketIOHandlers] = None
         self.registry: Optional[DeviceRegistry] = None
         self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
@@ -272,222 +274,6 @@ def setup_mqtt_client() -> mqtt_client.Client:
     client.on_disconnect = mqtt_on_disconnect
     client.on_message = mqtt_on_message
     return client
-
-
-# ---------------------------------------------------------------------
-# SocketIO callbacks
-# ---------------------------------------------------------------------
-
-async def on_connect() -> None:
-    logger.info("Success connected to Socket.IO server! namespace='/' ready")
-
-    # NOTE: ctx.sio.sid is the Socket.IO session id for the default namespace "/"
-    sio_sid = getattr(ctx.sio, "sid", None)
-    logger.info("Socket.IO session id (sid): %r", sio_sid)
-
-    # Optional (debug): engine.io session id, may help in low-level troubleshooting
-    eio_sid = getattr(getattr(ctx.sio, "eio", None), "sid", None)
-    logger.debug("Engine.IO session id (eio.sid): %r", eio_sid)
-
-    try:
-        await ctx.sio.emit("message", {"controller_sn": ctx.controller_sn, "status": "online"})
-    except Exception as e:
-        logger.warning("Failed to send 'online' status after connect: %r", e)
-
-
-async def on_disconnect() -> None:
-    """
-    Triggered when SocketIO connection with server is lost
-
-    NOTE: argument "reason" implemented in version 5.12, but not accessible
-    in current client 5.0.3 (Released in Dec 14,2020)
-    """
-    logger.warning("SocketIO connection lost")
-
-
-async def on_response(data: Any) -> None:
-    logger.debug("SocketIO server response: %r", data)
-
-
-async def on_error(data: Any) -> None:
-    logger.debug("SocketIO server error: %r", data)
-
-
-# NOTE: In actual Socket.IO versions - argument is "Dict[str, Any]",
-#       but in old versions what we use - this is "str" -> now set "Any" type
-async def on_connect_error(data: Any) -> None:
-    """
-    Called when initial connection to server fails
-    """
-    # Connection was refused by server (e.g. controller not registered)
-    logger.error(
-        "Yandex Alice integration connection refused by server, stopping client..."
-    )
-    reason_raw = str(data).strip()
-    logger.error("Message from server: %r", reason_raw)
-
-    # Stop the client — it cannot operate without a valid connection to the server
-    if ctx.time_rate_sender and ctx.time_rate_sender.running:
-        try:
-            await ctx.time_rate_sender.stop()
-            logger.info("Stopped Alice state sender due to connect_error")
-        except Exception as e:
-            logger.debug("Failed to stop sender: %r", e)
-
-    # Trigger clean shutdown
-    if ctx.stop_event and not ctx.stop_event.is_set():
-        ctx.stop_event.set()
-
-
-async def any_unprocessed_event(event: str, sid: str, data: Any) -> None:
-    """
-    Fallback handler for Socket.IO events that don't have specific handlers
-    """
-    logger.debug("SocketIO not handled event %r", event)
-
-
-async def on_alice_devices_list(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Handles a device discovery request from the server
-    Returns a list of devices defined in the controller config
-    """
-    logger.debug("Received 'alice_devices_list' event:")
-    logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
-    req_id: str = data.get("request_id")
-
-    if ctx.registry is None:
-        logger.error("Registry not available for device list")
-        return {"request_id": req_id, "payload": {"devices": []}}
-
-    devices_list: List[Dict[str, Any]] = ctx.registry.build_yandex_devices_list()
-    if not devices_list:
-        logger.warning("No devices found in configuration")
-
-    devices_response: Dict[str, Any] = {
-        "request_id": req_id,
-        "payload": {
-            # "user_id" will be added on the server proxy side
-            "devices": devices_list,
-        },
-    }
-
-    logger.info("Sending device list response to Yandex:")
-    logger.info(json.dumps(devices_response, ensure_ascii=False, indent=2))
-    return devices_response
-
-
-async def on_alice_devices_query(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Handles a Yandex request to retrieve the current state of devices.
-    """
-    logger.debug("alice_devices_query event:")
-    logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
-
-    request_id = data.get("request_id", "unknown")
-    devices_response: List[Dict[str, Any]] = []
-
-    for dev in data.get("devices", []):
-        device_id = dev.get("id")
-        logger.debug("Try get data for device: %r", device_id)
-        devices_response.append(await ctx.registry.get_device_current_state(device_id))
-
-    query_response = {
-        "request_id": request_id,
-        "payload": {
-            "devices": devices_response,
-        },
-    }
-
-    logger.debug("answer devices query to Yandex:")
-    logger.debug(json.dumps(query_response, ensure_ascii=False, indent=2))
-    return query_response
-
-
-async def handle_single_device_action(device: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Processes all capabilities for a single device and returns the result block,
-    formatted according to Yandex Smart Home action response spec.
-    """
-    device_id: str = device.get("id", "")
-    if not device_id:
-        logger.warning("Device block missing 'id': %r", device)
-        return {}
-
-    cap_results: List[Dict[str, Any]] = []
-    for cap in device.get("capabilities", []):
-        cap_type: str = cap.get("type")
-        instance: str = cap.get("state", {}).get("instance")
-        value: Any = cap.get("state", {}).get("value")
-
-        try:
-            await ctx.registry.forward_yandex_to_mqtt(device_id, cap_type, instance, value)
-            logger.debug("Action applied to %r: %r = %r", device_id, instance, value)
-            status = "DONE"
-        except Exception as e:
-            logger.exception("Failed to apply action for device %r", device_id)
-            status = "ERROR"
-
-        cap_results.append(
-            {
-                "type": cap_type,
-                "state": {
-                    "instance": instance,
-                    "action_result": {"status": status},
-                },
-            }
-        )
-
-    return {
-        "id": device_id,
-        "capabilities": cap_results,
-    }
-
-
-async def on_alice_devices_action(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Handles a device action request from Yandex (e.g., turn on/off)
-    Applies the command to the device and returns the result
-    """
-    logger.debug("Received 'alice_devices_action' event")
-
-    logger.debug("Full payload:")
-    logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
-
-    request_id: str = data.get("request_id", "unknown")    
-    devices_in: List[Dict[str, Any]] = data.get("payload", {}).get("devices", [])
-    devices_info: List[Dict[str, Any]] = []
-
-    for device in devices_in:
-        result = await handle_single_device_action(device)
-        if result:
-            devices_info.append(result)
-
-    action_response: Dict[str, Any] = {
-        "request_id": request_id,
-        "payload": {"devices": devices_info},
-    }
-
-    logger.debug("Sending action response:")
-    logger.debug(json.dumps(action_response, ensure_ascii=False, indent=2))
-    return action_response
-
-
-def bind_socketio_handlers(sock: socketio.AsyncClient) -> None:
-    """
-    Bind event handlers to the SocketIO client
-
-    Unlike decorators, we use .on() method for better safety - this approach
-    helps control all names and objects at any time and in any context
-    """
-    sock.on("connect", on_connect)
-    sock.on("disconnect", on_disconnect)
-    sock.on("response", on_response)
-    sock.on("error", on_error)
-    sock.on("connect_error", on_connect_error)
-    sock.on("alice_devices_list", on_alice_devices_list)
-    sock.on("alice_devices_query", on_alice_devices_query)
-    sock.on("alice_devices_action", on_alice_devices_action)
-    sock.on("*", any_unprocessed_event)  # Handle any unprocessed events
 
 
 # ---------------------------------------------------------------------
@@ -935,7 +721,7 @@ async def main() -> int:
     try:
         ctx.mqtt_client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
         ctx.mqtt_client.loop_start()
-        logger.info(f"Connected to '{MQTT_HOST}' MQTT broker")
+        logger.info("Connected to %r MQTT broker", MQTT_HOST)
     except Exception as e:
         logger.error("MQTT connect failed: %r", e)
         return 0  # 0 mean - exit without service restart
@@ -954,7 +740,34 @@ async def main() -> int:
 
     # Explicitly set the loop to avoid "attached to a different loop" errors
     ctx.sio._loop = ctx.main_loop
-    bind_socketio_handlers(ctx.sio)
+
+    # Create and bind Socket.IO handlers
+    def on_permanent_disconnect_callback():
+        """Callback for unrecoverable connection errors"""
+        logger.error("Permanent disconnect detected, stopping client...")
+        
+        # Stop time_rate_sender
+        if ctx.time_rate_sender and ctx.time_rate_sender.running:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    ctx.time_rate_sender.stop(), ctx.main_loop
+                )
+                logger.info("Stopped Alice state sender due to permanent disconnect")
+            except Exception as e:
+                logger.debug("Failed to stop sender: %r", e)
+        
+        # Trigger clean shutdown
+        if ctx.stop_event and not ctx.stop_event.is_set():
+            ctx.stop_event.set()
+    
+    ctx.sio_handlers = SocketIOHandlers(
+        registry=ctx.registry,
+        controller_sn=ctx.controller_sn,
+        sio_client=ctx.sio,
+        on_permanent_disconnect=on_permanent_disconnect_callback,
+    )
+    ctx.sio_handlers.bind_sio_handlers_to_client(ctx.sio)
+    logger.debug("Socket.IO handlers initialized and bound")
 
     logger.info("Connecting Socket.IO client...")
     if not await connect_controller(ctx.sio, config):
