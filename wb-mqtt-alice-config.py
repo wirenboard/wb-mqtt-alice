@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH, INTEGRATION_CONFIG_PATH
+from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from fetch_url import fetch_url
 from models import Capability, Config, Device, Property, Room, RoomID, ClientConfig
 from wb_mqtt_load_config import get_board_revision, get_key_id, load_server_config
