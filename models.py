@@ -66,5 +66,5 @@ class Config(BaseModel):
 
 class ClientConfig(BaseModel):
     client_enabled: bool = False
-    reconnection_interval_min: int = 20  # minutes
-    log_level: str = "info"
+    reconnection_interval_min: int = 20
+    log_level: str = "INFO"  # Possible values: "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
