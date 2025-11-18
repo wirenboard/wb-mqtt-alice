@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Migration script for wb-mqtt-alice client configuration.
-Updates client_enabled flag while preserving all other fields.
+This script is used to migrate the wb-mqtt-alice client configuration.
+It updates the `client_enabled` flag in the configuration file that was moved from
+`/usr/lib/wb-mqtt-alice/wb-mqtt-alice-webui.conf` to
+`/etc/wb-mqtt-alice-client.conf`, preserving all other fields.
+This migration is applied during upgrades of wb-mqtt-alice to version 0.6.0 and later.
 """
 import json
 import sys
