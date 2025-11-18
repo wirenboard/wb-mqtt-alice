@@ -791,7 +791,7 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
     return response
 
 
-@app.post("/integrations/alice/enable", status_code=HTTPStatus.OK)
+@app.post("/integrations/alice/enable_client", status_code=HTTPStatus.OK)
 async def enable_integration(request: Request):
     """Enable Yandex Alice integration"""
 
@@ -861,7 +861,7 @@ async def enable_integration(request: Request):
     return {"message": get_translation("integration_enabled", language)}
 
 
-@app.get("/integrations/alice/enable", status_code=HTTPStatus.OK)
+@app.get("/integrations/alice/enable_client", status_code=HTTPStatus.OK)
 def get_enable_integration(request: Request):
     """Return status of Yandex Alice integration"""
 
