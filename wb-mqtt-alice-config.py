@@ -602,10 +602,6 @@ async def get_all_rooms_and_devices():
     # Don't force client reload because this doesn't change devices
     finalize_config_change(config, force_client_reload=False)
 
-    client_config = load_client_config()
-    #TODO (victor.fedorov): remove this field in future versions.
-    # Need to Patch HomeUI (remove this.isIntegrationEnabled = data.enabled ?? false;)
-    config.enabled = client_config.client_enabled
     return config
 
 
