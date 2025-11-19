@@ -1,0 +1,31 @@
+#!/bin/bash
+# filepath: debian/postinst
+
+set -e
+
+# Paths
+NEW_CONF="/etc/wb-mqtt-alice-client.conf"
+MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
+MIGRATION_SCRIPT="/usr/lib/wb-mqtt-alice/wb_alice_migrate_client_config.py"
+
+case "$1" in
+    configure)
+        # Apply migration if flag file exists
+        if [ -f "$MIGRATION_FLAG" ]; then
+            VALUE=$(cat "$MIGRATION_FLAG")
+            python3 "$MIGRATION_SCRIPT" "$NEW_CONF" "$VALUE"
+            # Clean up migration flag
+            rm -f "$MIGRATION_FLAG"
+        fi
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,37 @@
+#!/bin/bash
+# filepath: debian/preinst
+
+set -e
+
+# Paths
+OLD_CONF="/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf"
+MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
+
+case "$1" in
+    install|upgrade)
+        # Save client_enabled value if old file exists
+        if [ -f "$OLD_CONF" ]; then
+            python3 -c "
+import json
+try:
+    with open('$OLD_CONF', 'r') as f:
+        config = json.load(f)
+    value = config.get('client_enabled', False)
+    with open('$MIGRATION_FLAG', 'w') as f:
+        f.write(str(value))
+except Exception as e:
+    print(f'Error: {e}')
+"
+        fi
+        ;;
+    abort-upgrade)
+        ;;
+    *)
+        echo "preinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

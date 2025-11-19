@@ -1,8 +1,9 @@
-wb-mqtt-alice-client.conf /usr/lib/wb-mqtt-alice/
+wb-mqtt-alice-client.conf /etc/
 wb-mqtt-alice-devices.conf /etc/
 wb-mqtt-alice-devices.conf.example /etc/
 wb-mqtt-alice-webui.conf /usr/lib/wb-mqtt-alice/
 50wb-alice /etc/wb-configs.d/
+wb_alice_migrate_client_config.py /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice-client.py /usr/lib/wb-mqtt-alice/
 mqtt_topic.py /usr/lib/wb-mqtt-alice/
 device_registry.py /usr/lib/wb-mqtt-alice/
@@ -20,3 +21,4 @@ wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/
 wb_mqtt_alice_cli.py /usr/lib/wb-mqtt-alice/
 wb_mqtt_load_config.py /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice /usr/bin/
+wb-mqtt-alice-server.conf /usr/lib/wb-mqtt-alice/

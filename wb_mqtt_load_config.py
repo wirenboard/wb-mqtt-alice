@@ -1,24 +1,24 @@
 import logging
 import json
 from pathlib import Path
-from constants import CLIENT_CONFIG_PATH, BOARD_REVISION_PATH, BOARD_MODEL_PATH
+from constants import SERVER_CONFIG_PATH, BOARD_REVISION_PATH, BOARD_MODEL_PATH
 import re
 
 BOARD_REVISION_PATH = Path(BOARD_REVISION_PATH)
 BOARD_MODEL_PATH = Path(BOARD_MODEL_PATH)
-CLIENT_CONFIG_PATH = Path(CLIENT_CONFIG_PATH)
+SERVER_CONFIG_PATH = Path(SERVER_CONFIG_PATH)
 
 logger = logging.getLogger(__name__)
 
-def load_client_config():
-    """Load client configuration file"""
+def load_server_config():
+    """Load server configuration file"""
 
-    logger.debug("Reading client configuration file...")
+    logger.debug("Reading server configuration file...")
     try:
-        client_config = json.loads(CLIENT_CONFIG_PATH.read_text(encoding="utf-8"))
-        return client_config
+        server_config = json.loads(SERVER_CONFIG_PATH.read_text(encoding="utf-8"))
+        return server_config
     except Exception as e:
-        logger.error("Error reading client configuration file: %r", e)
+        logger.error("Error reading server configuration file: %r", e)
         raise
 
 
