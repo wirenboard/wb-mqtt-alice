@@ -602,6 +602,10 @@ async def get_all_rooms_and_devices():
     # Don't force client reload because this doesn't change devices
     finalize_config_change(config, force_client_reload=False)
 
+    client_config = load_client_config()
+    #TODO (victor.fedorov): remove this field in future versions.
+    # Need to Patch HomeUI (remove this.isIntegrationEnabled = data.enabled ?? false;)
+    config.enabled = client_config.client_enabled
     return config
 
 
@@ -854,9 +858,7 @@ async def enable_integration(request: Request):
     client_config.client_enabled = requested_status
     save_client_config(client_config)
 
-    # Optionally restart client if integration enabled and controller linked
-    if requested_status:
-        force_client_reload_config()
+    force_client_reload_config()
 
     return {"message": get_translation("integration_enabled", language)}
 

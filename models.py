@@ -63,6 +63,7 @@ class Config(BaseModel):
     devices: Dict[str, Device]
     link_url: Optional[str] = None
     unlink_url: Optional[str] = None
+    enabled: bool = True  # TODO (victor.fedorov): remove this field in future versions
 
 class ClientConfig(BaseModel):
     client_enabled: bool = False
