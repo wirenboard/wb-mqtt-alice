@@ -854,9 +854,7 @@ async def enable_integration(request: Request):
     client_config.client_enabled = requested_status
     save_client_config(client_config)
 
-    # Optionally restart client if integration enabled and controller linked
-    if requested_status:
-        force_client_reload_config()
+    force_client_reload_config()
 
     return {"message": get_translation("integration_enabled", language)}
 
