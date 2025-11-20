@@ -641,6 +641,7 @@ async def main() -> int:
 
     # Early register signal handlers for graceful shutdown
     ctx.stop_event = asyncio.Event() # Keeps the loop alive until a signal arrives
+    ctx.main_loop = asyncio.get_running_loop()
     ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
     ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
 
@@ -680,7 +681,6 @@ async def main() -> int:
     #       4. time_rate_sender + MQTT subscriptions
     #          Thid start only after Socket.IO connection is ready and we are
     #          can send notifications from us to Yandex server
-    ctx.main_loop = asyncio.get_running_loop()
     ctx.client_pkg_ver = get_client_pkg_ver()
     try:
         ctx.registry = DeviceRegistry(

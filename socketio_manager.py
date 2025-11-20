@@ -135,15 +135,20 @@ class SocketIOConnectionManager:
                 event
             )
         else:
-            # Business event - register directly with Socket.IO
-            if self._sio is None:
-                raise RuntimeError(
-                    f"Cannot register handler for {event!r}: "
-                    "Socket.IO client not created yet. "
-                    "Create client first or wait until connection."
-                )
-            self._sio.on(event, handler)
-            logger.debug("Registered user handler for business event %r", event)
+            # Business event
+            # - if not exist, register later directly with Socket.IO
+            # - if client already exists, bind immediately
+            if event not in self._user_handlers or isinstance(self._user_handlers[event], Callable):
+                self._user_handlers[event] = []
+            self._user_handlers[event].append(handler)
+            logger.debug(
+                "Registered business handler for event %r (will be bound on client creation)",
+                event,
+            )
+
+            if self._sio is not None:
+                self._sio.on(event, handler)
+                logger.debug("Registered business handler %r on existing client", event)
 
 
     # =========================================================================
@@ -251,13 +256,23 @@ class SocketIOConnectionManager:
             randomization_factor=0.5,  # jitter
         )
 
+        logger.debug("Re-registering handlers to new client")
         # System event handlers are registered here as wrappers.
         # User handlers will be called from within these wrappers.
         client.on("connect", self._on_connect_wrapper)
         client.on("disconnect", self._on_disconnect_wrapper)
         client.on("connect_error", self._on_connect_error_wrapper)
 
-        logger.debug("Created Socket.IO client with system event wrappers")
+        # Later business callbacks register
+        for event, handlers in self._user_handlers.items():
+            if event not in self.SYSTEM_EVENTS:
+                if isinstance(handlers, list):
+                    for h in handlers:
+                        client.on(event, h)
+                else:
+                    client.on(event, handlers)
+
+        logger.debug("Created new Socket.IO client")
         return client
     
     async def connect(self) -> bool:
@@ -279,15 +294,6 @@ class SocketIOConnectionManager:
             self._sio = self._create_client()
             logger.debug("Created new Socket.IO client instance")
 
-        if self._handlers is not None:
-            logger.debug("Re-registering handlers to new client")
-            try:
-                self._handlers.bind_sio_handlers_to_client(self._sio)
-            except Exception as e:
-                logger.exception("Failed to re-register handlers")
-                self._sio = None
-                return False
-
         logger.info("Connecting Socket.IO client to %r...", self.server_url)
         
         try:
@@ -297,6 +303,7 @@ class SocketIOConnectionManager:
                 self._sio.connect(
                     self.server_url,
                     socketio_path=self.socketio_path,
+                    transports=['websocket'], # Need sticky WebSocket sessions
                     headers={"WB-Client-Pkg-Ver": self.client_pkg_ver},
                 ),
                 timeout=10.0,
@@ -401,6 +408,12 @@ class SocketIOConnectionManager:
             self._custom_reconnection_loop(reason)
         )
         logger.info("Started custom reconnection task (reason: %r)", reason)
+
+    async def start_custom_reconnect(self, reason: str = "manual_initial_failure") -> None:
+        """
+        Public wrapper for starting custom reconnection from application code
+        """
+        await self._trigger_custom_reconnection(reason)
 
     async def _monitor_connection(self) -> None:
         """
