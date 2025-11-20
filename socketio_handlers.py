@@ -37,23 +37,35 @@ class SocketIOHandlers:
         *,
         registry: Any,  # DeviceRegistry
         controller_sn: str,
-        sio_client: Any,  # socketio.AsyncClient
+        sio_client: Optional[Any] = None,  # socketio.AsyncClient
         on_permanent_disconnect: Optional[callable] = None,
+        connection_manager: Optional[Any] = None, # SocketIOConnectionManager
     ):
         """
-        Initialize handlers with required dependencies.
+        Initialize handlers with required dependencies
         
         Args:
             registry: DeviceRegistry instance for device management
             controller_sn: Controller serial number for identification
             sio_client: Socket.IO client instance (for emitting messages)
             on_permanent_disconnect: Callback to trigger on unrecoverable errors
+            connection_manager: Manager for triggering custom reconnection
         """
         self.registry = registry
         self.controller_sn = controller_sn
-        self.sio = sio_client
+        self._sio_client = sio_client
         self._on_permanent_disconnect = on_permanent_disconnect
-    
+        self._connection_manager = connection_manager
+
+    @property
+    def sio(self):
+        """Get Socket.IO client - from direct reference or connection manager"""
+        if self._sio_client is not None:
+            return self._sio_client
+        if self._connection_manager is not None:
+            return self._connection_manager.client
+        raise RuntimeError("No Socket.IO client available")
+
     # -------------------------------------------------------------------------
     # Connection Lifecycle Handlers
     # -------------------------------------------------------------------------
@@ -91,23 +103,30 @@ class SocketIOHandlers:
         
         NOTE: Argument 'reason' is not available in Socket.IO version 5.0.3
         (Released in Dec 14,2020). It was added in version 5.12+
+
+        This handler is called when:
+        - Connection is lost during operation
+        - Server explicitly disconnects the client
         """
         logger.warning("Socket.IO connection lost")
 
+        # NOTE: Socket.IO will attempt automatic reconnection
+        #       If reconnection fails permanently, monitor_task via sio.wait()
+        #       will detect it and trigger custom reconnection logic
+
+
     async def on_connect_error(self, data: Any) -> None:
         """
-        Handler:
+        Handler: Connection error from server
           - Initial connection to server failed
-          - Or active connection was refused by server side disconnect(sid)
+          - Or active connection was refused by server side by disconnect(sid)
         
         Args:
             data: Error message from server (type varies by Socket.IO version)
                 NOTE: In actual Socket.IO versions - argument is "Dict[str, Any]",
                 but in old versions what we use - this is "str" -> now set "Any" type
         """
-        logger.error(
-            "Yandex Alice integration connection refused by server, stopping client..."
-        )
+        logger.error("Yandex Alice integration connection refused by server")
         # This typically indicates:
         # - Controller not registered on server
         # - Authentication failure
@@ -115,22 +134,14 @@ class SocketIOHandlers:
         reason_raw = str(data).strip()
         logger.error("Message from server: %r", reason_raw)
 
-        # FIXME: When replace handlers to other file, we comment this logic
-        #
-        # Stop the client — it cannot operate without a valid connection to the server
-        # if ctx.time_rate_sender and ctx.time_rate_sender.running:
-        #     try:
-        #         await ctx.time_rate_sender.stop()
-        #         logger.info("Stopped Alice state sender due to connect_error")
-        #     except Exception as e:
-        #         logger.debug("Failed to stop sender: %r", e)
-        # # Trigger clean shutdown
-        # if ctx.stop_event and not ctx.stop_event.is_set():
-        #     ctx.stop_event.set()
+        # Record disconnect event for monitoring purposes
+        if self._connection_manager:
+            if hasattr(self._connection_manager, '_record_disconnect'):
+                self._connection_manager._record_disconnect(f"connect_error: {reason_raw}")
 
-        # Trigger application shutdown - cannot operate without server connection
-        if self._on_permanent_disconnect:
-            self._on_permanent_disconnect()
+        # NOTE: Built-in Socket.IO reconnect NOT will handle this automatically
+        #       It reconnection fails permanently, monitor_task via sio.wait()
+        #       will detect it and trigger custom reconnection logic
 
     async def on_response(self, data: Any) -> None:
         """
@@ -338,6 +349,8 @@ class SocketIOHandlers:
         Args:
             sio_client: socketio.AsyncClient instance
         """
+        self._sio_client = sio_client
+
         # Connection lifecycle
         sio_client.on("connect", self.on_connect)
         sio_client.on("disconnect", self.on_disconnect)

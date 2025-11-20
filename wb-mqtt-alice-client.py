@@ -22,7 +22,7 @@ import string
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 import http.client
 import socket
 
@@ -56,12 +56,18 @@ class AppContext:
     def __init__(self):
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         """
-        Global asyncio event loop, used to safely schedule coroutines from non-async
-        threads (e.g. MQTT callbacks) via `asyncio.run_coroutine_threadsafe()`
+        Global asyncio event loop, used to safely schedule
+        coroutines from non-async threads (e.g. MQTT callbacks)
+        via `asyncio.run_coroutine_threadsafe()`
           - stop_event - Event that signals the main loop to wake up and initiate shutdown
           - sio_manager - SocketIO connection manager for handling real-time communication
-
         """
+
+        self.graceful_shutdown_requested: bool = False
+        """
+        Flag indicating shutdown (Ctrl+C, SIGTERM) vs reconnectable disconnect
+        """
+
         self.stop_event: Optional[asyncio.Event] = None
         self.sio_manager: Optional[SocketIOConnectionManager] = None
         self.sio_handlers: Optional[SocketIOHandlers] = None
@@ -104,8 +110,6 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
         )
         logger.debug("            Payload: %r", json.dumps(data))
         return None
-
-    logger.debug("Connected status: %r", ctx.sio.connected)
 
     logger.debug("Attempting to emit %r with payload: %r", event, data)
     sio_client = ctx.sio_manager.client
@@ -240,6 +244,8 @@ def generate_client_id(prefix: str = "wb-alice-client") -> str:
 def setup_mqtt_client() -> mqtt_client.Client:
     """
     Create and configure MQTT client with event handlers
+    - Called during initial setup
+    - Not during reconnection
     """
     client = mqtt_client.Client(client_id=generate_client_id())
     client.on_connect = mqtt_on_connect
@@ -436,12 +442,17 @@ async def probe_nginx_until_stable(
 
 async def connect_controller(config: Dict[str, Any]) -> bool:
     """
-    Setup and connect to SocketIO server using provided configuration
+    Create and connect Socket.IO client to Alice integration server
+    with using provided configuration
+    
+    Returns:
+        True if connection successful, False otherwise
     """
     ctx.controller_sn = get_controller_sn()
     if not ctx.controller_sn:
-        logger.error("Cannot proceed without controller ID")
+        logger.error("Cannot proceed without controller serial number")
         return False
+    logger.info("Controller SN: %r", ctx.controller_sn)
 
     # ARCHITECTURE NOTE: We always connect to localhost:8042 where Nginx proxy runs.
     # Nginx forwards requests to the actual server specified in 'server_address'.
@@ -458,12 +469,50 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
     logger.debug("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
 
     logger.debug("Waiting for nginx proxy to be ready...")
-    if not await wait_for_nginx_ready():
-        logger.error("Nginx proxy not ready - exiting")
+    if not await wait_for_nginx_ready(timeout=15):
+        logger.error("Nginx is not ready after 15 seconds")
         return False
 
     if not await probe_nginx_until_stable():
         return False
+
+    # Define callbacks for connection lifecycle
+    def on_disconnect_detected():
+        """
+        Callback when Socket.IO disconnect is detected
+        """
+        logger.warning(
+            "Socket.IO disconnected - stopping MQTT state updates"
+        )
+        
+        if ctx.time_rate_sender and ctx.time_rate_sender.running:
+            try:
+                # Schedule stop in event loop
+                if ctx.main_loop and ctx.main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        ctx.time_rate_sender.stop(), ctx.main_loop
+                    )
+                    logger.info("Stopped Alice state sender due to disconnect")
+            except Exception as e:
+                logger.exception("Failed to stop sender: %r", e)
+
+    def on_reconnect_success():
+        """Called after successful reconnection - restart MQTT processing"""
+        logger.info(
+            "Socket.IO reconnected - resuming MQTT state updates"
+        )
+        
+        if ctx.time_rate_sender and not ctx.time_rate_sender.running:
+            try:
+                # Schedule start in event loop
+                if ctx.main_loop and ctx.main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        ctx.time_rate_sender.start(), ctx.main_loop
+                    )
+                    subscribe_registry_topics()
+                    logger.info("Restarted Alice state sender after reconnection")
+            except Exception as e:
+                logger.exception("Failed to restart sender: %r", e)
 
     is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
     ctx.sio_manager = SocketIOConnectionManager(
@@ -475,38 +524,24 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
         reconnection_delay=RECONNECT_DELAY_INITIAL,  # first recconect delay
         reconnection_delay_max=RECONNECT_DELAY_MAX,
         debug_logging=is_debug_log_enabled,
+        custom_reconnect_enabled=True,
+        custom_reconnect_interval=1200,  # 20 minutes
+        health_check_interval=120,  # 2 minutes
+        on_disconnect_callback=on_disconnect_detected,
+        on_reconnect_success_callback=on_reconnect_success,
     )
-    sio_client = ctx.sio_manager.create_client()
 
-    # Setup handlers before connecting
-    def on_permanent_disconnect_callback():
-        """Callback for unrecoverable connection errors"""
-        logger.error("Permanent disconnect detected, stopping client...")
-        
-        # Stop time_rate_sender
-        if ctx.time_rate_sender and ctx.time_rate_sender.running:
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    ctx.time_rate_sender.stop(), ctx.main_loop
-                )
-                logger.info("Stopped Alice state sender due to permanent disconnect")
-            except Exception as e:
-                logger.debug("Failed to stop sender: %r", e)
-        
-        # Trigger clean shutdown
-        if ctx.stop_event and not ctx.stop_event.is_set():
-            ctx.stop_event.set()
-    
     ctx.sio_handlers = SocketIOHandlers(
         registry=ctx.registry,
         controller_sn=ctx.controller_sn,
-        sio_client=sio_client,
-        on_permanent_disconnect=on_permanent_disconnect_callback,
+        on_permanent_disconnect=None,  # Not used anymore
+        connection_manager=ctx.sio_manager,
     )
-    ctx.sio_handlers.bind_sio_handlers_to_client(sio_client)
-    logger.debug("Socket.IO handlers initialized and bound")
+    # Register handlers BEFORE connecting
+    ctx.sio_manager.register_handlers(ctx.sio_handlers)
+    logger.debug("Socket.IO handlers registered")
 
-    return await ctx.sio_manager.connect(sio_client)
+    return await ctx.sio_manager.connect()
 
 
 def _log_and_stop(sig: signal.Signals) -> None:
@@ -606,25 +641,25 @@ async def graceful_shutdown() -> None:
 
 
 async def main() -> int:
-    ctx.main_loop = asyncio.get_running_loop()
 
-    ctx.stop_event = asyncio.Event()  # keeps the loop alive until a signal arrives
+    # Early register signal handlers for graceful shutdown
+    ctx.stop_event = asyncio.Event() # Keeps the loop alive until a signal arrives
     ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
     ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
-    ctx.client_pkg_ver = get_client_pkg_ver()
 
-    config = read_config(CLIENT_CONFIG_PATH)
+    config = read_config(SERVER_CONFIG_PATH)
     if not config:
         logger.error("Cannot proceed without configuration")
         return 0  # 0 mean - exit without service restart
 
     if not config.get("client_enabled", False):
-        logger.info("Client is disabled in configuration. Waiting for shutdown signal...")
-        logger.info("To enable Alice integration, set 'Activate integration' in WEBUI.")
-        # Just wait for shutdown signal without doing anything
-        await ctx.stop_event.wait()
-        return 0
-    config = read_config(SERVER_CONFIG_PATH)
+        logger.info("Alice integration is DISABLED in configuration")
+        logger.info(
+            "To enable integration, set 'client_enabled': true in file %r",
+            SERVER_CONFIG_PATH
+        )
+        return 0  # 0 mean - exit without service restart
+    logger.info("Alice integration is enabled - starting client...")
 
     # NOTE: Initialization sequence:
     #       - First create registry
@@ -636,6 +671,20 @@ async def main() -> int:
     #         When fully ready reciave commands from yandex
     #         Do it now, becoase mqtt and time_rate_sender need use already upped connection
 
+    # NOTE: Initialize core components order is critical:
+    #       1. Create registry - maps devices to MQTT topics
+    #          Any actions from Yandex need registry ready map "device to MQTT topic"
+    #       2. Next connect to local MQTT brocker
+    #          We verify broker is alive and we can publish commands when gen Yandex action
+    #          DO NOT subscribe yet on this moment
+    #       3. Init Socket.IO connections
+    #          When fully ready reciave commands from yandex
+    #          Do it now, becoase mqtt and time_rate_sender need use already upped connection
+    #       4. time_rate_sender + MQTT subscriptions
+    #          Thid start only after Socket.IO connection is ready and we are
+    #          can send notifications from us to Yandex server
+    ctx.main_loop = asyncio.get_running_loop()
+    ctx.client_pkg_ver = get_client_pkg_ver()
     try:
         ctx.registry = DeviceRegistry(
             cfg_path=DEVICE_PATH,
@@ -678,7 +727,7 @@ async def main() -> int:
 
     await graceful_shutdown()
     logger.info("Shutdown complete")
-    return 0
+    return 0  # 0 mean - exit without service restart
 
 
 if __name__ == "__main__":
