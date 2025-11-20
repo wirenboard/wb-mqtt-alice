@@ -526,7 +526,6 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
         debug_logging=is_debug_log_enabled,
         custom_reconnect_enabled=True,
         custom_reconnect_interval=1200,  # 20 minutes
-        health_check_interval=120,  # 2 minutes
         on_disconnect_callback=on_disconnect_detected,
         on_reconnect_success_callback=on_reconnect_success,
     )
@@ -534,11 +533,9 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
     ctx.sio_handlers = SocketIOHandlers(
         registry=ctx.registry,
         controller_sn=ctx.controller_sn,
-        on_permanent_disconnect=None,  # Not used anymore
-        connection_manager=ctx.sio_manager,
     )
     # Register handlers BEFORE connecting
-    ctx.sio_manager.register_handlers(ctx.sio_handlers)
+    ctx.sio_handlers.register_with_manager(ctx.sio_manager)
     logger.debug("Socket.IO handlers registered")
 
     return await ctx.sio_manager.connect()

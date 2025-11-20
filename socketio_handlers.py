@@ -10,9 +10,7 @@ and connection lifecycle events.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
-
-import socketio
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +35,6 @@ class SocketIOHandlers:
         *,
         registry: Any,  # DeviceRegistry
         controller_sn: str,
-        sio_client: Optional[Any] = None,  # socketio.AsyncClient
-        on_permanent_disconnect: Optional[callable] = None,
-        connection_manager: Optional[Any] = None, # SocketIOConnectionManager
     ):
         """
         Initialize handlers with required dependencies
@@ -47,24 +42,11 @@ class SocketIOHandlers:
         Args:
             registry: DeviceRegistry instance for device management
             controller_sn: Controller serial number for identification
-            sio_client: Socket.IO client instance (for emitting messages)
-            on_permanent_disconnect: Callback to trigger on unrecoverable errors
-            connection_manager: Manager for triggering custom reconnection
         """
         self.registry = registry
         self.controller_sn = controller_sn
-        self._sio_client = sio_client
-        self._on_permanent_disconnect = on_permanent_disconnect
-        self._connection_manager = connection_manager
+        self._manager = None  # Will be set by register_with_manager()
 
-    @property
-    def sio(self):
-        """Get Socket.IO client - from direct reference or connection manager"""
-        if self._sio_client is not None:
-            return self._sio_client
-        if self._connection_manager is not None:
-            return self._connection_manager.client
-        raise RuntimeError("No Socket.IO client available")
 
     # -------------------------------------------------------------------------
     # Connection Lifecycle Handlers
@@ -76,26 +58,7 @@ class SocketIOHandlers:
         
         Called when the Socket.IO connection is established and namespace is ready
         """
-        logger.info("Success connected to Socket.IO server! namespace='/' ready")
-        
-        # Log session identifiers for debugging
-        # NOTE: ctx.sio.sid is the Socket.IO session id for the default namespace "/"
-        sio_sid = getattr(self.sio, "sid", None)
-        logger.info("Socket.IO session id (sid): %r", sio_sid)
-
-        # Optional (debug): engine.io session id, may help in low-level troubleshooting
-        eio_sid = getattr(getattr(self.sio, "eio", None), "sid", None)
-        logger.debug("Engine.IO session id (eio.sid): %r", eio_sid)
-        
-        # Notify server that controller is online
-        # NOTE: this is not processed on server side and needed only for debug
-        try:
-            await self.sio.emit(
-                "message",
-                {"controller_sn": self.controller_sn, "status": "online"}
-            )
-        except Exception as e:
-            logger.warning("Failed to send 'online' status after connect: %r", e)
+        logger.info("Business: Connected to Socket.IO server")
 
     async def on_disconnect(self) -> None:
         """
@@ -108,7 +71,7 @@ class SocketIOHandlers:
         - Connection is lost during operation
         - Server explicitly disconnects the client
         """
-        logger.warning("Socket.IO connection lost")
+        logger.warning("Business: Socket.IO connection lost")
 
         # NOTE: Socket.IO will attempt automatic reconnection
         #       If reconnection fails permanently, monitor_task via sio.wait()
@@ -134,12 +97,7 @@ class SocketIOHandlers:
         reason_raw = str(data).strip()
         logger.error("Message from server: %r", reason_raw)
 
-        # Record disconnect event for monitoring purposes
-        if self._connection_manager:
-            if hasattr(self._connection_manager, '_record_disconnect'):
-                self._connection_manager._record_disconnect(f"connect_error: {reason_raw}")
-
-        # NOTE: Built-in Socket.IO reconnect NOT will handle this automatically
+        # NOTE: Built-in Socket.IO reconnect will NOT try handle connect_error
         #       It reconnection fails permanently, monitor_task via sio.wait()
         #       will detect it and trigger custom reconnection logic
 
@@ -338,32 +296,33 @@ class SocketIOHandlers:
     # Handler Registration
     # -------------------------------------------------------------------------
 
-    def bind_sio_handlers_to_client(self, sio_client: socketio.AsyncClient) -> None:
+    def register_with_manager(self, manager) -> None:
         """
-        Bind all event handlers to a Socket.IO client
-
+        Register all event handlers with SocketIOConnectionManager
 
         Unlike decorators, we use .on() method for better safety - this approach
         helps control all names and objects at any time and in any context
         
         Args:
-            sio_client: socketio.AsyncClient instance
+            manager: SocketIOConnectionManager instance
         """
-        self._sio_client = sio_client
+        self._manager = manager
 
-        # Connection lifecycle
-        sio_client.on("connect", self.on_connect)
-        sio_client.on("disconnect", self.on_disconnect)
-        sio_client.on("connect_error", self.on_connect_error)
-        sio_client.on("response", self.on_response)
-        sio_client.on("error", self.on_error)
-        
-        # Alice Smart Home events
-        sio_client.on("alice_devices_list", self.on_alice_devices_list)
-        sio_client.on("alice_devices_query", self.on_alice_devices_query)
-        sio_client.on("alice_devices_action", self.on_alice_devices_action)
-        
+        # System events - registered through manager's .on() for wrapping
+        manager.on("connect", self.on_connect)
+        manager.on("disconnect", self.on_disconnect)
+        manager.on("connect_error", self.on_connect_error)
+
+        # Generic Socket.IO events
+        manager.on("response", self.on_response)
+        manager.on("error", self.on_error)
+
         # Catch-all for unprocessed events
-        sio_client.on("*", self.on_any_unprocessed)
-        
-        logger.debug("All Socket.IO handlers bound to client")
+        manager.on("*", self.on_any_unprocessed)
+
+        # Alice Smart Home events
+        manager.on("alice_devices_list", self.on_alice_devices_list)
+        manager.on("alice_devices_query", self.on_alice_devices_query)
+        manager.on("alice_devices_action", self.on_alice_devices_action)
+
+        logger.debug("All handlers registered with SocketIOConnectionManager")

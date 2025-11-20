@@ -10,8 +10,7 @@ Manages Socket.IO client lifecycle: creation, connection, monitoring, and shutdo
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
-from typing import Callable, List
+from typing import Any, Callable, Dict, List, Optional
 
 import socketio
 
@@ -39,7 +38,10 @@ class SocketIOConnectionManager:
     This class isolates Socket.IO connection logic from application logic,
     making it easier to add custom reconnection strategies later
     """
-    
+
+    # System events that manager wraps for monitoring/metrics
+    SYSTEM_EVENTS = {'connect', 'disconnect', 'connect_error'}
+
     def __init__(
         self,
         *,
@@ -79,9 +81,6 @@ class SocketIOConnectionManager:
         self.controller_sn = controller_sn
         self.client_pkg_ver = client_pkg_ver
 
-        self._handlers_registered: bool = False
-        self._handlers: Optional[Any] = None
-
         # - - - Connection configuration - - -
         self._reconnection = reconnection
         self._reconnection_delay = reconnection_delay
@@ -93,6 +92,10 @@ class SocketIOConnectionManager:
 
         self._on_disconnect_callback = on_disconnect_callback
         self._on_reconnect_success_callback = on_reconnect_success_callback
+
+        # - - - User handlers registry - - -
+        self._user_handlers: Dict[str, Callable] = {}
+        """User-registered event handlers (business logic)"""
 
         # - - - State tracking - - -
         # ts after sock.connect()
@@ -108,7 +111,129 @@ class SocketIOConnectionManager:
 
         self.disconnect_history: List[Dict[str, Any]] = []
         logger.debug("SocketIOConnectionManager initialized for %r", server_url)
+
+    # =========================================================================
+    # Public API: Event Handler Registration
+    # =========================================================================
     
+    def on(self, event: str, handler: Callable) -> None:
+        """
+        Register event handler (business logic)
+        
+        For system events (connect, disconnect, connect_error), manager wraps
+        the handler to perform infrastructure tasks first
+        
+        Example:
+            manager.on('connect', async_connect_handler)
+            manager.on('alice_devices_list', async_alice_handler)
+        """
+        if event in self.SYSTEM_EVENTS:
+            # System event - store for calling after manager's work
+            self._user_handlers[event] = handler
+            logger.debug(
+                "Registered user handler for system event %r (will be wrapped)", 
+                event
+            )
+        else:
+            # Business event - register directly with Socket.IO
+            if self._sio is None:
+                raise RuntimeError(
+                    f"Cannot register handler for {event!r}: "
+                    "Socket.IO client not created yet. "
+                    "Create client first or wait until connection."
+                )
+            self._sio.on(event, handler)
+            logger.debug("Registered user handler for business event %r", event)
+
+
+    # =========================================================================
+    # System Event Wrappers (Infrastructure Layer)
+    # =========================================================================
+    
+    async def _on_connect_wrapper(self) -> None:
+        """
+        System wrapper for 'connect' event.
+        
+        Manager responsibilities:
+        1. Track connection timestamp
+        2. Log connection details
+        3. Call user handler (if registered)
+        """
+        # Manager's infrastructure work
+        self.connected_at = time.monotonic()
+
+        # Log session identifiers for debugging
+        # NOTE: ctx.sio.sid is the Socket.IO session id for the default namespace "/"
+        sio_sid = getattr(self._sio, "sid", None)
+        logger.info("Manager: Success connected to Socket.IO server, namespace='/' ready (sid=%r)", sio_sid)
+
+        # Optional (debug): engine.io session id, may help in low-level troubleshooting
+        eio_sid = getattr(getattr(self._sio, "eio", None), "sid", None)
+        logger.debug("Engine.IO session id (eio.sid): %r", eio_sid)
+
+        # Notify server that controller is online
+        # NOTE: this is not processed on server side and needed only for debug
+        try:
+            await self._sio.emit(
+                "message",
+                {"controller_sn": self.controller_sn, "status": "online"}
+            )
+        except Exception as e:
+            logger.warning("Failed to send 'online' status after connect: %r", e)
+
+
+        # Call user's business logic handler
+        if 'connect' in self._user_handlers:
+            try:
+                await self._user_handlers['connect']()
+            except Exception as e:
+                logger.exception("Error in user connect handler: %r", e)
+    
+    async def _on_disconnect_wrapper(self) -> None:
+        """
+        System wrapper for 'disconnect' event.
+        
+        Manager responsibilities:
+        1. Record disconnect event
+        2. Log disconnect
+        3. Call user handler (if registered)
+        """
+        # Manager's infrastructure work
+        self._record_disconnect("disconnect_event")
+        logger.warning("Manager: Socket.IO disconnected")
+        
+        # Call user's business logic handler
+        if 'disconnect' in self._user_handlers:
+            try:
+                await self._user_handlers['disconnect']()
+            except Exception as e:
+                logger.exception("Error in user disconnect handler: %r", e)
+    
+    async def _on_connect_error_wrapper(self, data: Any) -> None:
+        """
+        System wrapper for 'connect_error' event.
+        
+        Manager responsibilities:
+        1. Record error details
+        2. Log error
+        3. Call user handler (if registered)
+        
+        Note: Built-in Socket.IO reconnect will handle retries automatically.
+        If all attempts fail, monitor_task will trigger custom reconnection.
+        """
+        # Manager's infrastructure work
+        reason_raw = str(data).strip()
+        self._record_disconnect(f"connect_error: {reason_raw}")
+        logger.error("Manager: Socket.IO connect_error - %r", reason_raw)
+        
+        # Call user's business logic handler
+        if 'connect_error' in self._user_handlers:
+            try:
+                await self._user_handlers['connect_error'](data)
+            except Exception as e:
+                logger.exception("Error in user connect_error handler: %r", e)
+
+
     def _create_client(self) -> socketio.AsyncClient:
         """
         Create and configure Socket.IO client instance
@@ -126,7 +251,13 @@ class SocketIOConnectionManager:
             randomization_factor=0.5,  # jitter
         )
 
-        logger.debug("Created Socket.IO client with reconnection=%r", self._reconnection)
+        # System event handlers are registered here as wrappers.
+        # User handlers will be called from within these wrappers.
+        client.on("connect", self._on_connect_wrapper)
+        client.on("disconnect", self._on_disconnect_wrapper)
+        client.on("connect_error", self._on_connect_error_wrapper)
+
+        logger.debug("Created Socket.IO client with system event wrappers")
         return client
     
     async def connect(self) -> bool:
@@ -215,40 +346,6 @@ class SocketIOConnectionManager:
             logger.exception("Failed to start monitoring tasks")
 
         return True
-
-    def register_handlers(self, handlers: Any) -> None:
-        """
-        Register Socket.IO event handlers
-        
-        Must be called BEFORE connect() to ensure handlers are bound when
-        connection is established
-        
-        Args:
-            handlers: SocketIOHandlers instance with bind method
-        
-        Raises:
-            RuntimeError: If client not initialized or already connected
-        """
-        if self._handlers_registered:
-            logger.warning("Handlers already registered, skipping")
-            return
-
-        if self._sio is None:
-            self._sio = self._create_client()
-            logger.debug("Created Socket.IO client for handler registration")
-        
-        if self._sio.connected:
-            raise RuntimeError(
-                "Cannot register handlers after connection established. "
-                "Call register_handlers() before connect()"
-            )
-        
-        # Bind handlers to client
-        handlers.bind_sio_handlers_to_client(self._sio)
-        self._handlers = handlers
-        self._handlers_registered = True
-        logger.debug("Socket.IO handlers registered successfully")
-
 
     def _record_disconnect(self, reason: str) -> None:
         """Record disconnect event in history"""
@@ -565,3 +662,29 @@ class SocketIOConnectionManager:
             Monitor task or None
         """
         return self._monitor_task
+
+    # =========================================================================
+    # Convenience Methods for User Handlers
+    # =========================================================================
+    
+    async def emit(self, event: str, data: Any = None, **kwargs) -> Any:
+        """
+        Emit Socket.IO event (convenience method for user handlers).
+        
+        Args:
+            event: Event name
+            data: Data to send
+            **kwargs: Additional arguments passed to sio.emit()
+        
+        Returns:
+            Result from sio.emit()
+        
+        Raises:
+            RuntimeError: If Socket.IO client not connected
+        """
+        if self._sio is None or not self._sio.connected:
+            raise RuntimeError(
+                f"Cannot emit {event!r}: Socket.IO not connected"
+            )
+        
+        return await self._sio.emit(event, data, **kwargs)
