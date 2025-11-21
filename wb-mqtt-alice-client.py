@@ -21,7 +21,7 @@ import string
 import subprocess
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import http.client
 import socket
 
@@ -311,7 +311,7 @@ def test_nginx_http_response(
     host: str = 'localhost',
     port: int = 8042,
     timeout: int = 5
-) -> tuple[bool, Optional[int], float, str]:
+) -> Tuple[bool, Optional[int], float, str]:
     """
     Test connection to server via local nginx proxy before Socket.IO connect
 
@@ -418,7 +418,7 @@ async def probe_nginx_until_stable(
     return False
 
 
-async def connect_controller(config: Dict[str, Any]) -> bool:
+async def connect_controller(server_address: str) -> bool:
     """
     Create and connect Socket.IO client to Alice integration server
     with using provided configuration
@@ -438,10 +438,6 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
     # - SSL termination at Nginx level
     # - Certificate-based authentication
     # See configure-nginx-proxy.sh for Nginx configuration details.
-    server_address = config.get("server_address")  # Used by Nginx proxy
-    if not server_address:
-        logger.error("'server_address' not specified in configuration")
-        return False
     logger.info("Target SocketIO server: %r", server_address)
     logger.info("Client version: %r", ctx.client_pkg_ver)
     logger.debug("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
@@ -455,7 +451,7 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
         controller_sn=ctx.controller_sn,
         client_pkg_ver=ctx.client_pkg_ver,
         reconnection=True,  # auto-reconnect ON
-        reconnection_delay=RECONNECT_DELAY_INITIAL,  # first recconect delay
+        reconnection_delay=RECONNECT_DELAY_INITIAL,  # first reconnect delay
         reconnection_delay_max=RECONNECT_DELAY_MAX,
         debug_logging=is_debug_log_enabled,
         custom_reconnect_enabled=True,
@@ -540,7 +536,7 @@ async def graceful_shutdown() -> None:
     # NOTE: Shutdown sequence:
     #       - First stop time_rate_sender so we stop generating new outbound updates
     #       - Always shutdown Socket.IO connections last
-    #         This need becoase time_rate_sender use mqtt and mqtt use need use Socket.IO connections
+    #         This need because time_rate_sender use mqtt and mqtt use need use Socket.IO connections
 
     # Stop AliceDeviceEventRate
     if ctx.time_rate_sender and ctx.time_rate_sender.running:
@@ -550,7 +546,10 @@ async def graceful_shutdown() -> None:
 
     # Disconnect Socket.IO
     if ctx.sio_manager:
-        await ctx.sio_manager.disconnect()
+        try:
+            await asyncio.wait_for(ctx.sio_manager.disconnect(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Socket.IO disconnect timeout")
 
     # Stop MQTT client
     if ctx.mqtt_client:
@@ -586,16 +585,32 @@ async def main() -> int:
     ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
     ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
 
-    config = read_config(SERVER_CONFIG_PATH)
-    if not config:
-        logger.error("Cannot proceed without configuration")
+    server_cfg = read_config(SERVER_CONFIG_PATH)
+    if not server_cfg:
+        logger.error("Cannot proceed without server configuration")
         return 0  # 0 mean - exit without service restart
 
-    if not config.get("client_enabled", False):
+    server_address = server_cfg.get("server_address")  # Used by Nginx proxy
+    if not server_address:
+        logger.error("'server_address' not specified in server config %r",
+            SERVER_CONFIG_PATH,
+        )
+        return 0  # 0 mean - exit without service restart
+
+    client_cfg = read_config(CLIENT_CONFIG_PATH)
+    if not client_cfg:
+        logger.error("Cannot proceed without client configuration")
+        return 0  # 0 mean - exit without service restart
+
+    # Apply log level from client config
+    log_level_name = str(client_cfg.get("log_level", "INFO")).upper()
+    logger.setLevel(log_level_name)
+
+    if not client_cfg.get("client_enabled", False):
         logger.info("Alice integration is DISABLED in configuration")
         logger.info(
             "To enable integration, set 'client_enabled': true in file %r",
-            SERVER_CONFIG_PATH
+            CLIENT_CONFIG_PATH
         )
         return 0  # 0 mean - exit without service restart
     logger.info("Alice integration is enabled - starting client...")
@@ -640,7 +655,8 @@ async def main() -> int:
 
     ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
     logger.info("Connecting Socket.IO client...")
-    connected = await connect_controller(config)
+
+    connected = await connect_controller(server_address)
     if not connected:
         logger.error(
             "Failed to establish initial Socket.IO connection - "

@@ -245,7 +245,7 @@ class SocketIOConnectionManager:
             engineio_logger=self._debug_logging,
             reconnection=self._reconnection,  # auto-reconnect
             reconnection_attempts=0,  # 0 = infinite retries
-            reconnection_delay=self._reconnection_delay,  # first recconect delay
+            reconnection_delay=self._reconnection_delay,  # first reconnect delay
             reconnection_delay_max=self._reconnection_delay_max,
             randomization_factor=0.5,  # jitter
         )
@@ -513,11 +513,10 @@ class SocketIOConnectionManager:
                     except asyncio.CancelledError:
                         pass
                 
-                # Close client AFTER stop monitor task, for prevent reconect
-                await self._close_client(notify_offline=False)
+                # Close client AFTER stop monitor task, for prevent reconnect
+                await self._close_client()
 
                 # Try to reconnect with new client
-                self._sio_client = None  # Force creation of new client
                 logger.debug("Recreating Socket.IO client for reconnection")
                 success = await self.connect()
 
@@ -554,7 +553,7 @@ class SocketIOConnectionManager:
         if eio_state != "connected":
             return False
 
-        # Check namespace ready - mean server validate connection successfully
+        # Check namespace ready - means server validated connection successfully
         ns_list = getattr(self._sio_client, "namespaces", {})
         if "/" not in ns_list:
             logger.warning("Namespace '/' not ready ")
