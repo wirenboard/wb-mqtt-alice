@@ -187,6 +187,13 @@ def mqtt_on_message(client: mqtt_client.Client, userdata: Any, message: mqtt_cli
         return None
 
     topic_str = message.topic
+    if not ctx.time_rate_sender or not ctx.time_rate_sender.running:
+        logger.debug(
+            "time_rate_sender is not running, drop message from %r",
+            topic_str,
+        )
+        return None
+
     try:
         payload_str = message.payload.decode("utf-8").strip()
     except UnicodeDecodeError:
@@ -198,14 +205,11 @@ def mqtt_on_message(client: mqtt_client.Client, userdata: Any, message: mqtt_cli
     logger.debug("       - Size   : %r", len(message.payload))
     logger.debug("       - Message: %r", payload_str)
 
-    # add message to wb_alice_device_state_sender
-    if ctx.time_rate_sender:
-        asyncio.run_coroutine_threadsafe(
-            ctx.time_rate_sender.add_message(topic_str, payload_str),
-            ctx.main_loop
-        )
-    else:
-        logger.debug("time_rate_sender is not ready, drop message from %r", topic_str)
+    # Pass message to wb_alice_device_state_sender
+    asyncio.run_coroutine_threadsafe(
+        ctx.time_rate_sender.add_message(topic_str, payload_str),
+        ctx.main_loop
+    )
 
 
 def generate_client_id(prefix: str = "wb-alice-client") -> str:
@@ -405,8 +409,8 @@ async def probe_nginx_until_stable(
 
         await asyncio.sleep(sleep_between_attempts_s)
 
-    logger.error(
-        "Aborting init: Nginx probe FAILED before Socket.IO connect "
+    logger.warning(
+        "Nginx upstream probe failed (upstream not ready or 5xx) "
         "(last_latency=%.3fs, last_status=%r, last_info=%r)",
         last_elapsed_time,
         last_status_code,
@@ -443,14 +447,8 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
     logger.info("Client version: %r", ctx.client_pkg_ver)
     logger.debug("Connecting via Nginx proxy: %r", LOCAL_PROXY_URL)
 
-    logger.debug("Waiting for nginx proxy to be ready...")
-    if not await wait_for_nginx_ready(timeout=15):
-        logger.error("Nginx is not ready after 15 seconds")
-        return False
-
-    if not await probe_nginx_until_stable():
-        return False
-
+    # Create manager + handlers BEFORE nginx probe, for custom reconnect
+    # logic may be started even if pre-flight checks fail
     is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
     ctx.sio_manager = SocketIOConnectionManager(
         server_url=LOCAL_PROXY_URL,
@@ -462,7 +460,7 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
         reconnection_delay_max=RECONNECT_DELAY_MAX,
         debug_logging=is_debug_log_enabled,
         custom_reconnect_enabled=True,
-        custom_reconnect_interval=120,  # 2 minutes
+        custom_reconnect_interval=60,  # 1 minutes
     )
 
     ctx.sio_handlers = SocketIOHandlers(
@@ -474,6 +472,13 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
     # Register handlers BEFORE connecting
     ctx.sio_handlers.register_with_manager(ctx.sio_manager)
     logger.debug("Socket.IO handlers registered")
+
+    logger.debug("Waiting for nginx proxy to be ready...")
+    # This only informative, soft check need for can start custom reconnect
+    # in case when server totally offline
+    if not await wait_for_nginx_ready(timeout=15):
+        logger.error("Nginx is not ready after 15 seconds")
+    await probe_nginx_until_stable()
 
     return await ctx.sio_manager.connect()
 

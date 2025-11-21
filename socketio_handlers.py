@@ -77,6 +77,28 @@ class SocketIOHandlers:
             except Exception as e:
                 logger.warning("Failed to subscribe to %r: %r", topic, e)
 
+    def _unsubscribe_registry_topics(self) -> None:
+        """
+        Unsubscribe MQTT client from all topics from registry
+
+        Called when Socket.IO connection is lost or permanently refused,
+        to avoid processing device updates while we cannot notify Yandex
+        """
+        if self._mqtt_client is None:
+            logger.error("Cannot unsubscribe: MQTT client is None")
+            return
+
+        if self.registry is None or not hasattr(self.registry, "topic2info"):
+            logger.error("Cannot unsubscribe: MQTT registry not ready")
+            return
+
+        for topic in self.registry.topic2info.keys():
+            try:
+                self._mqtt_client.unsubscribe(topic)
+                logger.debug("MQTT unsubscribed from %r", topic)
+            except Exception as e:
+                logger.warning("Failed to unsubscribe from %r: %r", topic, e)
+
     # -------------------------------------------------------------------------
     # Connection Lifecycle Handlers
     # -------------------------------------------------------------------------
@@ -132,7 +154,7 @@ class SocketIOHandlers:
                 logger.exception(
                     "Failed to stop Alice state sender on disconnect: %r", e
                 )
-
+        self._unsubscribe_registry_topics()
 
     async def on_connect_error(self, data: Any) -> None:
         """
@@ -152,6 +174,19 @@ class SocketIOHandlers:
         # - Server rejecting connection
         reason_raw = str(data).strip()
         logger.error("Message from server: %r", reason_raw)
+
+        # Stop Alice state sender to avoid sending updates while offline
+        if self._time_rate_sender is not None and getattr(
+            self._time_rate_sender, "running", False
+        ):
+            try:
+                await self._time_rate_sender.stop()
+                logger.info("Alice state sender stopped due to disconnect")
+            except Exception as e:
+                logger.exception(
+                    "Failed to stop Alice state sender on disconnect: %r", e
+                )
+        self._unsubscribe_registry_topics()
 
         # NOTE: Built-in Socket.IO reconnect will NOT try handle connect_error
         #       It reconnection fails permanently, monitor_task via sio.wait()

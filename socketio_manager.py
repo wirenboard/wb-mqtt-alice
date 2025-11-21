@@ -219,7 +219,6 @@ class SocketIOConnectionManager:
         Note: Built-in Socket.IO reconnect will handle retries automatically.
         If all attempts fail, monitor_task will trigger custom reconnection.
         """
-        # Manager's infrastructure work
         reason_raw = str(data).strip()
         self._record_disconnect(f"connect_error: {reason_raw}")
         logger.error("Manager: Socket.IO connect_error - %r", reason_raw)
@@ -302,10 +301,10 @@ class SocketIOConnectionManager:
                 timeout=10.0,
             )
         except socketio.exceptions.ConnectionError as e:
-            logger.exception("Socket.IO Connection Failed: %r", str(e))
+            logger.warning("Socket.IO Connection Failed: %r", str(e))
             return False
         except asyncio.TimeoutError:
-            logger.exception("Socket.IO Connection Timeout (>10s)")
+            logger.warning("Socket.IO Connection Timeout (>10s)")
             return False
         except Exception as e:
             logger.exception(
