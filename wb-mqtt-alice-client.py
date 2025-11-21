@@ -164,31 +164,6 @@ async def publish_to_mqtt(topic: str, payload: str) -> None:
 # MQTT callbacks
 # ---------------------------------------------------------------------
 
-
-def subscribe_registry_topics() -> None:
-    """
-    Subscribe MQTT client to all topics from registry
-    Called only after full initialization (Socket.IO connected, etc.)
-    
-    NOTE: This need only for notify yandex API,
-          but not needed for commands from Yandex
-    """
-
-    if ctx.mqtt_client is None:
-        logger.error("Cannot subscribe: MQTT client is None")
-        return
-
-    # Check if registry is ready
-    if ctx.registry is None or not hasattr(ctx.registry, "topic2info"):
-        logger.error("Cannot subscribe: MQTT Registry not ready")
-        return None
-
-    # subscribe to every topic from registry
-    for t in ctx.registry.topic2info.keys():
-        ctx.mqtt_client.subscribe(t, qos=0)
-        logger.debug("MQTT Subscribed to %r", t)
-
-
 def mqtt_on_connect(client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
     if rc != 0:
         logger.error("MQTT Connection failed with code: %r", rc)
@@ -476,44 +451,6 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
     if not await probe_nginx_until_stable():
         return False
 
-    # Define callbacks for connection lifecycle
-    def on_disconnect_detected():
-        """
-        Callback when Socket.IO disconnect is detected
-        """
-        logger.warning(
-            "Socket.IO disconnected - stopping MQTT state updates"
-        )
-        
-        if ctx.time_rate_sender and ctx.time_rate_sender.running:
-            try:
-                # Schedule stop in event loop
-                if ctx.main_loop and ctx.main_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        ctx.time_rate_sender.stop(), ctx.main_loop
-                    )
-                    logger.info("Stopped Alice state sender due to disconnect")
-            except Exception as e:
-                logger.exception("Failed to stop sender: %r", e)
-
-    def on_reconnect_success():
-        """Called after successful reconnection - restart MQTT processing"""
-        logger.info(
-            "Socket.IO reconnected - resuming MQTT state updates"
-        )
-        
-        if ctx.time_rate_sender and not ctx.time_rate_sender.running:
-            try:
-                # Schedule start in event loop
-                if ctx.main_loop and ctx.main_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        ctx.time_rate_sender.start(), ctx.main_loop
-                    )
-                    subscribe_registry_topics()
-                    logger.info("Restarted Alice state sender after reconnection")
-            except Exception as e:
-                logger.exception("Failed to restart sender: %r", e)
-
     is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
     ctx.sio_manager = SocketIOConnectionManager(
         server_url=LOCAL_PROXY_URL,
@@ -525,14 +462,14 @@ async def connect_controller(config: Dict[str, Any]) -> bool:
         reconnection_delay_max=RECONNECT_DELAY_MAX,
         debug_logging=is_debug_log_enabled,
         custom_reconnect_enabled=True,
-        custom_reconnect_interval=1200,  # 20 minutes
-        on_disconnect_callback=on_disconnect_detected,
-        on_reconnect_success_callback=on_reconnect_success,
+        custom_reconnect_interval=120,  # 2 minutes
     )
 
     ctx.sio_handlers = SocketIOHandlers(
         registry=ctx.registry,
         controller_sn=ctx.controller_sn,
+        mqtt_client=ctx.mqtt_client,
+        time_rate_sender=ctx.time_rate_sender,
     )
     # Register handlers BEFORE connecting
     ctx.sio_handlers.register_with_manager(ctx.sio_manager)
@@ -707,16 +644,22 @@ async def main() -> int:
     # Set emit callback for yandex_handlers module
     set_emit_callback(_emit_async)
 
-    logger.info("Connecting Socket.IO client...")
-    if not await connect_controller(config):
-        logger.error("Failed to establish initial connection - exiting")
-        return 1  # Need exit with error for restart
-
-    # Init and start AliceDeviceStateSender only after connect SocketIO
     ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
-    asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.start(), ctx.main_loop)
-    subscribe_registry_topics()
-    logger.info("Client initialization complete, ready to handle requests")
+    logger.info("Connecting Socket.IO client...")
+    connected = await connect_controller(config)
+    if not connected:
+        logger.error(
+            "Failed to establish initial Socket.IO connection - "
+            "service will stay running and will retry in background"
+        )
+        if ctx.sio_manager is not None:
+            await ctx.sio_manager.start_custom_reconnect("initial_connect_failed")
+        else:
+            logger.error(
+                "SocketIO manager is not initialized, cannot start custom reconnect loop"
+            )
+
+    logger.info("Client initialization continue when connect to server")
 
     # Wait for shutdown signal
     await ctx.stop_event.wait()

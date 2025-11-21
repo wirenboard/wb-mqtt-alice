@@ -55,8 +55,6 @@ class SocketIOConnectionManager:
         debug_logging: bool = False,
         custom_reconnect_enabled: bool = True,
         custom_reconnect_interval: int = 1200,  # 20 minutes
-        on_disconnect_callback: Optional[Callable[[], None]] = None,
-        on_reconnect_success_callback: Optional[Callable[[], None]] = None,
     ):
         """
         Initialize Socket.IO Connection Manager
@@ -73,8 +71,6 @@ class SocketIOConnectionManager:
 
             custom_reconnect_enabled: Enable custom 20-min reconnection logic
             custom_reconnect_interval: Interval between custom reconnect attempts (seconds)
-            on_disconnect_callback: Called when disconnect detected (to stop MQTT)
-            on_reconnect_success_callback: Called after successful reconnection (to start MQTT)
         """
         self.server_url = server_url
         self.socketio_path = socketio_path
@@ -89,9 +85,6 @@ class SocketIOConnectionManager:
 
         self._custom_reconnect_enabled = custom_reconnect_enabled
         self._custom_reconnect_interval = custom_reconnect_interval
-
-        self._on_disconnect_callback = on_disconnect_callback
-        self._on_reconnect_success_callback = on_reconnect_success_callback
 
         # - - - User handlers registry - - -
         self._user_handlers: Dict[str, Callable] = {}
@@ -388,13 +381,6 @@ class SocketIOConnectionManager:
 
         self._is_reconnecting = True
         
-        # Notify application to stop MQTT processing
-        if self._on_disconnect_callback:
-            try:
-                self._on_disconnect_callback()
-            except Exception as e:
-                logger.exception("Error in disconnect callback: %r", e)
-        
         # Cancel existing reconnection task if any
         if self._reconnection_task and not self._reconnection_task.done():
             self._reconnection_task.cancel()
@@ -508,14 +494,6 @@ class SocketIOConnectionManager:
                 if success:
                     logger.info("Custom reconnection successful after %d attempts", attempt)
                     self._is_reconnecting = False
-                    
-                    # Notify application to restart MQTT processing
-                    if self._on_reconnect_success_callback:
-                        try:
-                            self._on_reconnect_success_callback()
-                        except Exception as e:
-                            logger.exception("Error in reconnect success callback: %r", e)
-                    
                     return  # Exit loop on success
                 else:
                     logger.warning("Reconnection attempt #%d failed", attempt)

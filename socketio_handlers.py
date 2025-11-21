@@ -10,7 +10,7 @@ and connection lifecycle events.
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ class SocketIOHandlers:
         *,
         registry: Any,  # DeviceRegistry
         controller_sn: str,
+        mqtt_client: Optional[Any] = None,
+        time_rate_sender: Optional[Any] = None,
     ):
         """
         Initialize handlers with required dependencies
@@ -42,11 +44,38 @@ class SocketIOHandlers:
         Args:
             registry: DeviceRegistry instance for device management
             controller_sn: Controller serial number for identification
+            mqtt_client: Optional MQTT client instance for subscriptions
+            time_rate_sender: Optional AliceDeviceStateSender instance
         """
         self.registry = registry
         self.controller_sn = controller_sn
         self._manager = None  # Will be set by register_with_manager()
+        self._mqtt_client = mqtt_client
+        self._time_rate_sender = time_rate_sender
 
+    def _subscribe_registry_topics(self) -> None:
+        """
+        Subscribe MQTT client to all topics from registry
+        Called only after full initialization (Socket.IO connected, etc.)
+
+        NOTE: This need only for notify yandex API,
+            but not needed for commands from Yandex
+        """
+        if self._mqtt_client is None:
+            logger.error("Cannot subscribe: MQTT client is None")
+            return
+
+        # Check if registry is ready
+        if self.registry is None or not hasattr(self.registry, "topic2info"):
+            logger.error("Cannot subscribe: MQTT registry not ready")
+            return
+
+        for topic in self.registry.topic2info.keys():
+            try:
+                self._mqtt_client.subscribe(topic, qos=0)
+                logger.debug("MQTT subscribed to %r", topic)
+            except Exception as e:
+                logger.warning("Failed to subscribe to %r: %r", topic, e)
 
     # -------------------------------------------------------------------------
     # Connection Lifecycle Handlers
@@ -58,7 +87,22 @@ class SocketIOHandlers:
         
         Called when the Socket.IO connection is established and namespace is ready
         """
-        logger.info("Business: Connected to Socket.IO server")
+        logger.debug("Business: Connected to Socket.IO server")
+
+        # Start Alice state sender (if provided) and subscribe to MQTT topics
+        if self._time_rate_sender is not None and not getattr(
+            self._time_rate_sender, "running", False
+        ):
+            try:
+                await self._time_rate_sender.start()
+                logger.info("Alice state sender started after connect")
+            except Exception as e:
+                logger.exception(
+                    "Failed to start Alice state sender after connect: %r", e
+                )
+
+        # Subscribe to all topics from registry (if MQTT client is available)
+        self._subscribe_registry_topics()
 
     async def on_disconnect(self) -> None:
         """
@@ -71,11 +115,23 @@ class SocketIOHandlers:
         - Connection is lost during operation
         - Server explicitly disconnects the client
         """
-        logger.warning("Business: Socket.IO connection lost")
+        logger.debug("Business: Socket.IO connection lost")
 
         # NOTE: Socket.IO will attempt automatic reconnection
         #       If reconnection fails permanently, monitor_task via sio.wait()
         #       will detect it and trigger custom reconnection logic
+
+        # Stop Alice state sender to avoid sending updates while offline
+        if self._time_rate_sender is not None and getattr(
+            self._time_rate_sender, "running", False
+        ):
+            try:
+                await self._time_rate_sender.stop()
+                logger.info("Alice state sender stopped due to disconnect")
+            except Exception as e:
+                logger.exception(
+                    "Failed to stop Alice state sender on disconnect: %r", e
+                )
 
 
     async def on_connect_error(self, data: Any) -> None:
@@ -91,7 +147,7 @@ class SocketIOHandlers:
         """
         logger.error("Yandex Alice integration connection refused by server")
         # This typically indicates:
-        # - Controller not registered on server
+        # - Controller not registerfed on server
         # - Authentication failure
         # - Server rejecting connection
         reason_raw = str(data).strip()
