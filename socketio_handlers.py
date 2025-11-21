@@ -18,18 +18,18 @@ logger = logging.getLogger(__name__)
 class SocketIOHandlers:
     """
     Centralized Socket.IO event handlers for Alice integration.
-    
+
     This class encapsulates all Socket.IO event handling logic:
     - Connection lifecycle (connect, disconnect, errors)
     - Alice device discovery, queries, and actions
     - Generic server responses
-    
+
     Separating handlers from the main client improves:
     - Testability (can mock dependencies)
     - Maintainability (all handlers in one place)
     - Readability (clear responsibility separation)
     """
-    
+
     def __init__(
         self,
         *,
@@ -40,7 +40,7 @@ class SocketIOHandlers:
     ):
         """
         Initialize handlers with required dependencies
-        
+
         Args:
             registry: DeviceRegistry instance for device management
             controller_sn: Controller serial number for identification
@@ -102,11 +102,11 @@ class SocketIOHandlers:
     # -------------------------------------------------------------------------
     # Connection Lifecycle Handlers
     # -------------------------------------------------------------------------
-    
+
     async def on_connect(self) -> None:
         """
         Handler: Successful connection to Socket.IO server
-        
+
         Called when the Socket.IO connection is established and namespace is ready
         """
         logger.debug("Business: Connected to Socket.IO server")
@@ -129,7 +129,7 @@ class SocketIOHandlers:
     async def on_disconnect(self) -> None:
         """
         Handler: Connection to Socket.IO server lost
-        
+
         NOTE: Argument 'reason' is not available in Socket.IO version 5.0.3
         (Released in Dec 14,2020). It was added in version 5.12+
 
@@ -161,7 +161,7 @@ class SocketIOHandlers:
         Handler: Connection error from server
           - Initial connection to server failed
           - Or active connection was refused by server side by disconnect(sid)
-        
+
         Args:
             data: Error message from server (type varies by Socket.IO version)
                 NOTE: In actual Socket.IO versions - argument is "Dict[str, Any]",
@@ -195,16 +195,16 @@ class SocketIOHandlers:
     async def on_response(self, data: Any) -> None:
         """
         Handler: Generic server response.
-        
+
         Args:
             data: Response data from server
         """
         logger.debug("Socket.IO server response: %r", data)
-    
+
     async def on_error(self, data: Any) -> None:
         """
         Handler: Server error message.
-        
+
         Args:
             data: Error data from server
         """
@@ -213,14 +213,14 @@ class SocketIOHandlers:
     async def on_any_unprocessed(self, event: str, sid: str, data: Any) -> None:
         """
         Handler: Catch-all for unprocessed Socket.IO events
-        
+
         Args:
             event: Event name
             sid: Session ID
             data: Event data
         """
         logger.debug("Socket.IO unhandled event %r", event)
-    
+
     # -------------------------------------------------------------------------
     # Alice Smart Home Handlers
     # -------------------------------------------------------------------------
@@ -228,13 +228,13 @@ class SocketIOHandlers:
     async def on_alice_devices_list(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handler: Device discovery request from Yandex server
-        
+
         Returns a list of all devices configured in the controller
         Called when user links their smart home account or requests device refresh
-        
+
         Args:
             data: Request with request_id
-            
+
         Returns:
             Response dict with devices list formatted per Yandex Smart Home spec
         """
@@ -257,7 +257,7 @@ class SocketIOHandlers:
                 "devices": devices_list,
             },
         }
-        
+
         logger.info("Sending device list response to Yandex:")
         logger.info(json.dumps(devices_list_response, ensure_ascii=False, indent=2))
         return devices_list_response
@@ -265,19 +265,19 @@ class SocketIOHandlers:
     async def on_alice_devices_query(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handler: Device current state query request from Yandex
-        
+
         Returns current state of requested devices
         Called when user asks Alice about device status or when Alice app refreshes
-        
+
         Args:
             data: Request with device IDs to query
-            
+
         Returns:
             Response dict with device states
         """
         logger.debug("alice_devices_query event:")
         logger.debug(json.dumps(data, ensure_ascii=False, indent=2))
-        
+
         request_id = data.get("request_id", "unknown")
         devices_response: List[Dict[str, Any]] = []
 
@@ -287,7 +287,7 @@ class SocketIOHandlers:
             devices_response.append(
                 await self.registry.get_device_current_state(device_id)
             )
-        
+
         query_response = {
             "request_id": request_id,
             "payload": {
@@ -302,13 +302,13 @@ class SocketIOHandlers:
     async def on_alice_devices_action(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handler: Device action command from Yandex (e.g., turn on/off)
-        
+
         Applies requested actions to devices (e.g., turn on/off, set brightness)
         Called when user gives voice commands or uses Alice app controls
-        
+
         Args:
             data: Request with devices and actions to perform
-            
+
         Returns:
             Response dict with action results
         """
@@ -324,7 +324,7 @@ class SocketIOHandlers:
             result = await self._handle_single_device_action(device)
             if result:
                 devices_info.append(result)
-        
+
         action_response: Dict[str, Any] = {
             "request_id": request_id,
             "payload": {"devices": devices_info},
@@ -343,7 +343,7 @@ class SocketIOHandlers:
 
         Args:
             device: Device action data with capabilities
-            
+
         Returns:
             Result block formatted per Yandex Smart Home spec
         """
@@ -351,13 +351,13 @@ class SocketIOHandlers:
         if not device_id:
             logger.warning("Device block missing 'id': %r", device)
             return {}
-        
+
         cap_results: List[Dict[str, Any]] = []
         for cap in device.get("capabilities", []):
             cap_type: str = cap.get("type")
             instance: str = cap.get("state", {}).get("instance")
             value: Any = cap.get("state", {}).get("value")
-            
+
             try:
                 await self.registry.forward_yandex_to_mqtt(
                     device_id, cap_type, instance, value
@@ -369,15 +369,17 @@ class SocketIOHandlers:
             except Exception as e:
                 logger.exception("Failed to apply action for device %r", device_id)
                 status = "ERROR"
-            
-            cap_results.append({
-                "type": cap_type,
-                "state": {
-                    "instance": instance,
-                    "action_result": {"status": status},
-                },
-            })
-        
+
+            cap_results.append(
+                {
+                    "type": cap_type,
+                    "state": {
+                        "instance": instance,
+                        "action_result": {"status": status},
+                    },
+                }
+            )
+
         return {
             "id": device_id,
             "capabilities": cap_results,
@@ -393,7 +395,7 @@ class SocketIOHandlers:
 
         Unlike decorators, we use .on() method for better safety - this approach
         helps control all names and objects at any time and in any context
-        
+
         Args:
             manager: SocketIOConnectionManager instance
         """
