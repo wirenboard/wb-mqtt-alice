@@ -11,6 +11,7 @@ import asyncio
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
+import contextlib
 
 import socketio
 
@@ -94,7 +95,7 @@ class SocketIOConnectionManager:
         # ts after sock.connect()
         self.connected_at: Optional[float] = None
         # SocketIO async client instance for handling real-time communication
-        self._sio: Optional[socketio.AsyncClient] = None
+        self._sio_client: Optional[socketio.AsyncClient] = None
         self._monitor_task: Optional[asyncio.Task] = None
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -139,8 +140,8 @@ class SocketIOConnectionManager:
                 event,
             )
 
-            if self._sio is not None:
-                self._sio.on(event, handler)
+            if self._sio_client is not None:
+                self._sio_client.on(event, handler)
                 logger.debug("Registered business handler %r on existing client", event)
 
 
@@ -162,17 +163,17 @@ class SocketIOConnectionManager:
 
         # Log session identifiers for debugging
         # NOTE: ctx.sio.sid is the Socket.IO session id for the default namespace "/"
-        sio_sid = getattr(self._sio, "sid", None)
+        sio_sid = getattr(self._sio_client, "sid", None)
         logger.info("Manager: Success connected to Socket.IO server, namespace='/' ready (sid=%r)", sio_sid)
 
         # Optional (debug): engine.io session id, may help in low-level troubleshooting
-        eio_sid = getattr(getattr(self._sio, "eio", None), "sid", None)
+        eio_sid = getattr(getattr(self._sio_client, "eio", None), "sid", None)
         logger.debug("Engine.IO session id (eio.sid): %r", eio_sid)
 
         # Notify server that controller is online
         # NOTE: this is not processed on server side and needed only for debug
         try:
-            await self._sio.emit(
+            await self._sio_client.emit(
                 "message",
                 {"controller_sn": self.controller_sn, "status": "online"}
             )
@@ -282,8 +283,8 @@ class SocketIOConnectionManager:
             return False
 
         # Create new client if not exists or if previous connection failed
-        if self._sio is None:
-            self._sio = self._create_client()
+        if self._sio_client is None:
+            self._sio_client = self._create_client()
             logger.debug("Created new Socket.IO client instance")
 
         logger.info("Connecting Socket.IO client to %r...", self.server_url)
@@ -292,7 +293,7 @@ class SocketIOConnectionManager:
             # Connect to local Nginx proxy which forwards to actual server
             # "controller_sn" is passed via SSL certificate when Nginx proxies
             await asyncio.wait_for(
-                self._sio.connect(
+                self._sio_client.connect(
                     self.server_url,
                     socketio_path=self.socketio_path,
                     transports=['websocket'], # Need sticky WebSocket sessions
@@ -322,11 +323,11 @@ class SocketIOConnectionManager:
         await asyncio.sleep(2)
         namespace = '/'
         # Check if client still connected
-        if not self._sio.connected:
+        if not self._sio_client.connected:
             logger.warning("Client disconnected while waiting for namespace")
             return False
         # Check if namespace registered
-        if hasattr(self._sio, 'namespaces') and namespace not in self._sio.namespaces:
+        if hasattr(self._sio_client, 'namespaces') and namespace not in self._sio_client.namespaces:
             logger.error("Default namespace failed to connect")
             return False
 
@@ -407,12 +408,12 @@ class SocketIOConnectionManager:
         This coroutine waits for the connection to be permanently lost
         (i.e., when the built-in reconnection mechanism gives up)
         """
-        if self._sio is None:
-            logger.error("_monitor_connection() called but _sio is None")
+        if self._sio_client is None:
+            logger.error("_monitor_connection() called but _sio_client is None")
             return
         
         try:
-            await self._sio.wait()
+            await self._sio_client.wait()
         except Exception as e:
             logger.exception("Socket.IO wait() failed with exception: %r", e)
         
@@ -471,9 +472,9 @@ class SocketIOConnectionManager:
             
             try:
                 # Disconnect old client if still connected
-                if self._sio and self._sio.connected:
+                if self._sio_client and self._sio_client.connected:
                     try:
-                        await asyncio.wait_for(self._sio.disconnect(), timeout=5.0)
+                        await asyncio.wait_for(self._sio_client.disconnect(), timeout=5.0)
                     except Exception:
                         pass
 
@@ -486,7 +487,7 @@ class SocketIOConnectionManager:
                         pass
 
                 # Try to reconnect with new client
-                self._sio = None  # Force creation of new client
+                self._sio_client = None  # Force creation of new client
                 logger.debug("Recreating Socket.IO client for reconnection")
                 success = await self.connect()
                 
@@ -510,25 +511,25 @@ class SocketIOConnectionManager:
         Returns:
             True if connected and ready, False otherwise
         """
-        if self._sio is None:
+        if self._sio_client is None:
             return False
         
-        if not self._sio.connected:
+        if not self._sio_client.connected:
             return False
         
-        eio_state = getattr(self._sio.eio, "state", None)
+        eio_state = getattr(self._sio_client.eio, "state", None)
         if eio_state != "connected":
             return False
         
         # Check namespace ready - mean server validate connection successfully
-        ns_list = getattr(self._sio, "namespaces", {})
+        ns_list = getattr(self._sio_client, "namespaces", {})
         if "/" not in ns_list:
             logger.warning("Namespace '/' not ready ")
             return False
 
         # BUG: Additional check for version SocketIO 5.0.3
         #      (may delete this check when upgrade version)
-        if hasattr(self._sio.eio, "write_loop_task") and self._sio.eio.write_loop_task is None:
+        if hasattr(self._sio_client.eio, "write_loop_task") and self._sio_client.eio.write_loop_task is None:
             logger.warning("Write loop task is None, connection may be unstable")
             return False
 
@@ -541,20 +542,20 @@ class SocketIOConnectionManager:
         Returns:
             Dict with connection details for debugging/monitoring
         """
-        if self._sio is None:
+        if self._sio_client is None:
             return {"status": "not_initialized"}
         
         return {
             "status": "connected" if self.is_connected() else "disconnected",
-            "connected": self._sio.connected,
-            "eio_state": getattr(self._sio.eio, "state", "unknown"),
-            "namespaces": list(getattr(self._sio, "namespaces", {}).keys()),
+            "connected": self._sio_client.connected,
+            "eio_state": getattr(self._sio_client.eio, "state", "unknown"),
+            "namespaces": list(getattr(self._sio_client, "namespaces", {}).keys()),
             "uptime_seconds": (
                 time.monotonic() - self.connected_at
                 if self.connected_at
                 else None
             ),
-            "sid": getattr(self._sio, "sid", None),
+            "sid": getattr(self._sio_client, "sid", None),
         }
 
     async def disconnect(self) -> None:
@@ -583,7 +584,7 @@ class SocketIOConnectionManager:
             except asyncio.CancelledError:
                 pass
 
-        if self._sio is None or not self._sio.connected:
+        if self._sio_client is None or not self._sio_client.connected:
             logger.debug("Already disconnected or not initialized")
             return
 
@@ -591,7 +592,7 @@ class SocketIOConnectionManager:
             logger.info("Notifying server about offline status...")
             # This is informative message, not have spesial beckend processing
             await asyncio.wait_for(
-                self._sio.emit(
+                self._sio_client.emit(
                     "message",
                     {"controller_sn": self.controller_sn, "status": "offline"}
                 ),
@@ -609,7 +610,7 @@ class SocketIOConnectionManager:
         # without it server not connect second controller twice
         try:
             logger.info("Disconnecting from Socket.IO server...")
-            await asyncio.wait_for(self._sio.disconnect(), timeout=5.0)
+            await asyncio.wait_for(self._sio_client.disconnect(), timeout=5.0)
             logger.info("Socket.IO disconnected successfully")
         except asyncio.TimeoutError:
             logger.warning("Timeout while disconnecting from Socket.IO server")
@@ -641,7 +642,7 @@ class SocketIOConnectionManager:
         Returns:
             socketio.AsyncClient instance or None
         """
-        return self._sio
+        return self._sio_client
     
     @property
     def monitor_task(self) -> Optional[asyncio.Task]:
@@ -672,9 +673,9 @@ class SocketIOConnectionManager:
         Raises:
             RuntimeError: If Socket.IO client not connected
         """
-        if self._sio is None or not self._sio.connected:
+        if self._sio_client is None or not self._sio_client.connected:
             raise RuntimeError(
                 f"Cannot emit {event!r}: Socket.IO not connected"
             )
         
-        return await self._sio.emit(event, data, **kwargs)
+        return await self._sio_client.emit(event, data, **kwargs)
