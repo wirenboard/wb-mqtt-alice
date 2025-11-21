@@ -12,7 +12,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -47,7 +46,7 @@ READ_TOPIC_TIMEOUT = 1.0
 RECONNECT_DELAY_INITIAL = 2
 RECONNECT_DELAY_MAX = 60
 
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s", force=True)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
@@ -600,16 +599,6 @@ async def main() -> int:
         )
         return 0  # 0 mean - exit without service restart
     logger.info("Alice integration is enabled - starting client...")
-
-    # NOTE: Initialization sequence:
-    #       - First create registry
-    #         Any actions from Yandex need registry ready to map "device -> MQTT topic"
-    #       - Next connect to local MQTT brocker
-    #         We verify broker is alive and we can publish commands when gen Yandex action
-    #         DO NOT subscribe yet on this moment
-    #       - Init Socket.IO connections
-    #         When fully ready reciave commands from yandex
-    #         Do it now, becoase mqtt and time_rate_sender need use already upped connection
 
     # NOTE: Initialize core components order is critical:
     #       1. Create registry - maps devices to MQTT topics
