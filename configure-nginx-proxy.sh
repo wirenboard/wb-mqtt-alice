@@ -1,6 +1,6 @@
 #!/bin/bash
 # Script for configuring nginx to work with ATECCx08 on Wiren Board controller
-set -e # Error handling
+set -e  # exit immediately on first error
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
@@ -16,16 +16,46 @@ CONFIG_FILE='/usr/lib/wb-mqtt-alice/wb-mqtt-alice-server.conf'
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
-LOG_PREFIX="[${PACKET_NAME} install]"
+LOG_PREFIX="[${PACKET_NAME} init]"
+
+# WB_ALICE_LOG_LEVEL can be: debug | info | warn | error (or any other value)
+# Default: info
+WB_ALICE_LOG_LEVEL="${WB_ALICE_LOG_LEVEL:=info}"
+
+log_debug() {
+    case "${WB_ALICE_LOG_LEVEL}" in
+        debug)
+            echo -e "${LOG_PREFIX} ${1}"
+        ;;
+        *)
+            : # silently ignore messages below current log level
+        ;;
+    esac
+}
 
 log_info() {
-    echo -e "${LOG_PREFIX} ${1}"
+    case "${WB_ALICE_LOG_LEVEL}" in
+        debug|info)
+            echo -e "${LOG_PREFIX} ${1}"
+        ;;
+        *)
+            : # silently ignore messages below current log level
+        ;;
+    esac
 }
 
 log_warn() {
-    echo -e "${LOG_PREFIX} ${1}" >&2
+    case "${WB_ALICE_LOG_LEVEL}" in
+        debug|info|warn)
+            echo -e "${LOG_PREFIX} ${1}" >&2
+        ;;
+        *)
+            : # silently ignore messages below current log level
+        ;;
+    esac
 }
 
+# Always print errors regardless of WB_ALICE_LOG_LEVEL to avoid silent failures
 log_error() {
     echo -e "${LOG_PREFIX} ${1}" >&2
 }
@@ -49,7 +79,7 @@ cert_is_valid() {
 #   0 - Success (certificate prepared and validated)
 #   exit 1 - Critical failure (original certificate not found)
 prepare_device_cert_bundle() {
-    log_info "Preparing device certificate bundle..."
+    log_debug "Preparing device certificate bundle..."
 
     if [ ! -f "${ORIGINAL_CERT}" ]; then
         log_error 'Cant find device certificate!'
@@ -61,17 +91,17 @@ prepare_device_cert_bundle() {
     # create correct certificate for agent to use
     if [ ! -f "${TARGET_CERT}" ] || ! cert_is_valid "${TARGET_CERT}"; then
         if cert_is_valid "${ORIGINAL_CERT}"; then
-            log_info 'Device cert is OK, reusing it'
+            log_debug 'Device cert is OK, reusing it'
             rm -f "${TARGET_CERT}"
             ln -s "${ORIGINAL_CERT}" "${TARGET_CERT}"
         else
-            log_info 'Creating fixed bundle certificate'
+            log_info 'Creating new fixed bundle certificate file'
             print_bundle_part 2 < "${ORIGINAL_CERT}" > "${TARGET_CERT}"
             print_bundle_part 1 < "${ORIGINAL_CERT}" >> "${TARGET_CERT}"
         fi
         CHANGES_MADE='true'
     else
-        log_info 'Device cert already valid'
+        log_debug 'Device cert already valid'
     fi
 }
 
@@ -85,7 +115,7 @@ prepare_device_cert_bundle() {
 #   0 - Success (directive added or already exists)
 #   1 - Failure (configuration error)
 add_ssl_engine_to_nginx() {
-    log_info "Configuring ssl_engine in nginx.conf..."
+    log_debug "Configuring ssl_engine in nginx.conf..."
 
     local is_nginx_conf_exists=$([ -f "${NGINX_CONF}" ] && echo 'true' || echo 'false')
     if [ "${is_nginx_conf_exists}" = 'false' ]; then
@@ -96,14 +126,14 @@ add_ssl_engine_to_nginx() {
     # Check if directive already exists
     local is_directive_exists=$(grep -q "^ssl_engine ateccx08;" "${NGINX_CONF}" && echo 'true' || echo 'false')
     if [ "${is_directive_exists}" = 'true' ]; then
-        log_info "ssl_engine directive already exists"
+        log_debug "ssl_engine directive already exists"
         return 0
     fi
     
     # Create backup
     local backup_file="${NGINX_CONF}.backup.$(date +%Y%m%d_%H%M%S)"
     cp "${NGINX_CONF}" "${backup_file}"
-    log_info "Created backup file: ${backup_file}"
+    log_debug "Created backup file: ${backup_file}"
     
     # Add directive to the beginning of file
     sed -i "1i ${ENGINE_LINE}" "${NGINX_CONF}"
@@ -134,7 +164,7 @@ add_ssl_engine_to_nginx() {
 #   0 - Success (permissions configured correctly)
 #   1 - Failure (critical error during configuration)
 setup_i2c_permissions() {
-    log_info "Setting up I2C access permissions..."
+    log_debug "Setting up I2C access permissions..."
 
     # Create group if it doesn't exist
     local is_group_exists=$(getent group hardware-crypto > /dev/null 2>&1 && echo 'true' || echo 'false')
@@ -156,7 +186,7 @@ setup_i2c_permissions() {
         CHANGES_MADE='true'
         log_info "Set permissions on I2C devices"
     else
-        log_info "I2C devices already have correct group"
+        log_debug "I2C devices already have correct group"
     fi
 
     # Add www-data to group
@@ -167,16 +197,16 @@ setup_i2c_permissions() {
         log_warn "nginx restart required for user group changes to take effect"
         CHANGES_MADE='true'
     else
-        log_info "User www-data is already in hardware-crypto group"
+        log_debug "User www-data is already in hardware-crypto group"
     fi
 
     # Determine I2C bus number based on controller version
     local i2c_bus_number=$(get_i2c_bus_number)
-    log_info "Using I2C bus number: ${i2c_bus_number}"
+    log_debug "Using I2C bus number: ${i2c_bus_number}"
 
     # Verify access www-data to I2C
     if sudo -u www-data i2cdetect -y ${i2c_bus_number} &>/dev/null; then
-        log_info "I2C access for www-data verified successfully"
+        log_debug "I2C access for www-data verified successfully"
         return 0
     else
         log_warn "Failed to verify I2C access for www-data"
@@ -265,7 +295,7 @@ get_key_id() {
 #   0 - Success
 #   1 - Error occurred
 create_site_config() {
-    log_info "Creating site configuration..."
+    log_debug "Creating site configuration..."
 
     local controller_version=$(get_board_revision)
     local key_id=$(get_key_id "${controller_version}")
@@ -273,14 +303,14 @@ create_site_config() {
     local server_address=$(get_server_address_from_conf)
     log_info "Server address resolved: ${server_address}"
     if [[ -z "$server_address" ]]; then
-        log_error "server_address not set or empty in config" >&2
+        log_error "server_address not set or empty in config"
         return 1
     fi
 
     # Verify certificate exists
     local cert_path="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
     if [[ ! -f "$cert_path" ]]; then
-        log_error "Certificate not found: $cert_path" >&2
+        log_error "Certificate not found: $cert_path"
         return 1
     fi
 
@@ -290,6 +320,13 @@ create_site_config() {
     # Prepare full config content
     local site_config_content
     site_config_content=$(cat <<EOF
+# NGINX configuration for wb-mqtt-alice proxy
+# Important official WebSocket proxying reference:
+# https://nginx.org/en/docs/http/websocket.html
+#
+# This config ensures proper handling of WebSocket connections
+# and secure client authentication via ATECCx08 hardware key
+
 server {
     listen 8042;
     server_name localhost;
@@ -303,7 +340,7 @@ server {
 
         # Use a variable to prevent NGINX from checking DNS on startup
         set \$alice_host "${server_host}";
-        
+
         # Required settings - basic proxy configuration
         proxy_pass https://\$alice_host:${server_port};
         proxy_ssl_name \$alice_host;
@@ -320,6 +357,13 @@ server {
         proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
         proxy_ssl_protocols TLSv1.3;
         proxy_ssl_verify on;
+
+        # Off: use hardware key on every TLS handshake
+        #      - slower, ~0.7s per handshake
+        #      - some old or non-standard servers may work only with "off"
+        # On:  reuse TLS session (hardware key only for first handshake)
+        #      - faster, ~0.6s per handshake
+        #      - reduces chip load and improves stability
         proxy_ssl_session_reuse off;
     }
 }
@@ -336,7 +380,7 @@ EOF
 
     local tmp_config
     if ! tmp_config=$(mktemp); then
-        log_error "Failed to create temporary file" >&2
+        log_error "Failed to create temporary file"
         return 1
     fi
     echo "${site_config_content}" > "${tmp_config}"
@@ -352,7 +396,7 @@ EOF
     fi
     rm -f "${tmp_config}"
 
-    log_info "Site configuration is up to date — do nothing"
+    log_debug "Site configuration is up to date — do nothing"
 }
 
 # Enable nginx site by creates symbolic link from sites-available
@@ -364,12 +408,12 @@ EOF
 # Returns:
 #   0 - Always returns success
 enable_site() {
-    log_info "Enabling site..."
+    log_debug "Enabling site..."
     local enabled_site="/etc/nginx/sites-enabled/${SITE_NAME}"
 
     # Check if symlink exists and points to correct target
     if [[ -L "${enabled_site}" ]] && [[ "$(readlink "${enabled_site}")" == "${SITE_CONFIG}" ]]; then
-        log_info "Site already enabled and pointing to correct config"
+        log_debug "Site already enabled and pointing to correct config"
         return 0
     fi
 
@@ -378,7 +422,7 @@ enable_site() {
     ln -sf "${SITE_CONFIG}" "/etc/nginx/sites-enabled/"
     
     CHANGES_MADE='true'
-    log_info "Site enabled"
+    log_info "Nginx site enabled"
 }
 
 # Verify by test configuration and reloads/starts nginx service
@@ -391,7 +435,7 @@ enable_site() {
 #   0 - nginx reloaded successfully
 #   1 - Configuration test failed
 reload_nginx() {
-    log_info "Checking nginx configuration..."
+    log_debug "Checking nginx configuration..."
 
     local is_config_valid=$(nginx -t 2>/dev/null && echo 'true' || echo 'false')
     if [ "${is_config_valid}" = 'false' ]; then
@@ -400,20 +444,20 @@ reload_nginx() {
         return 1
     fi
 
-    log_info "Configuration is valid, reloading nginx..."
+    log_info "Nginx configuration is valid, reloading proxy service..."
     local is_nginx_active=$(systemctl is-active nginx >/dev/null 2>&1 && echo 'true' || echo 'false')
     if [ "${is_nginx_active}" = 'true' ]; then
         systemctl reload nginx
-        log_info "nginx reloaded"
+        log_info "Nginx reloaded"
     else
         systemctl start nginx
-        log_info "nginx started"
+        log_info "Nginx started"
     fi
     return 0
 }
 
 main() {
-    log_info "Starting nginx configuration for work with ATECCx08"
+    log_debug "Starting nginx configuration for work with ATECCx08"
 
     # Check root privileges
     local is_root=$([ "${EUID}" -eq 0 ] && echo 'true' || echo 'false')
@@ -434,20 +478,19 @@ main() {
 
     # Only reload nginx if any changes were made
     if [ "${CHANGES_MADE}" = 'true' ]; then
-        log_info "Changes were made, reloading nginx..."
+        log_info "Detected changes in configuration, applying to Nginx..."
         if ! reload_nginx; then
             exit 1
         fi
     else
-        log_info "No changes made, nginx reload skipped"
+        log_debug "No changes made, nginx reload skipped"
         # Still verify configuration is valid
         if ! nginx -t >/dev/null 2>&1; then
             log_warn "nginx configuration test failed, but no changes were made"
         fi
     fi
 
-    log_info "Setup completed successfully!"
-    log_info "Proxy is available at localhost:8042"
+    log_info "Nginx proxy setup successfully: available at localhost:8042"
 }
 
 main "${@}"
