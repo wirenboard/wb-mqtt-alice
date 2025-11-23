@@ -475,7 +475,8 @@ async def connect_controller(server_address: str) -> bool:
         logger.error("Nginx is not ready after 15 seconds")
     await probe_nginx_until_stable()
 
-    return await ctx.sio_manager.connect()
+    # Connect with infinite attempts (0 = infinite)
+    return await ctx.sio_manager.connect(connection_attempts=0)
 
 
 def _log_and_stop(sig: signal.Signals) -> None:
@@ -547,7 +548,7 @@ async def graceful_shutdown() -> None:
     # Disconnect Socket.IO
     if ctx.sio_manager:
         try:
-            await asyncio.wait_for(ctx.sio_manager.disconnect(), timeout=5.0)
+            await asyncio.wait_for(ctx.sio_manager.disconnect_client(), timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning("Socket.IO disconnect timeout")
 
@@ -655,20 +656,9 @@ async def main() -> int:
 
     ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
     logger.info("Connecting Socket.IO client...")
-
-    connected = await connect_controller(server_address)
-    if not connected:
-        logger.error(
-            "Failed to establish initial Socket.IO connection - "
-            "service will stay running and will retry in background"
-        )
-        if ctx.sio_manager is not None:
-            await ctx.sio_manager.start_custom_reconnect("initial_connect_failed")
-        else:
-            logger.error(
-                "SocketIO manager is not initialized, cannot start custom reconnect loop"
-            )
-
+    
+    # Try to connect with infinite attempts
+    await connect_controller(server_address)
     logger.info("Client initialization continue when connect to server")
 
     # Wait for shutdown signal
