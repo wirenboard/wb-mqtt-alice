@@ -4,7 +4,7 @@
 """
 Socket.IO Event Handlers for Yandex Alice Integration
 
-Contains all Socket.IO event handlers for processing Alice smart home requests
+Contains Socket.IO event handlers for processing Alice smart home requests
 and connection lifecycle events.
 """
 
@@ -15,19 +15,13 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-class SocketIOHandlers:
+class SioAliceHandlers:
     """
-    Centralized Socket.IO event handlers for Alice integration.
+    Centralized Socket.IO event handlers for Alice integration
 
     This class encapsulates all Socket.IO event handling logic:
     - Connection lifecycle (connect, disconnect, errors)
     - Alice device discovery, queries, and actions
-    - Generic server responses
-
-    Separating handlers from the main client improves:
-    - Testability (can mock dependencies)
-    - Maintainability (all handlers in one place)
-    - Readability (clear responsibility separation)
     """
 
     def __init__(
@@ -191,35 +185,6 @@ class SocketIOHandlers:
         # NOTE: Built-in Socket.IO reconnect will NOT try handle connect_error
         #       It reconnection fails permanently, monitor_task via sio.wait()
         #       will detect it and trigger custom reconnection logic
-
-    async def on_response(self, data: Any) -> None:
-        """
-        Handler: Generic server response.
-
-        Args:
-            data: Response data from server
-        """
-        logger.debug("Socket.IO server response: %r", data)
-
-    async def on_error(self, data: Any) -> None:
-        """
-        Handler: Server error message.
-
-        Args:
-            data: Error data from server
-        """
-        logger.debug("Socket.IO server error: %r", data)
-
-    async def on_any_unprocessed(self, event: str, sid: str, data: Any) -> None:
-        """
-        Handler: Catch-all for unprocessed Socket.IO events
-
-        Args:
-            event: Event name
-            sid: Session ID
-            data: Event data
-        """
-        logger.debug("Socket.IO unhandled event %r", event)
 
     # -------------------------------------------------------------------------
     # Alice Smart Home Handlers
@@ -391,13 +356,13 @@ class SocketIOHandlers:
 
     def register_with_manager(self, manager) -> None:
         """
-        Register all event handlers with SocketIOConnectionManager
+        Register all event handlers with SioConnectionManager
 
         Unlike decorators, we use .on() method for better safety - this approach
         helps control all names and objects at any time and in any context
 
         Args:
-            manager: SocketIOConnectionManager instance
+            manager: SioConnectionManager instance
         """
         self._manager = manager
 
@@ -406,16 +371,9 @@ class SocketIOHandlers:
         manager.on("disconnect", self.on_disconnect)
         manager.on("connect_error", self.on_connect_error)
 
-        # Generic Socket.IO events
-        manager.on("response", self.on_response)
-        manager.on("error", self.on_error)
-
-        # Catch-all for unprocessed events
-        manager.on("*", self.on_any_unprocessed)
-
         # Alice Smart Home events
         manager.on("alice_devices_list", self.on_alice_devices_list)
         manager.on("alice_devices_query", self.on_alice_devices_query)
         manager.on("alice_devices_action", self.on_alice_devices_action)
 
-        logger.debug("All handlers registered with SocketIOConnectionManager")
+        logger.debug("All handlers registered with SioConnectionManager")

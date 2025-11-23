@@ -31,8 +31,8 @@ from constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CON
 from device_registry import DeviceRegistry
 from wb_alice_device_state_sender import AliceDeviceStateSender
 from yandex_handlers import send_to_yandex_state, set_emit_callback
-from socketio_handlers import SocketIOHandlers
-from socketio_manager import SocketIOConnectionManager
+from sio_alice_handlers import SioAliceHandlers
+from sio_connection_manager import SioConnectionManager
 
 # Configuration constants
 MQTT_HOST = "localhost"
@@ -68,8 +68,8 @@ class AppContext:
         """
 
         self.stop_event: Optional[asyncio.Event] = None
-        self.sio_manager: Optional[SocketIOConnectionManager] = None
-        self.sio_handlers: Optional[SocketIOHandlers] = None
+        self.sio_manager: Optional[SioConnectionManager] = None
+        self.sio_handlers: Optional[SioAliceHandlers] = None
         self.registry: Optional[DeviceRegistry] = None
         self.mqtt_client: Optional[mqtt_client.Client] = None
         self.controller_sn: Optional[str] = None
@@ -445,7 +445,7 @@ async def connect_controller(server_address: str) -> bool:
     # Create manager + handlers BEFORE nginx probe, for custom reconnect
     # logic may be started even if pre-flight checks fail
     is_debug_log_enabled = logger.getEffectiveLevel() == logging.DEBUG
-    ctx.sio_manager = SocketIOConnectionManager(
+    ctx.sio_manager = SioConnectionManager(
         server_url=LOCAL_PROXY_URL,
         socketio_path=SOCKETIO_PATH,
         controller_sn=ctx.controller_sn,
@@ -458,7 +458,7 @@ async def connect_controller(server_address: str) -> bool:
         custom_reconnect_interval=60,  # 1 minutes
     )
 
-    ctx.sio_handlers = SocketIOHandlers(
+    ctx.sio_handlers = SioAliceHandlers(
         registry=ctx.registry,
         controller_sn=ctx.controller_sn,
         mqtt_client=ctx.mqtt_client,

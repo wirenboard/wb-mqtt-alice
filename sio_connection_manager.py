@@ -25,7 +25,7 @@ except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
 
 
-class SocketIOConnectionManager:
+class SioConnectionManager:
     """
     Manages Socket.IO connection lifecycle
 
@@ -112,7 +112,7 @@ class SocketIOConnectionManager:
         self._should_stop: bool = False
 
         self.disconnect_history: List[Dict[str, Any]] = []
-        logger.debug("SocketIOConnectionManager initialized for %r", server_url)
+        logger.debug("SioConnectionManager initialized for %r", server_url)
 
     # =========================================================================
     # Public API: Event Handler Registration
@@ -263,6 +263,11 @@ class SocketIOConnectionManager:
         client.on("connect", self._on_connect_wrapper)
         client.on("disconnect", self._on_disconnect_wrapper)
         client.on("connect_error", self._on_connect_error_wrapper)
+
+        # TODO(vg): in actual client v5.0.3 (2020-12-14) - event '*'
+        #           not implemented, this added in v5.4.1 (2021-10-14)
+        #           When update to fresh Socket.IO may add this handler here
+        # client.on("*", self._on_any_unprocessed_wrapper)
 
         # Later business callbacks register
         for event, handlers in self._user_handlers.items():
