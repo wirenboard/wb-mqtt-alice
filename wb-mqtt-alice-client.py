@@ -38,7 +38,9 @@ from sio_connection_manager import SioConnectionManager
 MQTT_HOST = "localhost"
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60
-LOCAL_PROXY_URL = "http://localhost:8042"
+LOCAL_PROXY_HOST = "localhost"
+LOCAL_PROXY_PORT = 8042
+LOCAL_PROXY_URL = f"http://{LOCAL_PROXY_HOST}:{LOCAL_PROXY_PORT}"
 SOCKETIO_PATH = "/socket.io"
 
 # Timeouts
@@ -308,8 +310,8 @@ def read_config(filename: str) -> Optional[Dict[str, Any]]:
 
 
 def test_nginx_http_response(
-    host: str = 'localhost',
-    port: int = 8042,
+    host: str = LOCAL_PROXY_HOST,
+    port: int = LOCAL_PROXY_PORT,
     timeout: int = 5
 ) -> Tuple[bool, Optional[int], float, str]:
     """
