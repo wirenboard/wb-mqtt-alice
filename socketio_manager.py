@@ -291,7 +291,9 @@ class SocketIOConnectionManager:
         if getattr(client_tmp, "connected", False):
             try:
                 logger.info("Disconnecting from Socket.IO server...")
-                await asyncio.wait_for(client_tmp.disconnect(), timeout=self.DISCONNECT_TIMEOUT)
+                await asyncio.wait_for(
+                    client_tmp.disconnect(), timeout=self.DISCONNECT_TIMEOUT
+                )
                 logger.info("Socket.IO disconnected successfully")
             except asyncio.TimeoutError:
                 logger.warning("Timeout while disconnecting from Socket.IO server")
@@ -327,7 +329,7 @@ class SocketIOConnectionManager:
         - If client exists and connection is down:
             * if built-in Socket.IO reconnect is active - do nothing
             * if built-in Socket.IO reconnect is not active - connect
-        
+
         Returns:
             - True if connection successful
             - False otherwise
@@ -496,12 +498,6 @@ class SocketIOConnectionManager:
         # Record disconnect and trigger custom reconnection
         self._record_disconnect("permanent_disconnect")
         await self._trigger_custom_reconnection("permanent_disconnect")
-
-        # FIXME: maybe stop event here
-        #        on_disconnect() callback may not call - but this place may better
-        # if not ctx.stop_event.is_set():
-        #     logger.error("SocketIO permanently disconnected, stopping client")
-        #     ctx.stop_event.set()
 
     async def _connection_loop(
         self, initial_reason: str, max_attempts: int = 0
