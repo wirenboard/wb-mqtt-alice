@@ -11,7 +11,6 @@ import asyncio
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
-import contextlib
 
 import socketio
 
@@ -41,6 +40,14 @@ class SocketIOConnectionManager:
     making it easier to add custom reconnection strategies later
     """
 
+    # Connection timeouts (seconds)
+    CONNECT_TIMEOUT = 10.0
+    NAMESPACE_READY_WAIT = 2.0
+    DISCONNECT_TIMEOUT = 5.0
+
+    # Default reconnection interval (seconds)
+    DEFAULT_RECONNECT_INTERVAL = 60
+
     # System events that manager wraps for monitoring/metrics
     SYSTEM_EVENTS = {"connect", "disconnect", "connect_error"}
 
@@ -56,7 +63,7 @@ class SocketIOConnectionManager:
         reconnection_delay_max: int = 60,
         debug_logging: bool = False,
         custom_reconnect_enabled: bool = True,
-        custom_reconnect_interval: int = 1200,  # 20 minutes
+        custom_reconnect_interval: int = DEFAULT_RECONNECT_INTERVAL,
     ):
         """
         Initialize Socket.IO Connection Manager
@@ -72,7 +79,7 @@ class SocketIOConnectionManager:
             debug_logging: Enable Socket.IO debug logging
 
             custom_reconnect_enabled: Enable custom 20-min reconnection logic
-            custom_reconnect_interval: Interval between custom reconnect attempts (seconds)
+            custom_reconnect_interval: Interval between reconnect attempts (seconds)
         """
         self.server_url = server_url
         self.socketio_path = socketio_path
@@ -284,13 +291,12 @@ class SocketIOConnectionManager:
         if getattr(client_tmp, "connected", False):
             try:
                 logger.info("Disconnecting from Socket.IO server...")
-                await asyncio.wait_for(client_tmp.disconnect_client(), timeout=5.0)
+                await asyncio.wait_for(client_tmp.disconnect(), timeout=self.DISCONNECT_TIMEOUT)
                 logger.info("Socket.IO disconnected successfully")
             except asyncio.TimeoutError:
                 logger.warning("Timeout while disconnecting from Socket.IO server")
             except Exception as e:
                 logger.warning("Error during Socket.IO disconnect: %r", e)
-
 
     async def connect(self, *, connection_attempts: int = 1) -> bool:
         """
@@ -307,18 +313,24 @@ class SocketIOConnectionManager:
             False if all attempts failed
         """
         return await self._connection_loop(
-            reason="initial_connect",
-            max_attempts=connection_attempts
+            reason="initial_connect", max_attempts=connection_attempts
         )
 
     async def _connect_once(self) -> bool:
         """
-        Make a single connection Socket.IO attempt
-          - Establish Socket.IO connection
-          - Creates client internally and connects to server
+        Make a single connection attempt using existing Socket.IO client
+        Client is created once and reused for all connection attempts
 
+        This method is idempotent:
+        - If client exists and connection is up - do nothing
+        - If client does not exist - create client and connect
+        - If client exists and connection is down:
+            * if built-in Socket.IO reconnect is active - do nothing
+            * if built-in Socket.IO reconnect is not active - connect
+        
         Returns:
-            True if connection successful, False otherwise
+            - True if connection successful
+            - False otherwise
         """
         try:
             self._event_loop = asyncio.get_running_loop()
@@ -326,21 +338,28 @@ class SocketIOConnectionManager:
             logger.error("connect() called outside async context")
             return False
 
-        # FIXME: On this place logig must be different - connect idempotent
-        #        - If client exist and connect up - not do anything
-        #        - If client exist - but connect down - check reconect task
-        #          may be work standart mechanism Socket.IO
-        #        - If client exist, connection down, and Socket.IO reconnect
-        #          task not active - connect
-        #        - If client not exist - create client and connect
+        # If client already exists and connection is active - do nothing
+        if self._sio_client is not None and self.is_connected():
+            logger.info(
+                "Socket.IO client already connected, skipping new connect() attempt"
+            )
+            return True
 
-        # If client is already exists - kill it
-        if self._sio_client is not None:
-            with contextlib.suppress(Exception):
-                await self._close_client()
-        self._sio_client = self._create_client()
-        logger.debug("Created new Socket.IO client instance")
+        # If client exists but built-in auto-reconnect is currently working,
+        # do not interfere with internal reconnection loop
+        if self._sio_client is not None and self._is_builtin_reconnect_active():
+            logger.info(
+                "Socket.IO built-in reconnection is in progress, "
+                "skipping manual connect() attempt"
+            )
+            return False
 
+        # Create client only once - reuse for all connection attempts
+        if self._sio_client is None:
+            self._sio_client = self._create_client()
+            logger.debug("Created new Socket.IO client instance")
+        else:
+            logger.debug("Reusing existing Socket.IO client instance for connect()")
         logger.info("Connecting Socket.IO client to %r...", self.server_url)
 
         try:
@@ -353,17 +372,13 @@ class SocketIOConnectionManager:
                     transports=["websocket"],  # Need sticky WebSocket sessions
                     headers={"WB-Client-Pkg-Ver": self.client_pkg_ver},
                 ),
-                timeout=10.0,
+                timeout=self.CONNECT_TIMEOUT,
             )
         except socketio.exceptions.ConnectionError as e:
             logger.warning("Socket.IO Connection Failed: %r", str(e))
-            with contextlib.suppress(Exception):
-                await self._close_client()
             return False
         except asyncio.TimeoutError:
             logger.warning("Socket.IO Connection Timeout (>10s)")
-            with contextlib.suppress(Exception):
-                await self._close_client()
             return False
         except Exception as e:
             logger.exception(
@@ -371,8 +386,6 @@ class SocketIOConnectionManager:
                 type(e).__name__,
                 str(e),
             )
-            with contextlib.suppress(Exception):
-                await self._close_client()
             return False
 
         # Wait for namespace to be ready (important for socketio 5.0.3)
@@ -380,7 +393,7 @@ class SocketIOConnectionManager:
         #            connected.
         # On this moment simply sleep, this not critical error, but show
         # in log msg - ...
-        await asyncio.sleep(2)
+        await asyncio.sleep(self.NAMESPACE_READY_WAIT)
         namespace = "/"
         # Check if client still connected
         if not self._sio_client.connected:
@@ -398,14 +411,15 @@ class SocketIOConnectionManager:
         self.connected_at = time.monotonic()
         logger.info("Socket.IO connected successfully")
 
-        # Start tasks
-        try:
-            self._monitor_task = asyncio.create_task(
-                self._monitor_connection(), name="socketio-monitor"
-            )
-            logger.debug("Started connection monitor task")
-        except Exception:
-            logger.exception("Failed to start monitoring tasks")
+        # Start monitor task only if not already running
+        if self._monitor_task is None or self._monitor_task.done():
+            try:
+                self._monitor_task = asyncio.create_task(
+                    self._monitor_connection(), name="socketio-monitor"
+                )
+                logger.debug("Started connection monitor task")
+            except Exception:
+                logger.exception("Failed to start monitoring tasks")
 
         return True
 
@@ -427,9 +441,7 @@ class SocketIOConnectionManager:
         logger.debug("Recorded disconnect: %r", event)
 
     async def _trigger_custom_reconnection(
-        self,
-        reason: str,
-        max_attempts: int = 0
+        self, reason: str, max_attempts: int = 0
     ) -> None:
         """Trigger custom reconnection logic"""
         if not self._custom_reconnect_enabled:
@@ -439,26 +451,26 @@ class SocketIOConnectionManager:
             logger.debug("Reconnection already in progress, skipping trigger")
             return
 
-        if self._reconnection_task and not self._reconnection_task.done():
-            logger.debug("Reconnection task already running, skipping trigger")
-            return
-
-        self._is_reconnecting = True
-
         # Cancel existing reconnection task if any
         if self._reconnection_task and not self._reconnection_task.done():
+            logger.debug("Reconnection task already running, cancel it")
             self._reconnection_task.cancel()
             try:
                 await self._reconnection_task
             except asyncio.CancelledError:
                 pass
 
+        self._is_reconnecting = True
+
         # Start new reconnection loop
         self._reconnection_task = asyncio.create_task(
             self._connection_loop(reason, max_attempts)
         )
-        logger.info("Started reconnection task (reason: %r, max_attempts=%s)",
-                    reason, "infinite" if max_attempts == 0 else max_attempts)
+        logger.info(
+            "Started reconnection task (reason: %r, max_attempts=%s)",
+            reason,
+            "infinite" if max_attempts == 0 else max_attempts,
+        )
 
     async def _monitor_connection(self) -> None:
         """
@@ -491,11 +503,8 @@ class SocketIOConnectionManager:
         #     logger.error("SocketIO permanently disconnected, stopping client")
         #     ctx.stop_event.set()
 
-
     async def _connection_loop(
-        self,
-        initial_reason: str,
-        max_attempts: int = 0
+        self, initial_reason: str, max_attempts: int = 0
     ) -> bool:
         """
         Connection loop with configurable attempts
@@ -515,6 +524,13 @@ class SocketIOConnectionManager:
             initial_reason,
             "infinite" if max_attempts == 0 else max_attempts,
         )
+
+        if self._sio_client is not None and self.is_connected():
+            logger.info(
+                "Connection loop requested, but Socket.IO client is already connected"
+            )
+            self._is_reconnecting = False
+            return True
 
         while not self._should_stop and (max_attempts == 0 or attempt < max_attempts):
             attempt += 1
@@ -538,37 +554,56 @@ class SocketIOConnectionManager:
             logger.info("Connection attempt #%d...", attempt)
 
             try:
-                # Stop tasks before reconnecting
+                # Stop monitor task before reconnecting (will be restarted on success)
                 if self._monitor_task and not self._monitor_task.done():
                     self._monitor_task.cancel()
                     try:
                         await self._monitor_task
                     except asyncio.CancelledError:
                         pass
-                
-                # Try to reconnect with new client
-                logger.debug("Recreating Socket.IO client for reconnection")
-                success = await self._connect_once()
 
+                success = await self._connect_once()
                 if success:
-                    logger.info(
-                        "Connection successful after %d attempt(s)", attempt
-                    )
+                    logger.info("Connection successful after %d attempt(s)", attempt)
                     self._is_reconnecting = False
                     return True  # Exit loop on success
                 else:
                     logger.warning("Connection attempt #%d failed", attempt)
 
             except Exception as e:
-                logger.exception(
-                    "Error during connection attempt #%d: %r", attempt, e
-                )
+                logger.exception("Error during connection attempt #%d: %r", attempt, e)
         if max_attempts != 0 and attempt >= max_attempts:
-            logger.error("Connection loop exited after %d attempts (max reached)", attempt)
+            logger.error(
+                "Connection loop exited after %d attempts (max reached)", attempt
+            )
         else:
             logger.error("Connection loop exited (shutdown requested)")
         self._is_reconnecting = False
         return False  # All attempts failed
+
+    def _is_builtin_reconnect_active(self) -> bool:
+        """
+        Detection of built-in Socket.IO auto-reconnect state
+
+        For python-socketio 5.0.3 the AsyncClient keeps a private
+        `_reconnect_task` attribute. When it is not None and not done(),
+        the internal reconnect loop is active
+
+        Returns:
+            True if a reconnect task seems to be running, False otherwise.
+        """
+        if self._sio_client is None:
+            return False
+
+        reconnect_task = getattr(self._sio_client, "_reconnect_task", None)
+        if reconnect_task is None:
+            return False
+
+        try:
+            return not reconnect_task.done()
+        except Exception:
+            # In case it's not the expected type – treat as inactive
+            return False
 
     def is_connected(self) -> bool:
         """
