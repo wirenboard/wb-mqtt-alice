@@ -309,7 +309,7 @@ class SioConnectionManager:
         """
         Establish Socket.IO connection with retry logic
 
-        Args:
+        Args: connection_attempts implemented as named param for clear call
             connection_attempts: Total number of connection attempts
                    0 = infinite attempts (keep trying until success or shutdown)
                    1 = single attempt (default)
@@ -320,7 +320,7 @@ class SioConnectionManager:
             False if all attempts failed
         """
         return await self._connection_loop(
-            reason="initial_connect", max_attempts=connection_attempts
+            connect_reason="initial_connect", max_attempts=connection_attempts
         )
 
     async def _connect_once(self) -> bool:
@@ -448,7 +448,7 @@ class SioConnectionManager:
         logger.debug("Recorded disconnect: %r", event)
 
     async def _trigger_custom_reconnection(
-        self, reason: str, max_attempts: int = 0
+        self, connect_reason: str, max_attempts: int = 0
     ) -> None:
         """Trigger custom reconnection logic"""
         if not self._custom_reconnect_enabled:
@@ -471,11 +471,11 @@ class SioConnectionManager:
 
         # Start new reconnection loop
         self._reconnection_task = asyncio.create_task(
-            self._connection_loop(reason, max_attempts)
+            self._connection_loop(connect_reason, max_attempts)
         )
         logger.info(
-            "Started reconnection task (reason: %r, max_attempts=%s)",
-            reason,
+            "Started reconnection task (connect_reason: %r, max_attempts=%s)",
+            connect_reason,
             "infinite" if max_attempts == 0 else max_attempts,
         )
 
@@ -505,13 +505,14 @@ class SioConnectionManager:
         await self._trigger_custom_reconnection("permanent_disconnect")
 
     async def _connection_loop(
-        self, initial_reason: str, max_attempts: int = 0
+        self, connect_reason: str, max_attempts: int = 0
     ) -> bool:
         """
         Connection loop with configurable attempts
 
         Args:
-            initial_reason: Reason for the initial disconnect
+            connect_reason: Human-readable reason why connection loop is started
+                            (e.g. 'initial_connect', 'permanent_disconnect')
             max_attempts: Maximum number of attempts (0 = infinite)
 
         Returns:
@@ -522,7 +523,7 @@ class SioConnectionManager:
 
         logger.warning(
             "Starting connection loop (reason: %r, max_attempts=%s)",
-            initial_reason,
+            connect_reason,
             "infinite" if max_attempts == 0 else max_attempts,
         )
 
