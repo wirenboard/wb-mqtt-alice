@@ -700,4 +700,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.exception("Unhandled exception: %r", e)
     finally:
-        logger.info("wb-alice-client stopped")
+        logger.warning("Client shutdown complete — exiting service")
