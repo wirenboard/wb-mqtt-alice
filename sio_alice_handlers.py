@@ -223,8 +223,8 @@ class SioAliceHandlers:
             },
         }
 
-        logger.info("Sending device list response to Yandex:")
-        logger.info(json.dumps(devices_list_response, ensure_ascii=False, indent=2))
+        logger.info("Sending device list response to Yandex")
+        logger.debug(json.dumps(devices_list_response, ensure_ascii=False, indent=2))
         return devices_list_response
 
     async def on_alice_devices_query(self, data: Dict[str, Any]) -> Dict[str, Any]:

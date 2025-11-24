@@ -367,11 +367,23 @@ class SioConnectionManager:
             logger.debug("Created new Socket.IO client instance")
         else:
             logger.debug("Reusing existing Socket.IO client instance for connect()")
+
+            # In v5.0.3 when get 'connect_error' - eio session not closed
+            # If we try connect without disconnect() - we get error from eio:
+            #   - 'ValueError': 'Client is not in a disconnected state'
+            # Ensure client is in disconnected state before reconnecting
+            if not self.is_connected():
+                try:
+                    await self._sio_client.disconnect()
+                    logger.debug(
+                        "Ensured client is disconnected before reconnect attempt"
+                    )
+                except Exception as e:
+                    logger.debug("disconnect() during cleanup raised: %r", e)
+
         logger.info("Connecting Socket.IO client to %r...", self.server_url)
 
         try:
-            # Connect to local Nginx proxy which forwards to actual server
-            # "controller_sn" is passed via SSL certificate when Nginx proxies
             await asyncio.wait_for(
                 self._sio_client.connect(
                     self.server_url,
@@ -405,6 +417,8 @@ class SioConnectionManager:
         # Check if client still connected
         if not self._sio_client.connected:
             logger.warning("Client disconnected while waiting for namespace")
+            # This may happen when client get errom message from server:
+            # - "YANDEX_SKILL_NOT_LINKED"
             return False
         # Check if namespace registered
         if (
@@ -521,8 +535,8 @@ class SioConnectionManager:
         """
         attempt = 0
 
-        logger.warning(
-            "Starting connection loop (reason: %r, max_attempts=%s)",
+        logger.info(
+            "Starting connection loop (connect_reason: %r, max_attempts=%s)",
             connect_reason,
             "infinite" if max_attempts == 0 else max_attempts,
         )

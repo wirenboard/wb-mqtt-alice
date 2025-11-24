@@ -478,6 +478,8 @@ async def connect_controller(server_address: str) -> bool:
     await probe_nginx_until_stable()
 
     # Connect with infinite attempts (0 = infinite)
+    # NOTE: Connect to local Nginx proxy which forwards to actual server
+    #       "controller_sn" is passed via SSL certificate when Nginx proxies
     return await ctx.sio_manager.connect(connection_attempts=0)
 
 
