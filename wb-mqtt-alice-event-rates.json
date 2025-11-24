@@ -32,7 +32,7 @@
     "rate_rule": "last_value"
   },
   "devices.properties.float": {
-    "rate_timer": 60,
+    "rate_timer": 120,
     "rate_rule": "last_value"
   },
   "devices.properties.event": {

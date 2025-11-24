@@ -228,8 +228,7 @@ class DeviceRegistry:
         Returns:
             List of devices for /user/devices endpoint response
         """
-
-        logger.info("Building device list from %r devices", len(self.devices))
+        logger.debug("Building device list from %r devices", len(self.devices))
 
         devices_out: List[Dict[str, Any]] = []
 
@@ -301,9 +300,9 @@ class DeviceRegistry:
 
             devices_out.append(device)
 
-        logger.info("Final device list contains %r devices:", len(devices_out))
+        logger.debug("Final device list contains %r devices:", len(devices_out))
         for i, device in enumerate(devices_out):
-            logger.info("  %r. %r - %r", i + 1, device["id"], device["name"])
+            logger.debug("  %r. %r - %r", i + 1, device["id"], device["name"])
 
         return devices_out
 
