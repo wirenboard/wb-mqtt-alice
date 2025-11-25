@@ -342,32 +342,18 @@ def should_enable_client(config: Config) -> bool:
     """
     Check the minimum conditions for enabling the client
 
-    Both conditions must be met for client to be enabled:
+    One condition must be met for client to be enabled:
     - Integrations flagged
-    - Controller is registered (unlink_url is set)
     Args:
         config: Configuration object
     Returns:
-        - True if client should be enabled
-        - False otherwise
+        - flag from "client_enabled" in client_config
     """
 
     client_config = load_client_config()
+    logger.debug("[should_enable_client] : flag in config file - %s", client_config.client_enabled)
 
-    if not client_config.client_enabled:
-        logger.debug("Client should be disabled: integration not enabled")
-        return False
-
-    is_registered = bool(config.unlink_url)
-
-    if not is_registered:
-        logger.debug("Client should be disabled: controller not registered (no unlink_url)")
-        return False
-
-    logger.debug(
-        "Client should be enabled: integration enabled, controller registered"
-    )
-    return True
+    return client_config.client_enabled
 
 
 def sync_registration_status(config: Config) -> Config:
@@ -801,7 +787,10 @@ async def enable_integration(request: Request):
     request_data = await request.json()
     requested_status = request_data.get("enabled", False)
 
-    # Check controller linked status before enabling integration
+    # Update integration config
+    client_config.client_enabled = requested_status
+    save_client_config(client_config)
+
     if requested_status:
         # Use fetch_url to check current link status
         try:
@@ -823,9 +812,6 @@ async def enable_integration(request: Request):
 
             # Controller not linked if registration_url present or data empty
             if not data or ("registration_url" in data):
-                # Update integration config
-                client_config.client_enabled = requested_status
-                save_client_config(client_config)
                 raise HTTPException(
                     status_code=HTTPStatus.PRECONDITION_FAILED,
                     detail=get_translation("controller_not_linked", language),
@@ -833,9 +819,6 @@ async def enable_integration(request: Request):
 
             # Controller linked if detail exists
             if not (isinstance(data, dict) and data.get("detail")):
-                # Update integration config
-                client_config.client_enabled = requested_status
-                save_client_config(client_config)
                 raise HTTPException(
                     status_code=HTTPStatus.PRECONDITION_FAILED,
                     detail=get_translation("controller_status_unknown", language),
@@ -849,13 +832,10 @@ async def enable_integration(request: Request):
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 detail=get_translation("server_unavailable", language),
             )
-
-    # Update integration config
-    client_config.client_enabled = requested_status
-    save_client_config(client_config)
-
-    force_client_reload_config()
-
+        finally:
+            force_client_reload_config()
+    else:
+        force_client_reload_config()
     return {"message": get_translation("integration_enabled", language)}
 
 
