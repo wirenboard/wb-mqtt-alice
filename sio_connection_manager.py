@@ -219,15 +219,10 @@ class SioConnectionManager:
 
     async def _on_connect_error_wrapper(self, data: Any) -> None:
         """
-        System wrapper for 'connect_error' event.
+        System wrapper for 'connect_error' event
 
-        Manager responsibilities:
-        1. Record error details
-        2. Log error
-        3. Call user handler (if registered)
-
-        Note: Built-in Socket.IO reconnect will handle retries automatically.
-        If all attempts fail, monitor_task will trigger custom reconnection.
+        Note: Built-in Socket.IO reconnect will handle retries automatically
+        If all attempts fail, monitor_task will trigger custom reconnection
         """
         reason_raw = str(data).strip()
         self._record_disconnect(f"connect_error: {reason_raw}")
@@ -239,6 +234,23 @@ class SioConnectionManager:
                 await self._user_handlers["connect_error"](data)
             except Exception as e:
                 logger.exception("Error in user connect_error handler: %r", e)
+
+        # NOTE: This important if we get connect_error handling while work
+        #       standart Socket.IO reconnect mechanizm, not custom connect loop
+        # If not disconnect current client force - engine.io can work and
+        # we not get disconnect event -> sio.wait() not stop and we are looped
+        # client and server work with PING/PONG messages
+        if getattr(self._sio_client, "connected", False):
+            try:
+                logger.debug("Disconnecting from Socket.IO server after error")
+                await asyncio.wait_for(
+                    self._sio_client.disconnect(), timeout=self.DISCONNECT_TIMEOUT
+                )
+                logger.info("Socket.IO disconnected successfully")
+            except asyncio.TimeoutError:
+                logger.warning("Timeout while disconnecting from Socket.IO server")
+            except Exception as e:
+                logger.warning("Error during Socket.IO disconnect: %r", e)
 
     def _create_client(self) -> socketio.AsyncClient:
         """
