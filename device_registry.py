@@ -97,14 +97,14 @@ class DeviceRegistry:
         try:
             config_data = Path(path).read_text(encoding="utf-8")
             config_data = json.loads(config_data)
-            logger.info(
+            logger.debug(
                 "Config loaded: %r",
                 json.dumps(config_data, indent=2, ensure_ascii=False),
             )
             logger.info("Try to read event rates from %r", CONFIG_EVENTS_RATE_PATH)
             config_evets = Path(self._cfg_events_path).read_text(encoding="utf-8")
             config_evets = json.loads(config_evets)
-            logger.info(
+            logger.debug(
                 "Config loaded: %r",
                 json.dumps(config_evets, indent=2, ensure_ascii=False),
             )

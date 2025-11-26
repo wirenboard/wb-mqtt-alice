@@ -27,6 +27,10 @@ import socket
 
 import paho.mqtt.client as mqtt_client
 
+from importlib.metadata import PackageNotFoundError, version
+import socketio
+import engineio
+
 from constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CONFIG_PATH
 from device_registry import DeviceRegistry
 from wb_alice_device_state_sender import AliceDeviceStateSender
@@ -51,6 +55,20 @@ RECONNECT_DELAY_MAX = 60
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
+
+try:
+    # Client and server MUST have same Socket.IO versions = 5.0.3
+    logger.debug("Socket.IO module path: %s", socketio.__file__)
+    logger.debug("python-socketio version: %r", version("python-socketio"))
+except PackageNotFoundError:
+    logger.warning("python-socketio is not installed.")
+
+try:
+    # Client and server MUST have same Engine.IO versions = 4.0.0
+    logger.debug("Engine.IO module path: %s", engineio.__file__)
+    logger.debug("python-engineio version: %r", version("python-engineio"))
+except PackageNotFoundError:
+    logger.warning("python-engineio is not installed.")
 
 
 class AppContext:
