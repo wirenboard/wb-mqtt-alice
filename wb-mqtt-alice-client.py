@@ -57,12 +57,14 @@ logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
 try:
+    # Client and server MUST have same Socket.IO versions = 5.0.3
     logger.debug("Socket.IO module path: %s", socketio.__file__)
     logger.debug("python-socketio version: %r", version("python-socketio"))
 except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
 
 try:
+    # Client and server MUST have same Engine.IO versions = 4.0.0
     logger.debug("Engine.IO module path: %s", engineio.__file__)
     logger.debug("python-engineio version: %r", version("python-engineio"))
 except PackageNotFoundError:
