@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.7.2) stable; urgency=medium
+
+  * Set default rate timer to 5 minutes for yandex properties(float).
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Fri, 28 Nov 2025 11:20:00 +0300
+
 wb-mqtt-alice (0.7.1) stable; urgency=medium
 
   * Fix always restart the client after changing the integration flag
