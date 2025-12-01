@@ -20,6 +20,10 @@ from converters import (
     convert_temp_percent_to_kelvin,
     convert_temp_kelvin_to_percent,
     convert_to_bool,
+    handle_battery_level,
+    handle_food_level,
+    handle_motion,
+    handle_water_level,
 )
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
 from mqtt_topic import MQTTTopic
@@ -368,10 +372,48 @@ class DeviceRegistry:
                 # Other color_setting instances (e.g., color_scene) - passthrough
                 return raw
 
+        elif cap_type == "devices.properties.event":
+            # For event properties, we want to send the post processing raw value
+            return self._convert_events_to_yandex(instance, params.get("unit"), raw)
         else:
             # Unknown capability types - passthrough as string
             return raw
 
+    def _convert_events_to_yandex(self, instance: Optional[str], unit: Optional[str], raw: str) -> str:
+        """
+        Convert raw event property value to Yandex format using handler functions for each instance type.
+
+        Args:
+            instance: Property instance identifier
+            unit: Property unit from configuration
+            raw: Raw MQTT payload string
+
+        Returns:
+            Converted value in Yandex format. For unknown or unhandled instances, the raw value is returned as-is.
+        """
+        # Coerce and normalize raw payload early
+        raw = "" if raw is None else raw.strip() if isinstance(raw, str) else raw
+        if not instance:
+            logger.debug("No instance provided for event property, returning raw value")
+            return raw
+        # Mapping of event instance to handler function for extensibility
+        event_handlers = {
+            "motion": handle_motion,
+            "battery_level": handle_battery_level,
+            "food_level": handle_food_level,
+            "water_level": handle_water_level,
+        }
+
+        handler = event_handlers.get(instance)
+        if handler:
+            return handler(raw)
+        is_event_occurred = raw.lower() in ("1", "true", "on")
+        if is_event_occurred:
+            logger.debug("Event occurred for instance %r, unit %r", instance, unit)
+            if isinstance(unit, str) and unit:
+                return unit.split(".")[-1]
+            return raw
+        return raw
 
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
         """
