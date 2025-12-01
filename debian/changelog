@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.7.3) stable; urgency=medium
+
+  * Add support for events
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Mon, 01 Dec 2025 13:30:00 +0300
+
 wb-mqtt-alice (0.7.2) stable; urgency=medium
 
   * Set default rate timer to 5 minutes for yandex properties(float)
