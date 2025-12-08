@@ -852,8 +852,6 @@ def get_enable_integration(request: Request):
 async def unlink_controller(request: Request):
     """Unlink controller"""
     language = get_language(request)
-    client_cfg = load_client_config()
-    server_address = client_cfg.get("server_address")
     key_id = get_key_id(controller_version)
 
     try:
