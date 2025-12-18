@@ -21,10 +21,6 @@ from converters import (
     convert_temp_percent_to_kelvin,
     convert_temp_kelvin_to_percent,
     convert_to_bool,
-    handle_battery_level,
-    handle_food_level,
-    handle_motion,
-    handle_water_level,
     convert_mqtt_event_value,
 )
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
