@@ -11,6 +11,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from collections import defaultdict
 
 import paho.mqtt.subscribe as subscribe
 
@@ -24,6 +25,7 @@ from converters import (
     handle_food_level,
     handle_motion,
     handle_water_level,
+    convert_mqtt_event_value,
 )
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
 from mqtt_topic import MQTTTopic
@@ -33,8 +35,94 @@ from wb_alice_device_event_rate import AliceDeviceEventRate
 logger = logging.getLogger(__name__)
 
 
+def is_property_event(prop:str="")->bool:
+    """
+    Return True if the event property equals "devices.properties.event"
+    """
+    if prop.lower() == "devices.properties.event":
+        return True
+    return False
+
+
+def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    other_props: List[Dict[str, Any]] = []
+    events_by_instance: Dict[str, List[str]] = defaultdict(list)
+
+    for p in props:
+        try:
+            p_type = p.get("type")
+        except Exception:
+            p_type = None
+        if is_property_event(p_type):
+            params = p.get("parameters") or {}
+            instance = params.get("instance")
+            value = params.get("value")
+            if instance is None:
+                other_props.append(p)
+                continue
+            val = extract_event_value(value)
+            if val not in events_by_instance[instance]:
+                events_by_instance[instance].append(val)
+        else:
+            other_props.append(p)
+
+    merged_events_props: List[Dict[str, Any]] = []
+    for instance, values in events_by_instance.items():
+        events_list = []
+        for v in values:
+            if v == "":
+                continue
+            events_list.append({"value": v})
+        if not events_list:
+            continue
+        merged = {
+            "type": "devices.properties.event",
+            "retrievable": False,
+            "reportable": True,
+            "parameters": {
+                "instance": instance,
+                "events": events_list,
+            },
+        }
+        merged_events_props.append(merged)
+
+    return other_props + merged_events_props
+
+
+def transform(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        new = {}
+        for k, v in obj.items():
+            if k == "properties" and isinstance(v, list):
+                new[k] = merge_properties_list(v)
+            else:
+                new[k] = transform(v)
+        return new
+    elif isinstance(obj, list):
+        return [transform(i) for i in obj]
+    else:
+        return obj
+
+
+def extract_event_value(value: Any) -> str:
+    """Convert parameter ``value`` to an event string.
+
+    If ``value`` contains a dot, return the substring after the last dot.
+    Otherwise return ``str(value)``.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return str(value)
+    if "." in value:
+        return value.split(".")[-1]
+    return value
+
+
 async def read_topic_once(
-    topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0
+    topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0,
+    prop_type: str="",
+    unit_type: tuple=()
 ) -> Optional[Any]:
     """
     Reads a single retained MQTT message in a separate thread
@@ -55,6 +143,13 @@ async def read_topic_once(
         )
         if res:
             payload = res.payload.decode().strip()
+            if is_property_event(prop_type):
+                res.payload = convert_mqtt_event_value(
+                    event_type=unit_type[0],
+                    event_type_value=unit_type[-1],
+                    value=res.payload.decode().strip()
+                ).encode()
+
             logger.debug("Current topic %r state payload: %r", topic, payload)
         else:
             logger.debug("Current topic %r state: None", topic)
@@ -155,7 +250,7 @@ class DeviceRegistry:
                 index_key = (
                     device_id,
                     prop["type"],
-                    prop.get("parameters", {}).get("instance"),
+                    self._get_instance(prop),
                 )
                 self.cap_index[index_key] = full
 
@@ -280,7 +375,7 @@ class DeviceRegistry:
             for prop in dev.get("properties", []):
                 prop_obj = {
                     "type": prop["type"],
-                    "retrievable": True,
+                    "retrievable": True if not is_property_event(prop["type"]) else False,
                     "reportable": True,
                 }
                 # Always send "instance", but "unit" only if present in config
@@ -288,9 +383,9 @@ class DeviceRegistry:
                 instance = params.get("instance")
                 if instance:
                     prop_params: Dict[str, Any] = {"instance": instance}
-                    unit_cfg = params.get("unit")
+                    unit_cfg = params.get("value")
                     if isinstance(unit_cfg, str) and unit_cfg.strip():
-                        prop_params["unit"] = unit_cfg.strip()
+                        prop_params["value"] = unit_cfg.strip()
                     prop_obj["parameters"] = prop_params
                 else:
                     logger.warning(
@@ -301,13 +396,15 @@ class DeviceRegistry:
                 props.append(prop_obj)
             if props:
                 device["properties"] = props
-
+                for _prop in props:
+                    if is_property_event(_prop.get("type","")):
+                        device["properties"] = merge_properties_list(props)
+                        break
             devices_out.append(device)
 
         logger.debug("Final device list contains %r devices:", len(devices_out))
         for i, device in enumerate(devices_out):
             logger.debug("  %r. %r - %r", i + 1, device["id"], device["name"])
-
         return devices_out
 
     def _convert_cap_to_yandex(
@@ -372,20 +469,20 @@ class DeviceRegistry:
                 # Other color_setting instances (e.g., color_scene) - passthrough
                 return raw
 
-        elif cap_type == "devices.properties.event":
+        elif is_property_event(cap_type):
             # For event properties, we want to send the post processing raw value
-            return self._convert_events_to_yandex(instance, params.get("unit"), raw)
+            return self._convert_events_to_yandex(instance, params.get("value"), raw)
         else:
             # Unknown capability types - passthrough as string
             return raw
 
-    def _convert_events_to_yandex(self, instance: Optional[str], unit: Optional[str], raw: str) -> str:
+    def _convert_events_to_yandex(self, instance: Optional[str], value: Optional[str], raw: str) -> str:
         """
         Convert raw event property value to Yandex format using handler functions for each instance type.
 
         Args:
             instance: Property instance identifier
-            unit: Property unit from configuration
+            value: Property value from configuration
             raw: Raw MQTT payload string
 
         Returns:
@@ -396,22 +493,19 @@ class DeviceRegistry:
         if not instance:
             logger.debug("No instance provided for event property, returning raw value")
             return raw
-        # Mapping of event instance to handler function for extensibility
-        event_handlers = {
-            "motion": handle_motion,
-            "battery_level": handle_battery_level,
-            "food_level": handle_food_level,
-            "water_level": handle_water_level,
-        }
-
-        handler = event_handlers.get(instance)
-        if handler:
-            return handler(raw)
-        is_event_occurred = raw.lower() in ("1", "true", "on")
+        # UNCOMMENT if need to mapping of event instance to handler function for extensibility
+        # event_handlers = {
+        #     "motion": handle_motion,
+        #     etc..
+        # }
+        # handler = event_handlers.get(instance)
+        # if handler:
+        #     return handler(raw)
+        is_event_occurred = raw.lower() not in ("0", "false", "off")
         if is_event_occurred:
-            logger.debug("Event occurred for instance %r, unit %r", instance, unit)
-            if isinstance(unit, str) and unit:
-                return unit.split(".")[-1]
+            logger.debug("Event occurred for instance %r, value %r", instance, value)
+            if isinstance(value, str) and value:
+                return extract_event_value(value)
             return raw
         return raw
 
@@ -432,6 +526,12 @@ class DeviceRegistry:
         cap_type = blk["type"]
         instance = blk.get("parameters", {}).get("instance")
         try:
+            if is_property_event(cap_type):
+                raw = convert_mqtt_event_value(
+                    event_type=instance,
+                    event_type_value=extract_event_value(blk.get("parameters", {}).get("value")),
+                    value=raw,
+                )
             value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
             self._send_to_yandex(device_id, cap_type, instance, value)
         except (ValueError, TypeError) as e:
@@ -504,7 +604,6 @@ class DeviceRegistry:
         else:
             # Unknown capability types - passthrough as string
             return str(value)
-
 
     async def forward_yandex_to_mqtt(
         self,
@@ -584,9 +683,17 @@ class DeviceRegistry:
             logger.warning("Failed to convert value for %r: %r", key, e)
             return None
 
+    def _get_instance(self, prop: Dict[str, Any])->str:
+        prop_type = prop["type"]
+        index_key_param = prop.get("parameters", {}).get("instance")
+        index_key_param_unit = ""
+        if is_property_event(prop["type"]):
+            index_key_param_unit = extract_event_value(prop.get("parameters", {}).get("value"))
+        return index_key_param, index_key_param_unit
+
     async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         prop_type = prop["type"]
-        instance = prop.get("parameters", {}).get("instance")
+        instance = self._get_instance(prop)
         key = (device_id, prop_type, instance)
 
         topic = self.cap_index.get(key)
@@ -594,17 +701,20 @@ class DeviceRegistry:
             logger.debug("No MQTT topic found for property: %r", key)
             return None
         try:
-            msg = await read_topic_once(topic, timeout=1)
+            msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, unit_type=instance)
             if msg is None:
                 logger.debug("No retained payload in %r", topic)
                 return None
             raw = msg.payload.decode().strip()
-            value = float(raw)  # Currently only float is supported
+            try:                
+                value = float(raw)  # Currently only float is supported
+            except ValueError:
+                value = raw
 
             return {
                 "type": prop_type,
                 "state": {
-                    "instance": instance,
+                    "instance": instance[0],
                     "value": value,
                 },
             }
@@ -633,8 +743,18 @@ class DeviceRegistry:
         for prop in device.get("properties", []):
             logger.debug("Reading property state: %r", prop)
             prop_state = await self._read_property_state(device_id, prop)
+            if is_property_event(prop.get("type","")):
+                if prop_state is not None:
+                    prop_state = {
+                        "type": prop.get("type"),
+                        "state": {
+                            "instance": prop.get("parameters",{}).get("instance",""),
+                            "value": "online",
+                        },
+                    }
             if prop_state:
                 properties_output.append(prop_state)
+                break
 
         # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:

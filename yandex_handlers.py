@@ -81,7 +81,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
 
 def _event_prop(device_id: str, instance: Optional[str], value: Any) -> None:
     # Directly send event property to server, value is array of events
-    send_state_to_server(device_id, PROP_EVENT, instance, [value])
+    send_state_to_server(device_id, PROP_EVENT, instance, value)
 
 def _not_implemented(cap_type: str) -> Callable[..., None]:
     def _stub(*_a, **_kw) -> None:
