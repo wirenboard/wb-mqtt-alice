@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Iterable
 from collections import defaultdict
 
 import paho.mqtt.subscribe as subscribe
@@ -42,6 +42,16 @@ def is_property_event(prop:str="")->bool:
     if prop.lower() == "devices.properties.event":
         return True
     return False
+
+
+def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
+    values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
+    for d in items:
+        for k, v in d.items():
+            values_per_key[k].add(v)
+            if len(values_per_key[k]) > 1:
+                return False
+    return True
 
 
 def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -394,12 +404,14 @@ class DeviceRegistry:
                         dev_id,
                     )
                 props.append(prop_obj)
+
             if props:
                 device["properties"] = props
                 for _prop in props:
                     if is_property_event(_prop.get("type","")):
                         device["properties"] = merge_properties_list(props)
                         break
+
             devices_out.append(device)
 
         logger.debug("Final device list contains %r devices:", len(devices_out))
@@ -501,12 +513,9 @@ class DeviceRegistry:
         # handler = event_handlers.get(instance)
         # if handler:
         #     return handler(raw)
-        is_event_occurred = raw.lower() not in ("0", "false", "off")
-        if is_event_occurred:
-            logger.debug("Event occurred for instance %r, value %r", instance, value)
-            if isinstance(value, str) and value:
-                return extract_event_value(value)
-            return raw
+        logger.debug("Event occurred for instance %r, value %r", instance, value)
+        if isinstance(value, str) and value:
+            return extract_event_value(value)
         return raw
 
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
@@ -527,12 +536,18 @@ class DeviceRegistry:
         instance = blk.get("parameters", {}).get("instance")
         try:
             if is_property_event(cap_type):
-                raw = convert_mqtt_event_value(
+                param_list = []
+                for prop in self.devices[device_id].get("properties", []):
+                    param_list.append(prop.get("parameters"))
+                single_event_value = is_one_topic_one_event(param_list)
+                value = convert_mqtt_event_value(
                     event_type=instance,
                     event_type_value=extract_event_value(blk.get("parameters", {}).get("value")),
                     value=raw,
+                    single_event_value=single_event_value
                 )
-            value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
+            else:
+                value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
             self._send_to_yandex(device_id, cap_type, instance, value)
         except (ValueError, TypeError) as e:
             logger.warning("Failed to convert MQTT→Yandex for topic %r: %r", topic, e)
@@ -604,6 +619,7 @@ class DeviceRegistry:
         else:
             # Unknown capability types - passthrough as string
             return str(value)
+
 
     async def forward_yandex_to_mqtt(
         self,
@@ -690,6 +706,7 @@ class DeviceRegistry:
         if is_property_event(prop["type"]):
             index_key_param_unit = extract_event_value(prop.get("parameters", {}).get("value"))
         return index_key_param, index_key_param_unit
+
 
     async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         prop_type = prop["type"]

@@ -211,7 +211,7 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
     return round(percent, 1)
 
 
-def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str)->str:
+def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, single_event_value:bool=False)->str:
     """ Transform raw value from MQTT topics to Yandex events text values """
     # Each event has a dedicated topic.
     # Event: 'Opened'  -> Topic: 'opened'
@@ -220,14 +220,29 @@ def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str)->s
     if event_type == "button":
         # Event Button -  trigger one of topic"
         value = event_type_value if value.lower() not in ["0", "false", "off"] else None
-    else:
-        value = event_type_value if value.lower() in [ "1", "true", "on"] else None
+        return value
 
-    # When two events use the same topic, invert the values.
-    # if event_type == "water_leak":
-    #     # Event Water_leak -  one topic 0/1 or true/false, like wb-mwac-v2_60/Input F1
-    #     if event_type_value == "dry":
-    #         value = event_type_value if value.lower() in ["1", "true", "on"] else "leak"
-    #     if event_type_value == "leak":
-    #         value = event_type_value if value.lower() in ["1", "true", "on"] else "dry"
+    # If event has a single topic.
+    # Event: 'Opened'  -> Topic: 'opened'
+    # If values in: "1", "True"  -> opened
+    # If values in: "0", "False" -> closed
+    if single_event_value:
+        if event_type == "open":
+            if event_type_value == "opened":
+                value = event_type_value if convert_to_bool(value) else "closed"
+            elif vent_type_value.lower() == "closed":
+                value = event_type_value if convert_to_bool(value) else "opened"
+        elif event_type == "water_leak":
+            if event_type_value == "dry":
+                value = event_type_value if convert_to_bool(value) else "leak"
+            if event_type_value == "leak":
+                value = event_type_value if convert_to_bool(value) else "dry"
+        elif event_type == "motion":
+            if event_type_value == "detected":
+                value = event_type_value if convert_to_bool(value) else "not_detected"
+            if event_type_value == "not_detected":
+                value = event_type_value if convert_to_bool(value) else "detected"
+    else:
+        value = event_type_value if convert_to_bool(value) else None
+
     return value
