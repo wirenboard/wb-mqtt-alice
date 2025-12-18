@@ -214,7 +214,8 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
 def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, single_event_value:bool=False)->str:
     """ Transform raw value from MQTT topics to Yandex events text values """
     # Each event has a dedicated topic.
-    # Event: 'Opened'  -> Topic: 'opened'
+    # Event: 'Opened'  -> Topic: 'opened', values - 1, true
+    # Event: 'Closed'  -> Topic: 'closed', values - 1, true
     # Valid triggering values for this topic: 1, "1", True.
 
     if event_type == "button":
