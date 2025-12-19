@@ -211,7 +211,7 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
     return round(percent, 1)
 
 
-def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, single_event_value:bool=False)->str:
+def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, single_event_value:bool=False)->Optional[str]:
     """ Transform raw value from MQTT topics to Yandex events text values """
     # Each event has a dedicated topic.
     # Event: 'Opened'  -> Topic: 'opened', values - 1, true
@@ -231,17 +231,17 @@ def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, si
         if event_type == "open":
             if event_type_value == "opened":
                 value = event_type_value if convert_to_bool(value) else "closed"
-            elif vent_type_value.lower() == "closed":
+            elif event_type_value.lower() == "closed":
                 value = event_type_value if convert_to_bool(value) else "opened"
         elif event_type == "water_leak":
             if event_type_value == "dry":
                 value = event_type_value if convert_to_bool(value) else "leak"
-            if event_type_value == "leak":
+            elif event_type_value == "leak":
                 value = event_type_value if convert_to_bool(value) else "dry"
         elif event_type == "motion":
             if event_type_value == "detected":
                 value = event_type_value if convert_to_bool(value) else "not_detected"
-            if event_type_value == "not_detected":
+            elif event_type_value == "not_detected":
                 value = event_type_value if convert_to_bool(value) else "detected"
     else:
         value = event_type_value if convert_to_bool(value) else None
