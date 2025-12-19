@@ -32,8 +32,20 @@ logger = logging.getLogger(__name__)
 
 
 def is_property_event(prop:str="")->bool:
-    """
-    Return True if the event property equals "devices.properties.event"
+    """Check if property type is a Yandex Smart Home event property
+
+    Args:
+        prop: Property type string to check
+
+    Returns:
+        True if property type equals "devices.properties.event" (case-insensitive),
+        False otherwise
+
+    Example:
+        >>> is_property_event("devices.properties.event")
+        True
+        >>> is_property_event("devices.properties.float")
+        False
     """
     if prop.lower() == "devices.properties.event":
         return True
@@ -41,6 +53,24 @@ def is_property_event(prop:str="")->bool:
 
 
 def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
+    """Check if all items have single unique value per key.
+
+    Determines whether a collection of event properties uses a single-topic pattern
+    (one MQTT topic with boolean values) vs multi-topic pattern (multiple topics).
+
+    Args:
+        items: Iterable of dictionaries containing event property parameters
+
+    Returns:
+        True if each key across all items has only one unique value,
+        False if any key has multiple different values
+
+    Example:
+        >>> is_one_topic_one_event([{"instance": "open"}, {"instance": "open"}])
+        True
+        >>> is_one_topic_one_event([{"instance": "open"}, {"instance": "motion"}])
+        False
+    """
     values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
     for d in items:
         for k, v in d.items():
@@ -51,6 +81,27 @@ def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
 
 
 def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge multiple event properties with same instance into single property with events array.
+    
+    Transforms individual event property entries into Yandex Smart Home format where
+    events with the same instance are grouped under a single property with an events array.
+    
+    Input format (multiple properties):
+        [{"type": "devices.properties.event", "parameters": {"instance": "open", "value": "opened"}},
+         {"type": "devices.properties.event", "parameters": {"instance": "open", "value": "closed"}}]
+    
+    Output format (merged property):
+        [{"type": "devices.properties.event", "parameters": {
+            "instance": "open",
+            "events": [{"value": "opened"}, {"value": "closed"}]
+        }}]
+    
+    Args:
+        props: List of property dictionaries from device configuration
+        
+    Returns:
+        List with non-event properties unchanged and event properties merged by instance
+    """
     other_props: List[Dict[str, Any]] = []
     events_by_instance: Dict[str, List[str]] = defaultdict(list)
 
@@ -96,6 +147,17 @@ def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def transform(obj: Any) -> Any:
+    """Recursively transform device configuration, merging event properties.
+    
+    Traverses nested data structure and applies merge_properties_list to any
+    "properties" key containing a list of properties.
+    
+    Args:
+        obj: Data structure to transform (dict, list, or primitive)
+        
+    Returns:
+        Transformed object with event properties merged where found
+    """
     if isinstance(obj, dict):
         new = {}
         for k, v in obj.items():
@@ -719,8 +781,8 @@ class DeviceRegistry:
                 logger.debug("No retained payload in %r", topic)
                 return None
             raw = msg.payload.decode().strip()
-            try:                
-                value = float(raw)  # Currently only float is supported
+            try:
+                value = float(raw)
             except ValueError:
                 value = raw
 
