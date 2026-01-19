@@ -9,6 +9,9 @@ Handles type conversions between WirenBoard and Yandex Smart Home formats
 import logging
 from typing import Any, Optional
 
+from constants import (EventType, MotionEventValue, OpenEventValue,
+                       WaterLeakEventValue)
+
 logger = logging.getLogger(__name__)
 
 
@@ -252,31 +255,27 @@ def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, si
         >>> convert_mqtt_event_value("water_leak", "dry", "0", single_event_value=True)
         "leak"
     """
-    if event_type == "button":
+    if event_type == EventType.BUTTON:
         # Event Button -  trigger one of topic"
         value = event_type_value if value.lower() not in ["0", "false", "off"] else None
         return value
 
-    # If event has a single topic.
-    # Event Open: value : 'Opened' -> Topic: 'opened'
-    # If values in: "1", "True"  -> 'opened'
-    # If values in: "0", "False" -> 'closed'
     if single_event_value:
-        if event_type == "open":
-            if event_type_value == "opened":
-                value = event_type_value if convert_to_bool(value) else "closed"
-            elif event_type_value.lower() == "closed":
-                value = event_type_value if convert_to_bool(value) else "opened"
-        elif event_type == "water_leak":
-            if event_type_value == "dry":
-                value = event_type_value if convert_to_bool(value) else "leak"
-            elif event_type_value == "leak":
-                value = event_type_value if convert_to_bool(value) else "dry"
-        elif event_type == "motion":
-            if event_type_value == "detected":
-                value = event_type_value if convert_to_bool(value) else "not_detected"
-            elif event_type_value == "not_detected":
-                value = event_type_value if convert_to_bool(value) else "detected"
+        if event_type == EventType.OPEN:
+            if event_type_value == OpenEventValue.OPENED:
+                value = event_type_value if convert_to_bool(value) else OpenEventValue.CLOSED
+            elif event_type_value.lower() == OpenEventValue.CLOSED:
+                value = event_type_value if convert_to_bool(value) else OpenEventValue.OPENED
+        elif event_type == EventType.WATER_LEAK:
+            if event_type_value == WaterLeakEventValue.DRY:
+                value = event_type_value if convert_to_bool(value) else WaterLeakEventValue.LEAK
+            elif event_type_value == WaterLeakEventValue.LEAK:
+                value = event_type_value if convert_to_bool(value) else WaterLeakEventValue.DRY
+        elif event_type == EventType.MOTION:
+            if event_type_value == MotionEventValue.DETECTED:
+                value = event_type_value if convert_to_bool(value) else MotionEventValue.NOT_DETECTED
+            elif event_type_value == MotionEventValue.NOT_DETECTED:
+                value = event_type_value if convert_to_bool(value) else MotionEventValue.DETECTED
     else:
         value = event_type_value if convert_to_bool(value) else None
 

@@ -2,6 +2,34 @@
   File with all constants in project
 """
 
+from enum import Enum
+
+
+class EventType:
+    """Yandex Smart Home event types"""
+    BUTTON = "button"
+    OPEN = "open"
+    WATER_LEAK = "water_leak"
+    MOTION = "motion"
+
+
+class OpenEventValue:
+    """Values for open/close events"""
+    OPENED = "opened"
+    CLOSED = "closed"
+
+
+class WaterLeakEventValue:
+    """Values for water leak detection events"""
+    DRY = "dry"
+    LEAK = "leak"
+
+
+class MotionEventValue:
+    """Values for motion detection events"""
+    DETECTED = "detected"
+    NOT_DETECTED = "not_detected"
+
 # Capability  type constants
 CAP_ON_OFF = "devices.capabilities.on_off"
 CAP_COLOR_SETTING = "devices.capabilities.color_setting"
