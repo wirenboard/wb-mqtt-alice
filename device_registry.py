@@ -50,7 +50,7 @@ def is_property_event(prop:str="")->bool:
 
 def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
     """
-    Check if all items have single unique value per key.
+    Check if all items have single unique value per key
 
     Determines whether a collection of event properties uses a single-topic pattern
     (one MQTT topic with boolean values) vs multi-topic pattern (multiple topics).
@@ -146,7 +146,7 @@ def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def transform(obj: Any) -> Any:
     """
-    Recursively transform device configuration, merging event properties.
+    Recursively transform device configuration, merging event properties
     
     Traverses nested data structure and applies merge_properties_list to any
     "properties" key containing a list of properties.
@@ -173,7 +173,7 @@ def transform(obj: Any) -> Any:
 
 def extract_event_value(value: Any) -> str:
     """
-    Convert parameter ``value`` to an event string.
+    Convert parameter ``value`` to an event string
 
     If ``value`` contains a dot, return the substring after the last dot.
     Otherwise return ``str(value)``.
@@ -548,7 +548,7 @@ class DeviceRegistry:
 
     def _convert_events_to_yandex(self, instance: Optional[str], value: Optional[str], raw: str) -> str:
         """
-        Convert raw event property value to Yandex format using handler functions for each instance type.
+        Convert raw event property value to Yandex format using handler functions for each instance type
 
         Args:
             instance: Property instance identifier
@@ -578,7 +578,7 @@ class DeviceRegistry:
 
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
         """
-        Forwards MQTT message to Yandex Smart Home.
+        Forwards MQTT message to Yandex Smart Home
 
         Args:
             topic: MQTT topic in full format (/devices/device/controls/control)
