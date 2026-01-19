@@ -9,30 +9,26 @@ Handles device configuration, MQTT-Yandex routing
 import asyncio
 import json
 import logging
-from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Iterable
 from collections import defaultdict
+from pathlib import Path
+from typing import (Any, Awaitable, Callable, Dict, Iterable, List, Optional,
+                    Tuple)
 
 import paho.mqtt.subscribe as subscribe
 
-from converters import (
-    convert_rgb_int_to_wb,
-    convert_rgb_wb_to_int,
-    convert_temp_percent_to_kelvin,
-    convert_temp_kelvin_to_percent,
-    convert_to_bool,
-    convert_mqtt_event_value,
-)
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
+from converters import (convert_mqtt_event_value, convert_rgb_int_to_wb,
+                        convert_rgb_wb_to_int, convert_temp_kelvin_to_percent,
+                        convert_temp_percent_to_kelvin, convert_to_bool)
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
-
 
 logger = logging.getLogger(__name__)
 
 
 def is_property_event(prop:str="")->bool:
-    """Check if property type is a Yandex Smart Home event property
+    """
+    Check if property type is a Yandex Smart Home event property
 
     Args:
         prop: Property type string to check
@@ -53,7 +49,8 @@ def is_property_event(prop:str="")->bool:
 
 
 def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
-    """Check if all items have single unique value per key.
+    """
+    Check if all items have single unique value per key.
 
     Determines whether a collection of event properties uses a single-topic pattern
     (one MQTT topic with boolean values) vs multi-topic pattern (multiple topics).
@@ -81,7 +78,8 @@ def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
 
 
 def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Merge multiple event properties with same instance into single property with events array.
+    """
+    Merge multiple event properties with same instance into single property with events array
     
     Transforms individual event property entries into Yandex Smart Home format where
     events with the same instance are grouped under a single property with an events array.
@@ -147,7 +145,8 @@ def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def transform(obj: Any) -> Any:
-    """Recursively transform device configuration, merging event properties.
+    """
+    Recursively transform device configuration, merging event properties.
     
     Traverses nested data structure and applies merge_properties_list to any
     "properties" key containing a list of properties.
@@ -173,7 +172,8 @@ def transform(obj: Any) -> Any:
 
 
 def extract_event_value(value: Any) -> str:
-    """Convert parameter ``value`` to an event string.
+    """
+    Convert parameter ``value`` to an event string.
 
     If ``value`` contains a dot, return the substring after the last dot.
     Otherwise return ``str(value)``.
