@@ -9,7 +9,6 @@ Handles type conversions between WirenBoard and Yandex Smart Home formats
 import logging
 from typing import Any, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -212,11 +211,47 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
 
 
 def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, single_event_value:bool=False)->Optional[str]:
-    """ Transform raw value from MQTT topics to Yandex events text values """
-    # Each event has a dedicated topic.
-    # Event Open: value : 'Opened' -> Topic: 'opened', values - 1, true
-    # Event Open: value : 'Closed' -> Topic: 'closed', values - 1, true
-
+    """
+    Transform raw value from MQTT topics to Yandex Smart Home event text values
+    
+    Converts MQTT topic values to appropriate Yandex event values based on event type.
+    Handles both multi-topic events (separate topics for each state) and single-topic 
+    events (one topic with boolean values).
+    
+    Args:
+        event_type: Type of event (e.g., "button", "open", "water_leak", "motion")
+        event_type_value: Expected event value from Yandex format (e.g., "opened", "closed", 
+                         "dry", "leak", "detected", "not_detected")
+        value: Raw value from MQTT topic (e.g., "1", "0", "true", "false", "on", "off")
+        single_event_value: If True, handles single-topic events with value inversion.
+                           If False (default), handles multi-topic events
+    
+    Returns:
+        Optional[str]: Yandex event value string if event is triggered, None otherwise
+    
+    Examples:
+        Multi-topic events (default):
+        >>> convert_mqtt_event_value("open", "opened", "1")
+        "opened"
+        >>> convert_mqtt_event_value("open", "closed", "0")
+        None
+        
+        Button events:
+        >>> convert_mqtt_event_value("button", "click", "1")
+        "click"
+        >>> convert_mqtt_event_value("button", "click", "0")
+        None
+        
+        Single-topic events:
+        >>> convert_mqtt_event_value("open", "opened", "1", single_event_value=True)
+        "opened"
+        >>> convert_mqtt_event_value("open", "opened", "0", single_event_value=True)
+        "closed"
+        >>> convert_mqtt_event_value("water_leak", "dry", "1", single_event_value=True)
+        "dry"
+        >>> convert_mqtt_event_value("water_leak", "dry", "0", single_event_value=True)
+        "leak"
+    """
     if event_type == "button":
         # Event Button -  trigger one of topic"
         value = event_type_value if value.lower() not in ["0", "false", "off"] else None
