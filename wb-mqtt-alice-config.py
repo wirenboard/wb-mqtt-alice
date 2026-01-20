@@ -4,11 +4,11 @@ import json
 import logging
 import re
 import subprocess
+import tempfile
 import uuid
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
-import tempfile
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -17,8 +17,10 @@ from pydantic import ValidationError
 
 from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from fetch_url import fetch_url
-from models import Capability, Config, Device, Property, Room, RoomID, ClientConfig
-from wb_mqtt_load_config import get_board_revision, get_key_id, load_server_config
+from models import (Capability, ClientConfig, Config, Device, Property, Room,
+                    RoomID)
+from wb_mqtt_load_config import (get_board_revision, get_key_id,
+                                 load_server_config)
 
 # FastAPI initialization
 app = FastAPI(
@@ -848,9 +850,12 @@ def get_enable_integration(request: Request):
     return {"enabled": client_config.client_enabled}
 
 
-@app.delete("/integrations/alice/controller", status_code=HTTPStatus.OK)
+@app.put("/integrations/alice/unlink_controller", status_code=HTTPStatus.OK)
 async def unlink_controller(request: Request):
-    """Unlink controller"""
+    """
+    Unlink the controller from HomeUI by clicking on the red cross
+    Unlinking involves sending a request to the server's unlink endpoint.
+    """
     language = get_language(request)
     key_id = get_key_id(controller_version)
 
