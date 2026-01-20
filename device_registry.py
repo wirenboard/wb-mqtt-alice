@@ -103,23 +103,23 @@ def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     other_props: List[Dict[str, Any]] = []
     events_by_instance: Dict[str, List[str]] = defaultdict(list)
 
-    for p in props:
+    for cur_prop in props:
         try:
-            p_type = p.get("type")
+            cur_prop_type = cur_prop.get("type")
         except Exception:
-            p_type = None
-        if is_property_event(p_type):
-            params = p.get("parameters") or {}
+            cur_prop_type = None
+        if is_property_event(cur_prop_type):
+            params = cur_prop.get("parameters") or {}
             instance = params.get("instance")
             value = params.get("value")
             if instance is None:
-                other_props.append(p)
+                other_props.append(cur_prop)
                 continue
             val = extract_event_value(value)
             if val not in events_by_instance[instance]:
                 events_by_instance[instance].append(val)
         else:
-            other_props.append(p)
+            other_props.append(cur_prop)
 
     merged_events_props: List[Dict[str, Any]] = []
     for instance, values in events_by_instance.items():
