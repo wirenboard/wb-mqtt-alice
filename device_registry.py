@@ -124,10 +124,10 @@ def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     merged_events_props: List[Dict[str, Any]] = []
     for instance, values in events_by_instance.items():
         events_list = []
-        for v in values:
-            if v == "":
+        for value in values:
+            if value == "":
                 continue
-            events_list.append({"value": v})
+            events_list.append({"value": value})
         if not events_list:
             continue
         merged = {
