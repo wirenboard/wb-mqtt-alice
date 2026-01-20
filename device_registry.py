@@ -69,10 +69,10 @@ def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
         False
     """
     values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
-    for d in items:
-        for k, v in d.items():
-            values_per_key[k].add(v)
-            if len(values_per_key[k]) > 1:
+    for item in items:
+        for key, value in item.items():
+            values_per_key[key].add(value)
+            if len(values_per_key[key]) > 1:
                 return False
     return True
 
