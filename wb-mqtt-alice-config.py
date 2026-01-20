@@ -853,7 +853,7 @@ def get_enable_integration(request: Request):
 @app.put("/integrations/alice/unlink_controller", status_code=HTTPStatus.OK)
 async def unlink_controller(request: Request):
     """
-    Unlink the controller from HomeUI by clicking on the red cross
+    Unlink the controller from HomeUI by clicking on the red cross on page "My linked controllers"
     Unlinking involves sending a request to the server's unlink endpoint.
     """
     language = get_language(request)
