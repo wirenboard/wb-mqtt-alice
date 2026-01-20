@@ -768,6 +768,28 @@ class DeviceRegistry:
             return None
 
     def _get_instance(self, prop: Dict[str, Any])->str:
+        """
+        Extract the indexing tuple for a property configuration
+
+        Args:
+            prop: Property dictionary from device config. Expected to contain
+                "type" and an optional "parameters" dict with "instance" and
+                (for events) "value".
+
+        Returns:
+            Tuple[str, str]: (instance, unit_or_event_value)
+                - instance: the 'instance' parameter (e.g. "open", "temperature").
+                - unit_or_event_value: for event properties, the extracted event
+                value (e.g. "opened"); for non-event properties, an empty string.
+
+        Example:
+            >>> _get_instance({"type": "devices.properties.event",
+                            "parameters": {"instance": "open", "value": "value.opened"}})
+            ("open", "opened")
+            >>> _get_instance({"type": "devices.properties.float",
+                            "parameters": {"instance": "temperature"}})
+            ("temperature", "")
+        """        
         prop_type = prop["type"]
         index_key_param = prop.get("parameters", {}).get("instance")
         index_key_param_unit = ""
