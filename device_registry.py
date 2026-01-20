@@ -159,14 +159,14 @@ def transform(obj: Any) -> Any:
     """
     if isinstance(obj, dict):
         new = {}
-        for k, v in obj.items():
-            if k == "properties" and isinstance(v, list):
-                new[k] = merge_properties_list(v)
+        for key, value in obj.items():
+            if key == "properties" and isinstance(value, list):
+                new[key] = merge_properties_list(value)
             else:
-                new[k] = transform(v)
+                new[key] = transform(value)
         return new
     elif isinstance(obj, list):
-        return [transform(i) for i in obj]
+        return [transform(cur_obj) for cur_obj in obj]
     else:
         return obj
 
@@ -443,6 +443,9 @@ class DeviceRegistry:
             for prop in dev.get("properties", []):
                 prop_obj = {
                     "type": prop["type"],
+                    # 'retrievable' indicates whether Yandex is allowed to request (get) the current
+                    # state for this property. Event properties are not retrievable because
+                    # events do not have a stored persistent state and therefore cannot be queried.
                     "retrievable": True if not is_property_event(prop["type"]) else False,
                     "reportable": True,
                 }
