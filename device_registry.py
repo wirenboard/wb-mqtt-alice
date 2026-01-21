@@ -190,7 +190,8 @@ def extract_event_value(value: Any) -> str:
 async def read_topic_once(
     topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0,
     prop_type: str="",
-    unit_type: tuple=()
+    instance: Optional[str]=None,
+    unit_or_event_value: Optional[str]=None,
 ) -> Optional[Any]:
     """
     Reads a single retained MQTT message in a separate thread
@@ -213,8 +214,8 @@ async def read_topic_once(
             payload = res.payload.decode().strip()
             if is_property_event(prop_type):
                 res.payload = convert_mqtt_event_value(
-                    event_type=unit_type[0],
-                    event_type_value=unit_type[-1],
+                    event_type=instance,
+                    event_type_value=unit_or_event_value,
                     value=res.payload.decode().strip()
                 ).encode()
 
@@ -318,7 +319,7 @@ class DeviceRegistry:
                 index_key = (
                     device_id,
                     prop["type"],
-                    self._get_instance(prop),
+                    self._extract_instance_with_value(prop),
                 )
                 self.cap_index[index_key] = full
 
@@ -767,7 +768,7 @@ class DeviceRegistry:
             logger.warning("Failed to convert value for %r: %r", key, e)
             return None
 
-    def _get_instance(self, prop: Dict[str, Any])->str:
+    def _extract_instance_with_value(self, prop: Dict[str, Any])->Tuple[str, str]:
         """
         Extract the indexing tuple for a property configuration
 
@@ -783,24 +784,23 @@ class DeviceRegistry:
                 value (e.g. "opened"); for non-event properties, an empty string.
 
         Example:
-            >>> _get_instance({"type": "devices.properties.event",
+            >>> _extract_instance_with_value({"type": "devices.properties.event",
                             "parameters": {"instance": "open", "value": "value.opened"}})
             ("open", "opened")
-            >>> _get_instance({"type": "devices.properties.float",
+            >>> _extract_instance_with_value({"type": "devices.properties.float",
                             "parameters": {"instance": "temperature"}})
             ("temperature", "")
         """        
         prop_type = prop["type"]
-        index_key_param = prop.get("parameters", {}).get("instance")
-        index_key_param_unit = ""
+        instance = prop.get("parameters", {}).get("instance")
+        unit_or_event_value = prop.get("parameters", {}).get("unit")
         if is_property_event(prop["type"]):
-            index_key_param_unit = extract_event_value(prop.get("parameters", {}).get("value"))
-        return index_key_param, index_key_param_unit
-
+            unit_or_event_value = extract_event_value(prop.get("parameters", {}).get("value"))
+        return instance, unit_or_event_value
 
     async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         prop_type = prop["type"]
-        instance = self._get_instance(prop)
+        instance, unit_or_event_value = self._extract_instance_with_value(prop)
         key = (device_id, prop_type, instance)
 
         topic = self.cap_index.get(key)
@@ -808,7 +808,7 @@ class DeviceRegistry:
             logger.debug("No MQTT topic found for property: %r", key)
             return None
         try:
-            msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, unit_type=instance)
+            msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=unit_or_event_value)
             if msg is None:
                 logger.debug("No retained payload in %r", topic)
                 return None
@@ -821,7 +821,7 @@ class DeviceRegistry:
             return {
                 "type": prop_type,
                 "state": {
-                    "instance": instance[0],
+                    "instance": instance,
                     "value": value,
                 },
             }
