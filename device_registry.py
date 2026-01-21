@@ -465,14 +465,16 @@ class DeviceRegistry:
                 params = prop.get("parameters", {}) or {}
                 instance = params.get("instance")
                 if instance:
-                    # unit - for float properties
-                    # value - for event properties
                     prop_params: Dict[str, Any] = {"instance": instance}
                     if is_property_event(prop["type"]):
+                        # Event property
+                        # "value" is required for event properties
                         value_cfg = params.get("value")
                         if isinstance(value_cfg, str) and value_cfg.strip():
                             prop_params["value"] = value_cfg.strip()
                     else:
+                        # Float property (or non-event property)
+                        # "unit" is required for float properties
                         unit_cfg = params.get("unit")
                         if isinstance(unit_cfg, str) and unit_cfg.strip():
                             prop_params["unit"] = unit_cfg.strip()
