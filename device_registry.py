@@ -865,6 +865,11 @@ class DeviceRegistry:
             prop_state = await self._read_property_state(device_id, prop)
             if prop_state:
                 properties_output.append(prop_state)
+            # TODO (v.fedorov): 
+            #             Currently we only support non-retrievable events. The problem is that we have no storage 
+            #             location for state these events, so we cannot implement retrievable events at this time. 
+            #             To implement this, we would need to either: (1) support only a single topic instead of two/three, 
+            #             or (2) add intermediate storage for Yandex-formatted states directly in our client.
 
         # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:
