@@ -213,7 +213,7 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
     return round(percent, 1)
 
 
-def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, single_event_value:bool=False)->Optional[str]:
+def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, event_single_topic:bool=False)->Optional[str]:
     """
     Transform raw value from MQTT topics to Yandex Smart Home event text values
     
@@ -226,7 +226,7 @@ def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, si
         event_type_value: Expected event value from Yandex format (e.g., "opened", "closed", 
                          "dry", "leak", "detected", "not_detected")
         value: Raw value from MQTT topic (e.g., "1", "0", "true", "false", "on", "off")
-        single_event_value: If True, handles single-topic events with value inversion.
+        event_single_topic: If True, handles single-topic events with value inversion.
                            If False (default), handles multi-topic events
     
     Returns:
@@ -246,13 +246,13 @@ def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, si
         None
         
         Single-topic events:
-        >>> convert_mqtt_event_value("open", "opened", "1", single_event_value=True)
+        >>> convert_mqtt_event_value("open", "opened", "1", event_single_topic=True)
         "opened"
-        >>> convert_mqtt_event_value("open", "opened", "0", single_event_value=True)
+        >>> convert_mqtt_event_value("open", "opened", "0", event_single_topic=True)
         "closed"
-        >>> convert_mqtt_event_value("water_leak", "dry", "1", single_event_value=True)
+        >>> convert_mqtt_event_value("water_leak", "dry", "1", event_single_topic=True)
         "dry"
-        >>> convert_mqtt_event_value("water_leak", "dry", "0", single_event_value=True)
+        >>> convert_mqtt_event_value("water_leak", "dry", "0", event_single_topic=True)
         "leak"
     """
     if event_type == EventType.BUTTON:
@@ -260,7 +260,7 @@ def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, si
         value = event_type_value if value.lower() not in ["0", "false", "off"] else None
         return value
 
-    if single_event_value:
+    if event_single_topic:
         if event_type == EventType.OPEN:
             if event_type_value == OpenEventValue.OPENED:
                 value = event_type_value if convert_to_bool(value) else OpenEventValue.CLOSED

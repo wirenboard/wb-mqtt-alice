@@ -48,7 +48,7 @@ def is_property_event(prop:str="")->bool:
     return False
 
 
-def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
+def is_event_single_topic(items: Iterable[Dict[Any, Any]]) -> bool:
     """
     Check if all items have single unique value per key
 
@@ -62,10 +62,21 @@ def is_one_topic_one_event(items: Iterable[Dict[Any, Any]]) -> bool:
         True if each key across all items has only one unique value,
         False if any key has multiple different values
 
+    Note: User implementation patterns may vary, so this function only checks
+        whether different values exist for the same key. For example, door open
+        events can be implemented in two ways:
+        - Single topic with boolean values (single-topic):
+            "1" -> "opened"
+            "0" -> "closed"
+        - Two separate topics (multi-topic):
+            Topic "door/opened" with "1" or "0"
+            Topic "door/closed" with "1" or "0"
+        In the first case the function returns True, in the second case - False.
+
     Example:
-        >>> is_one_topic_one_event([{"instance": "open"}, {"instance": "open"}])
+        >>> is_event_single_topic([{"instance": "open"}, {"instance": "open"}])
         True
-        >>> is_one_topic_one_event([{"instance": "open"}, {"instance": "motion"}])
+        >>> is_event_single_topic([{"instance": "open"}, {"instance": "motion"}])
         False
     """
     values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
@@ -608,12 +619,12 @@ class DeviceRegistry:
                 param_list = []
                 for prop in self.devices[device_id].get("properties", []):
                     param_list.append(prop.get("parameters"))
-                single_event_value = is_one_topic_one_event(param_list)
+                event_single_topic = is_event_single_topic(param_list)
                 value = convert_mqtt_event_value(
                     event_type=instance,
                     event_type_value=extract_event_value(blk.get("parameters", {}).get("value")),
                     value=raw,
-                    single_event_value=single_event_value
+                    event_single_topic=event_single_topic
                 )
             else:
                 value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
