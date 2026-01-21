@@ -861,18 +861,8 @@ class DeviceRegistry:
         for prop in device.get("properties", []):
             logger.debug("Reading property state: %r", prop)
             prop_state = await self._read_property_state(device_id, prop)
-            if is_property_event(prop.get("type","")):
-                if prop_state is not None:
-                    prop_state = {
-                        "type": prop.get("type"),
-                        "state": {
-                            "instance": prop.get("parameters",{}).get("instance",""),
-                            "value": "online",
-                        },
-                    }
             if prop_state:
                 properties_output.append(prop_state)
-                break
 
         # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:
