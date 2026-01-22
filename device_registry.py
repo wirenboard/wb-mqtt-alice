@@ -312,10 +312,10 @@ class DeviceRegistry:
                 )
                 event_rate = AliceDeviceEventRate(event_rate_info)
                 self.topic2info[full] = (device_id, "capabilities", i, event_rate)
-                inst = cap.get("parameters", {}).get("instance")
                 # Instance types for each capability
                 # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
-                self.cap_index[(device_id, cap["type"], inst)] = full
+                instance, instance_value = self._extract_instance_with_value(cap)
+                self.cap_index[(device_id, cap["type"], instance, instance_value )] = full
 
             for i, prop in enumerate(device_data.get("properties", [])):
                 mqtt_topic = MQTTTopic(prop["mqtt"])
@@ -327,10 +327,13 @@ class DeviceRegistry:
                 )
                 event_rate = AliceDeviceEventRate(event_rate_info)
                 self.topic2info[full] = (device_id, "properties", i, event_rate)
+                instance, instance_value = self._extract_instance_with_value(prop)
                 index_key = (
                     device_id,
                     prop["type"],
-                    self._extract_instance_with_value(prop),
+                    instance,
+                    instance_value
+
                 )
                 self.cap_index[index_key] = full
 
@@ -708,9 +711,10 @@ class DeviceRegistry:
         device_id: str,
         cap_type: str,
         instance: Optional[str],
+        instance_value: Optional[str],
         value: Any,
     ) -> None:
-        key = (device_id, cap_type, instance)
+        key = (device_id, cap_type, instance, instance_value)
 
         if key not in self.cap_index:
             logger.warning("No mapping for %r", key)
@@ -752,7 +756,8 @@ class DeviceRegistry:
         """
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
-        key = (device_id, cap_type, instance)
+        instance, instance_value = self._extract_instance_with_value(cap)
+        key = (device_id, cap_type, instance, instance_value)
 
         topic = self.cap_index.get(key)
         if not topic:
@@ -806,22 +811,28 @@ class DeviceRegistry:
         """        
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
-        unit_or_event_value = prop.get("parameters", {}).get("unit")
+        if not instance:
+            # we have capatibilities
+            instance = prop.get("state", {}).get("instance")
+            unit_or_event_value = prop.get("parameters", {}).get("value")
+        else:
+            # we have properties
+            unit_or_event_value = prop.get("parameters", {}).get("unit")
         if is_property_event(prop["type"]):
             unit_or_event_value = extract_event_value(prop.get("parameters", {}).get("value"))
         return instance, unit_or_event_value
 
     async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         prop_type = prop["type"]
-        instance, unit_or_event_value = self._extract_instance_with_value(prop)
-        key = (device_id, prop_type, instance)
+        instance, instance_value = self._extract_instance_with_value(prop)
+        key = (device_id, prop_type, instance, instance_value)
 
         topic = self.cap_index.get(key)
         if not topic:
             logger.debug("No MQTT topic found for property: %r", key)
             return None
         try:
-            msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=unit_or_event_value)
+            msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value)
             if msg is None:
                 logger.debug("No retained payload in %r", topic)
                 return None
