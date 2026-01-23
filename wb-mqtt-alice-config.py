@@ -4,11 +4,11 @@ import json
 import logging
 import re
 import subprocess
+import tempfile
 import uuid
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
-import tempfile
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -17,8 +17,10 @@ from pydantic import ValidationError
 
 from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from fetch_url import fetch_url
-from models import Capability, Config, Device, Property, Room, RoomID, ClientConfig
-from wb_mqtt_load_config import get_board_revision, get_key_id, load_server_config
+from models import (Capability, ClientConfig, Config, Device, Property, Room,
+                    RoomID)
+from wb_mqtt_load_config import (get_board_revision, get_key_id,
+                                 load_server_config)
 
 # FastAPI initialization
 app = FastAPI(
@@ -846,6 +848,37 @@ def get_enable_integration(request: Request):
     client_config = load_client_config()
 
     return {"enabled": client_config.client_enabled}
+
+
+@app.put("/integrations/alice/unlink_controller", status_code=HTTPStatus.OK)
+async def unlink_controller(request: Request):
+    """
+    Unlink the controller from HomeUI by clicking on the red cross on page "My linked controllers"
+    Unlinking involves sending a request to the server's unlink endpoint.
+    """
+    language = get_language(request)
+    key_id = get_key_id(controller_version)
+
+    try:
+        response = fetch_url(
+            url=f"https://{server_address}/request-unlink",
+            key_id=key_id,
+        )
+        logger.info("response: %r", response)
+        if response.get("status_code", 0) in (HTTPStatus.OK, HTTPStatus.NO_CONTENT):
+            logger.info("Controller unlinked Successfully")
+        else:
+            logger.error("Failed to unlink controller, server response: %r", response)
+            return JSONResponse(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                content={
+                    "detail": get_translation("unlink_failed", language),
+                },
+            )
+    except Exception as e:
+        logger.error("Failed to fetch unregistration URL: %r", e)
+
+    return {"message": get_translation("controller_unlinked", language)}
 
 
 @app.exception_handler(Exception)

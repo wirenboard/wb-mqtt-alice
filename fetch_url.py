@@ -1,7 +1,7 @@
-import subprocess
 import json
-from pathlib import Path
+import subprocess
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Optional
 
 BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
@@ -18,7 +18,7 @@ def fetch_url(
     retry_opts: Optional[Iterable[str]] = None,
     ):
     """
-    Performs an authenticated POST request via curl with a hardware key.
+    Performs an authenticated POST request via curl with a hardware key
 
     Parameters:
         url (str): Target URL.

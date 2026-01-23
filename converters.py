@@ -9,6 +9,8 @@ Handles type conversions between WirenBoard and Yandex Smart Home formats
 import logging
 from typing import Any, Optional
 
+from constants import (EventType, MotionEventValue, OpenEventValue,
+                       WaterLeakEventValue)
 
 logger = logging.getLogger(__name__)
 
@@ -209,3 +211,72 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
         return 0.0
     percent = ((kelvin - min_k) / (max_k - min_k)) * 100.0
     return round(percent, 1)
+
+
+def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, event_single_topic:bool=False)->Optional[str]:
+    """
+    Transform raw value from MQTT topics to Yandex Smart Home event text values
+    
+    Converts MQTT topic values to appropriate Yandex event values based on event type.
+    Handles both multi-topic events (separate topics for each state) and single-topic 
+    events (one topic with boolean values).
+    
+    Args:
+        event_type: Type of event (e.g., "button", "open", "water_leak", "motion")
+        event_type_value: Expected event value from Yandex format (e.g., "opened", "closed", 
+                         "dry", "leak", "detected", "not_detected")
+        value: Raw value from MQTT topic (e.g., "1", "0", "true", "false", "on", "off")
+        event_single_topic: If True, handles single-topic events with value inversion.
+                           If False (default), handles multi-topic events
+    
+    Returns:
+        Optional[str]: Yandex event value string if event is triggered, None otherwise
+    
+    Examples:
+        Multi-topic events (default):
+        >>> convert_mqtt_event_value("open", "opened", "1")
+        "opened"
+        >>> convert_mqtt_event_value("open", "closed", "0")
+        None
+        
+        Button events:
+        >>> convert_mqtt_event_value("button", "click", "1")
+        "click"
+        >>> convert_mqtt_event_value("button", "click", "0")
+        None
+        
+        Single-topic events:
+        >>> convert_mqtt_event_value("open", "opened", "1", event_single_topic=True)
+        "opened"
+        >>> convert_mqtt_event_value("open", "opened", "0", event_single_topic=True)
+        "closed"
+        >>> convert_mqtt_event_value("water_leak", "dry", "1", event_single_topic=True)
+        "dry"
+        >>> convert_mqtt_event_value("water_leak", "dry", "0", event_single_topic=True)
+        "leak"
+    """
+    if event_type == EventType.BUTTON:
+        # Event Button -  trigger one of topic"
+        value = event_type_value if value.lower() not in ["0", "false", "off"] else None
+        return value
+
+    if event_single_topic:
+        if event_type == EventType.OPEN:
+            if event_type_value == OpenEventValue.OPENED:
+                value = event_type_value if convert_to_bool(value) else OpenEventValue.CLOSED
+            elif event_type_value.lower() == OpenEventValue.CLOSED:
+                value = event_type_value if convert_to_bool(value) else OpenEventValue.OPENED
+        elif event_type == EventType.WATER_LEAK:
+            if event_type_value == WaterLeakEventValue.DRY:
+                value = event_type_value if convert_to_bool(value) else WaterLeakEventValue.LEAK
+            elif event_type_value == WaterLeakEventValue.LEAK:
+                value = event_type_value if convert_to_bool(value) else WaterLeakEventValue.DRY
+        elif event_type == EventType.MOTION:
+            if event_type_value == MotionEventValue.DETECTED:
+                value = event_type_value if convert_to_bool(value) else MotionEventValue.NOT_DETECTED
+            elif event_type_value == MotionEventValue.NOT_DETECTED:
+                value = event_type_value if convert_to_bool(value) else MotionEventValue.DETECTED
+    else:
+        value = event_type_value if convert_to_bool(value) else None
+
+    return value

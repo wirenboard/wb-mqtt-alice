@@ -320,15 +320,14 @@ class SioAliceHandlers:
         cap_results: List[Dict[str, Any]] = []
         for cap in device.get("capabilities", []):
             cap_type: str = cap.get("type")
-            instance: str = cap.get("state", {}).get("instance")
+            instance, instance_value = self.registry._extract_instance_with_value(cap)
             value: Any = cap.get("state", {}).get("value")
-
             try:
                 await self.registry.forward_yandex_to_mqtt(
-                    device_id, cap_type, instance, value
+                    device_id, cap_type, instance, instance_value, value
                 )
                 logger.debug(
-                    "Action applied to %r: %r = %r", device_id, instance, value
+                    "Action applied to %r: %r (%r) = %r", device_id, instance, instance_value, value
                 )
                 status = "DONE"
             except Exception as e:

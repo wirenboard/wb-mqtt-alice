@@ -22,7 +22,8 @@ Typical usage:
 
 
 class MQTTTopic:
-    """Class for handling MQTT topics in WirenBoard format
+    """
+    Class for handling MQTT topics in WirenBoard format
 
     This class parses both short format (device/control) and full format
     (/devices/device/controls/control) MQTT topics and provides properties
@@ -45,7 +46,8 @@ class MQTTTopic:
     """
 
     def __init__(self, topic_str):
-        """Initialize an MQTTTopic instance.
+        """
+        Initialize an MQTTTopic instance
 
         Args:
             topic_str (str): The MQTT topic string in either short or full format
@@ -58,7 +60,8 @@ class MQTTTopic:
         self._parse_topic(topic_str)
 
     def _parse_topic(self, topic_str):
-        """Parse the topic string into device and control components
+        """
+        Parse the topic string into device and control components
 
         This method handles both short format (device/control) and
         full format (/devices/device/controls/control).
@@ -89,7 +92,8 @@ class MQTTTopic:
 
     @property
     def short(self):
-        """str: The topic in short format (device/control)
+        """
+        str: The topic in short format (device/control)
 
         Returns the original string if the topic is invalid
         """
@@ -99,7 +103,8 @@ class MQTTTopic:
 
     @property
     def full(self):
-        """str: The topic in full format (/devices/device/controls/control)
+        """
+        str: The topic in full format (/devices/device/controls/control)
 
         Returns the original string if the topic is invalid
         """
@@ -108,7 +113,8 @@ class MQTTTopic:
         return f"/devices/{self.device}/controls/{self.control}"
 
     def __str__(self):
-        """Return the string representation of the topic
+        """
+        Return the string representation of the topic
 
         Returns:
             str: The short format if valid, otherwise an error message
@@ -118,7 +124,8 @@ class MQTTTopic:
         return self.short
 
     def __repr__(self):
-        """Return the developer string representation of the topic
+        """
+        Return the developer string representation of the topic
 
         Returns:
             str: A string that could be used to recreate this object

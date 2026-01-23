@@ -79,6 +79,10 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> None:
     # HSV and color scene add there in future
 
 
+def _event_prop(device_id: str, instance: Optional[str], value: Any) -> None:
+    # Directly send event property to server, value is array of events
+    send_state_to_server(device_id, PROP_EVENT, instance, value)
+
 def _not_implemented(cap_type: str) -> Callable[..., None]:
     def _stub(*_a, **_kw) -> None:
         raise NotImplementedError("Handler for %r is not implemented yet" % cap_type)
@@ -97,7 +101,7 @@ _HANDLERS: Dict[str, Callable[[str, Optional[str], Any], None]] = {
     CAP_TOGGLE: _not_implemented("cap.toggle"),
     # Properties
     PROP_FLOAT: _float_prop,
-    PROP_EVENT: _not_implemented("prop.event"),
+    PROP_EVENT: _event_prop,
 }
 
 

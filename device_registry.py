@@ -9,28 +9,211 @@ Handles device configuration, MQTT-Yandex routing
 import asyncio
 import json
 import logging
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import (Any, Awaitable, Callable, Dict, Iterable, List, Optional,
+                    Tuple)
 
 import paho.mqtt.subscribe as subscribe
 
-from converters import (
-    convert_rgb_int_to_wb,
-    convert_rgb_wb_to_int,
-    convert_temp_percent_to_kelvin,
-    convert_temp_kelvin_to_percent,
-    convert_to_bool,
-)
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
+from converters import (EventType, convert_mqtt_event_value,
+                        convert_rgb_int_to_wb, convert_rgb_wb_to_int,
+                        convert_temp_kelvin_to_percent,
+                        convert_temp_percent_to_kelvin, convert_to_bool)
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
-
 
 logger = logging.getLogger(__name__)
 
 
+def is_property_event(prop:str="")->bool:
+    """
+    Check if property type is a Yandex Smart Home event property
+
+    Args:
+        prop: Property type string to check
+
+    Returns:
+        True if property type equals "devices.properties.event" (case-insensitive),
+        False otherwise
+
+    Example:
+        >>> is_property_event("devices.properties.event")
+        True
+        >>> is_property_event("devices.properties.float")
+        False
+    """
+    if prop.lower() == "devices.properties.event":
+        return True
+    return False
+
+
+def is_event_single_topic(items: Iterable[Dict[Any, Any]]) -> bool:
+    """
+    Check if all items have single unique value per key
+
+    Determines whether a collection of event properties uses a single-topic pattern
+    (one MQTT topic with boolean values) vs multi-topic pattern (multiple topics).
+
+    Args:
+        items: Iterable of dictionaries containing event property parameters
+
+    Returns:
+        True if each key across all items has only one unique value,
+        False if any key has multiple different values
+
+    Note: User implementation patterns may vary, so this function only checks
+        whether different values exist for the same key. For example, door open
+        events can be implemented in two ways:
+        - Single topic with boolean values (single-topic):
+            "1" -> "opened"
+            "0" -> "closed"
+        - Two separate topics (multi-topic):
+            Topic "door/opened" with "1" or "0"
+            Topic "door/closed" with "1" or "0"
+        In the first case the function returns True, in the second case - False.
+
+    Example:
+        >>> is_event_single_topic([{"instance": "open"}, {"instance": "open"}])
+        True
+        >>> is_event_single_topic([{"instance": "open"}, {"instance": "motion"}])
+        False
+    """
+    # Group by instance
+    by_instance: Dict[Any, List[Dict[Any, Any]]] = defaultdict(list)
+    for item in items:
+        instance = item.get('instance')
+        by_instance[instance].append(item)
+    
+    # For each group compare instance for keys
+    for instance, group in by_instance.items():
+        values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
+        for item in group:
+            for key, value in item.items():
+                if key != 'instance':  
+                    values_per_key[key].add(value)
+                    if len(values_per_key[key]) > 1:
+                        return False
+    return True
+
+
+
+def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merge multiple event properties with same instance into single property with events array
+    
+    Transforms individual event property entries into Yandex Smart Home format where
+    events with the same instance are grouped under a single property with an events array.
+    
+    Input format (multiple properties):
+        [{"type": "devices.properties.event", "parameters": {"instance": "open", "value": "opened"}},
+         {"type": "devices.properties.event", "parameters": {"instance": "open", "value": "closed"}}]
+    
+    Output format (merged property):
+        [{"type": "devices.properties.event", "parameters": {
+            "instance": "open",
+            "events": [{"value": "opened"}, {"value": "closed"}]
+        }}]
+    
+    Args:
+        props: List of property dictionaries from device configuration
+        
+    Returns:
+        List with non-event properties unchanged and event properties merged by instance
+    """
+    other_props: List[Dict[str, Any]] = []
+    events_by_instance: Dict[str, List[str]] = defaultdict(list)
+
+    for cur_prop in props:
+        try:
+            cur_prop_type = cur_prop.get("type")
+        except Exception:
+            cur_prop_type = None
+        if is_property_event(cur_prop_type):
+            params = cur_prop.get("parameters") or {}
+            instance = params.get("instance")
+            value = params.get("value")
+            if instance is None:
+                other_props.append(cur_prop)
+                continue
+            val = extract_event_value(value)
+            if val not in events_by_instance[instance]:
+                events_by_instance[instance].append(val)
+        else:
+            other_props.append(cur_prop)
+
+    merged_events_props: List[Dict[str, Any]] = []
+    for instance, values in events_by_instance.items():
+        events_list = []
+        for value in values:
+            if value == "":
+                continue
+            events_list.append({"value": value})
+        if not events_list:
+            continue
+        merged = {
+            "type": "devices.properties.event",
+            "retrievable": False,
+            "reportable": True,
+            "parameters": {
+                "instance": instance,
+                "events": events_list,
+            },
+        }
+        merged_events_props.append(merged)
+
+    return other_props + merged_events_props
+
+
+def transform(obj: Any) -> Any:
+    """
+    Recursively transform device configuration, merging event properties
+    
+    Traverses nested data structure and applies merge_properties_list to any
+    "properties" key containing a list of properties.
+    
+    Args:
+        obj: Data structure to transform (dict, list, or primitive)
+        
+    Returns:
+        Transformed object with event properties merged where found
+    """
+    if isinstance(obj, dict):
+        new = {}
+        for key, value in obj.items():
+            if key == "properties" and isinstance(value, list):
+                new[key] = merge_properties_list(value)
+            else:
+                new[key] = transform(value)
+        return new
+    elif isinstance(obj, list):
+        return [transform(cur_obj) for cur_obj in obj]
+    else:
+        return obj
+
+
+def extract_event_value(value: Any) -> str:
+    """
+    Convert parameter ``value`` to an event string
+
+    If ``value`` contains a dot, return the substring after the last dot.
+    Otherwise return ``str(value)``.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return str(value)
+    if "." in value:
+        return value.split(".")[-1]
+    return value
+
+
 async def read_topic_once(
-    topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0
+    topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0,
+    prop_type: str="",
+    instance: Optional[str]=None,
+    unit_or_event_value: Optional[str]=None,
 ) -> Optional[Any]:
     """
     Reads a single retained MQTT message in a separate thread
@@ -51,6 +234,13 @@ async def read_topic_once(
         )
         if res:
             payload = res.payload.decode().strip()
+            if is_property_event(prop_type):
+                res.payload = convert_mqtt_event_value(
+                    event_type=instance,
+                    event_type_value=unit_or_event_value,
+                    value=res.payload.decode().strip()
+                ).encode()
+
             logger.debug("Current topic %r state payload: %r", topic, payload)
         else:
             logger.debug("Current topic %r state: None", topic)
@@ -133,10 +323,10 @@ class DeviceRegistry:
                 )
                 event_rate = AliceDeviceEventRate(event_rate_info)
                 self.topic2info[full] = (device_id, "capabilities", i, event_rate)
-                inst = cap.get("parameters", {}).get("instance")
                 # Instance types for each capability
                 # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
-                self.cap_index[(device_id, cap["type"], inst)] = full
+                instance, instance_value = self._extract_instance_with_value(cap)
+                self.cap_index[(device_id, cap["type"], instance, instance_value )] = full
 
             for i, prop in enumerate(device_data.get("properties", [])):
                 mqtt_topic = MQTTTopic(prop["mqtt"])
@@ -148,10 +338,13 @@ class DeviceRegistry:
                 )
                 event_rate = AliceDeviceEventRate(event_rate_info)
                 self.topic2info[full] = (device_id, "properties", i, event_rate)
+                instance, instance_value = self._extract_instance_with_value(prop)
                 index_key = (
                     device_id,
                     prop["type"],
-                    prop.get("parameters", {}).get("instance"),
+                    instance,
+                    instance_value
+
                 )
                 self.cap_index[index_key] = full
 
@@ -276,7 +469,10 @@ class DeviceRegistry:
             for prop in dev.get("properties", []):
                 prop_obj = {
                     "type": prop["type"],
-                    "retrievable": True,
+                    # 'retrievable' indicates whether Yandex is allowed to request (get) the current
+                    # state for this property. Event properties are not retrievable because
+                    # events do not have a stored persistent state and therefore cannot be queried.
+                    "retrievable": True if not is_property_event(prop["type"]) else False,
                     "reportable": True,
                 }
                 # Always send "instance", but "unit" only if present in config
@@ -284,9 +480,36 @@ class DeviceRegistry:
                 instance = params.get("instance")
                 if instance:
                     prop_params: Dict[str, Any] = {"instance": instance}
-                    unit_cfg = params.get("unit")
-                    if isinstance(unit_cfg, str) and unit_cfg.strip():
-                        prop_params["unit"] = unit_cfg.strip()
+                    if is_property_event(prop["type"]):
+                        # Event property
+                        # "value" is required for event properties
+                        value_cfg = params.get("value")
+                        if isinstance(value_cfg, str) and value_cfg.strip():
+                            prop_params["value"] = value_cfg.strip()
+                        counter = 0
+                        for cur_prop in props:
+                            if cur_prop['parameters']['instance'] == instance:
+                                counter += 1
+                        # append default oppozit values for some events
+                        if counter == 0:
+                            _oppozit_obj = dict(prop_obj)
+                            _oppozit_params = dict(prop_params)
+                            _prefix, _value = value_cfg.strip().split('.')
+                            if instance in [EventType.OPEN, EventType.WATER_LEAK,EventType.MOTION]:
+                                oppozit_val = convert_mqtt_event_value(
+                                    event_type=instance, 
+                                    event_type_value = _value,
+                                    value=0,
+                                    event_single_topic=True,)
+                                _oppozit_params["value"] = _prefix + "." + oppozit_val
+                            _oppozit_obj["parameters"] = _oppozit_params
+                            props.append(_oppozit_obj)
+                    else:
+                        # Float property (or non-event property)
+                        # "unit" is required for float properties
+                        unit_cfg = params.get("unit")
+                        if isinstance(unit_cfg, str) and unit_cfg.strip():
+                            prop_params["unit"] = unit_cfg.strip()
                     prop_obj["parameters"] = prop_params
                 else:
                     logger.warning(
@@ -295,15 +518,19 @@ class DeviceRegistry:
                         dev_id,
                     )
                 props.append(prop_obj)
+
             if props:
                 device["properties"] = props
+                for _prop in props:
+                    if is_property_event(_prop.get("type","")):
+                        device["properties"] = merge_properties_list(props)
+                        break
 
             devices_out.append(device)
 
         logger.debug("Final device list contains %r devices:", len(devices_out))
         for i, device in enumerate(devices_out):
             logger.debug("  %r. %r - %r", i + 1, device["id"], device["name"])
-
         return devices_out
 
     def _convert_cap_to_yandex(
@@ -368,14 +595,46 @@ class DeviceRegistry:
                 # Other color_setting instances (e.g., color_scene) - passthrough
                 return raw
 
+        elif is_property_event(cap_type):
+            # For event properties, we want to send the post processing raw value
+            return self._convert_events_to_yandex(instance, params.get("value"), raw)
         else:
             # Unknown capability types - passthrough as string
             return raw
 
+    def _convert_events_to_yandex(self, instance: Optional[str], value: Optional[str], raw: str) -> str:
+        """
+        Convert raw event property value to Yandex format using handler functions for each instance type
+
+        Args:
+            instance: Property instance identifier
+            value: Property value from configuration
+            raw: Raw MQTT payload string
+
+        Returns:
+            Converted value in Yandex format. For unknown or unhandled instances, the raw value is returned as-is.
+        """
+        # Coerce and normalize raw payload early
+        raw = "" if raw is None else raw.strip() if isinstance(raw, str) else raw
+        if not instance:
+            logger.debug("No instance provided for event property, returning raw value")
+            return raw
+        # UNCOMMENT if need to mapping of event instance to handler function for extensibility
+        # event_handlers = {
+        #     "motion": handle_motion,
+        #     etc..
+        # }
+        # handler = event_handlers.get(instance)
+        # if handler:
+        #     return handler(raw)
+        logger.debug("Event occurred for instance %r, value %r", instance, value)
+        if isinstance(value, str) and value:
+            return extract_event_value(value)
+        return raw
 
     def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
         """
-        Forwards MQTT message to Yandex Smart Home.
+        Forwards MQTT message to Yandex Smart Home
 
         Args:
             topic: MQTT topic in full format (/devices/device/controls/control)
@@ -390,7 +649,19 @@ class DeviceRegistry:
         cap_type = blk["type"]
         instance = blk.get("parameters", {}).get("instance")
         try:
-            value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
+            if is_property_event(cap_type):
+                param_list = []
+                for prop in self.devices[device_id].get("properties", []):
+                    param_list.append(prop.get("parameters"))
+                event_single_topic = is_event_single_topic(param_list)
+                value = convert_mqtt_event_value(
+                    event_type=instance,
+                    event_type_value=extract_event_value(blk.get("parameters", {}).get("value")),
+                    value=raw,
+                    event_single_topic=event_single_topic
+                )
+            else:
+                value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
             self._send_to_yandex(device_id, cap_type, instance, value)
         except (ValueError, TypeError) as e:
             logger.warning("Failed to convert MQTT→Yandex for topic %r: %r", topic, e)
@@ -469,9 +740,10 @@ class DeviceRegistry:
         device_id: str,
         cap_type: str,
         instance: Optional[str],
+        instance_value: Optional[str],
         value: Any,
     ) -> None:
-        key = (device_id, cap_type, instance)
+        key = (device_id, cap_type, instance, instance_value)
 
         if key not in self.cap_index:
             logger.warning("No mapping for %r", key)
@@ -513,7 +785,8 @@ class DeviceRegistry:
         """
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
-        key = (device_id, cap_type, instance)
+        instance, instance_value = self._extract_instance_with_value(cap)
+        key = (device_id, cap_type, instance, instance_value)
 
         topic = self.cap_index.get(key)
         if not topic:
@@ -542,22 +815,64 @@ class DeviceRegistry:
             logger.warning("Failed to convert value for %r: %r", key, e)
             return None
 
-    async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _extract_instance_with_value(self, prop: Dict[str, Any])->Tuple[str, str]:
+        """
+        Extract the indexing tuple for a property configuration
+
+        Args:
+            prop: Property dictionary from device config. Expected to contain
+                "type" and an optional "parameters" dict with "instance" and
+                (for events) "value".
+
+        Returns:
+            Tuple[str, str]: (instance, unit_or_event_value)
+                - instance: the 'instance' parameter (e.g. "open", "temperature").
+                - unit_or_event_value: for event properties, the extracted event
+                value (e.g. "opened"); for non-event properties, an empty string.
+
+        Example:
+            >>> _extract_instance_with_value({"type": "devices.properties.event",
+                            "parameters": {"instance": "open", "value": "value.opened"}})
+            ("open", "opened")
+            >>> _extract_instance_with_value({"type": "devices.properties.float",
+                            "parameters": {"instance": "temperature"}})
+            ("temperature", "")
+        """        
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
-        key = (device_id, prop_type, instance)
+        if not instance:
+            # we have capatibilities
+            instance = prop.get("state", {}).get("instance")
+            unit_or_event_value = prop.get("parameters", {}).get("value")
+        else:
+            # we have properties
+            unit_or_event_value = prop.get("parameters", {}).get("unit")
+        if is_property_event(prop["type"]):
+            unit_or_event_value = extract_event_value(prop.get("parameters", {}).get("value"))
+        return instance, unit_or_event_value
 
+    async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        prop_type = prop["type"]
+        instance, instance_value = self._extract_instance_with_value(prop)
+        key = (device_id, prop_type, instance, instance_value)
+        if is_property_event(prop_type):
+            # TODO (victor.fedorov): need to know `retrievable` flag here to decide whether to read event property
+            logger.debug("Event properties are not retrievable: %r", key)
+            return None
         topic = self.cap_index.get(key)
         if not topic:
             logger.debug("No MQTT topic found for property: %r", key)
             return None
         try:
-            msg = await read_topic_once(topic, timeout=1)
+            msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value)
             if msg is None:
                 logger.debug("No retained payload in %r", topic)
                 return None
             raw = msg.payload.decode().strip()
-            value = float(raw)  # Currently only float is supported
+            try:
+                value = float(raw)
+            except ValueError:
+                value = raw
 
             return {
                 "type": prop_type,
@@ -588,14 +903,26 @@ class DeviceRegistry:
             if cap_state:
                 capabilities_output.append(cap_state)
 
+        event_flag = False
+
         for prop in device.get("properties", []):
             logger.debug("Reading property state: %r", prop)
             prop_state = await self._read_property_state(device_id, prop)
             if prop_state:
                 properties_output.append(prop_state)
+            # TODO (v.fedorov): 
+            #             Currently we only support non-retrievable events. The problem is that we have no storage 
+            #             location for state these events, so we cannot implement retrievable events at this time. 
+            #             To implement this, we would need to either: (1) support only a single topic instead of two/three, 
+            #             or (2) add intermediate storage for Yandex-formatted states directly in our client.
+            if is_property_event(prop.get("type")):
+                event_flag = True
 
         # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:
+            if event_flag:
+                logger.debug("There is only Event in device, temporary there is no state returned")
+                return
             logger.warning(
                 "%r: no live or retained data — marking DEVICE_UNREACHABLE",
                 device_id,
