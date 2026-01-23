@@ -17,8 +17,9 @@ from typing import (Any, Awaitable, Callable, Dict, Iterable, List, Optional,
 import paho.mqtt.subscribe as subscribe
 
 from constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
-from converters import (convert_mqtt_event_value, convert_rgb_int_to_wb,
-                        convert_rgb_wb_to_int, convert_temp_kelvin_to_percent,
+from converters import (EventType, convert_mqtt_event_value,
+                        convert_rgb_int_to_wb, convert_rgb_wb_to_int,
+                        convert_temp_kelvin_to_percent,
                         convert_temp_percent_to_kelvin, convert_to_bool)
 from mqtt_topic import MQTTTopic
 from wb_alice_device_event_rate import AliceDeviceEventRate
@@ -79,13 +80,23 @@ def is_event_single_topic(items: Iterable[Dict[Any, Any]]) -> bool:
         >>> is_event_single_topic([{"instance": "open"}, {"instance": "motion"}])
         False
     """
-    values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
+    # Group by instance
+    by_instance: Dict[Any, List[Dict[Any, Any]]] = defaultdict(list)
     for item in items:
-        for key, value in item.items():
-            values_per_key[key].add(value)
-            if len(values_per_key[key]) > 1:
-                return False
+        instance = item.get('instance')
+        by_instance[instance].append(item)
+    
+    # For each group compare instance for keys
+    for instance, group in by_instance.items():
+        values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
+        for item in group:
+            for key, value in item.items():
+                if key != 'instance':  
+                    values_per_key[key].add(value)
+                    if len(values_per_key[key]) > 1:
+                        return False
     return True
+
 
 
 def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -475,6 +486,24 @@ class DeviceRegistry:
                         value_cfg = params.get("value")
                         if isinstance(value_cfg, str) and value_cfg.strip():
                             prop_params["value"] = value_cfg.strip()
+                        counter = 0
+                        for cur_prop in props:
+                            if cur_prop['parameters']['instance'] == instance:
+                                counter += 1
+                        # append default oppozit values for some events
+                        if counter == 0:
+                            _oppozit_obj = dict(prop_obj)
+                            _oppozit_params = dict(prop_params)
+                            _prefix, _value = value_cfg.strip().split('.')
+                            if instance in [EventType.OPEN, EventType.WATER_LEAK,EventType.MOTION]:
+                                oppozit_val = convert_mqtt_event_value(
+                                    event_type=instance, 
+                                    event_type_value = _value,
+                                    value=0,
+                                    event_single_topic=True,)
+                                _oppozit_params["value"] = _prefix + "." + oppozit_val
+                            _oppozit_obj["parameters"] = _oppozit_params
+                            props.append(_oppozit_obj)
                     else:
                         # Float property (or non-event property)
                         # "unit" is required for float properties
