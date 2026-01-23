@@ -3,7 +3,7 @@ wb-mqtt-alice (0.7.3) stable; urgency=medium
   * Add support for events
   * Add endpoint for unlink controller from webui
 
- -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 23 Jan 2026 13:30:00 +0300
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Fri, 23 Jan 2026 10:30:00 +0300
 
 wb-mqtt-alice (0.7.2) stable; urgency=medium
 
