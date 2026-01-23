@@ -874,6 +874,8 @@ class DeviceRegistry:
             if cap_state:
                 capabilities_output.append(cap_state)
 
+        event_flag = False
+
         for prop in device.get("properties", []):
             logger.debug("Reading property state: %r", prop)
             prop_state = await self._read_property_state(device_id, prop)
@@ -884,9 +886,14 @@ class DeviceRegistry:
             #             location for state these events, so we cannot implement retrievable events at this time. 
             #             To implement this, we would need to either: (1) support only a single topic instead of two/three, 
             #             or (2) add intermediate storage for Yandex-formatted states directly in our client.
+            if is_property_event(prop.get("type")):
+                event_flag = True
 
         # If nothing was read - mark as unreachable
         if not capabilities_output and not properties_output:
+            if event_flag:
+                logger.debug("There is only Event in device, temporary there is no state returned")
+                return
             logger.warning(
                 "%r: no live or retained data — marking DEVICE_UNREACHABLE",
                 device_id,
