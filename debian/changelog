@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.8.0) stable; urgency=medium
+
+  * Set the minimum allowed version of homeui
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Fri, 23 Jan 2026 10:30:00 +0300
+
 wb-mqtt-alice (0.7.3) stable; urgency=medium
 
   * Add support for events
