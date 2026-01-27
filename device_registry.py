@@ -841,12 +841,13 @@ class DeviceRegistry:
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
         if not instance:
-            # we have capatibilities
+            # we have events => we have Enum values
             instance = prop.get("state", {}).get("instance")
             unit_or_event_value = prop.get("parameters", {}).get("value")
         else:
-            # we have properties
-            unit_or_event_value = prop.get("parameters", {}).get("unit")
+            # we have digit values
+            # TODO (v.fedorov): need to check Float properties with enum values (battery_level, food_level, etc.)
+            unit_or_event_value = None
         if is_property_event(prop["type"]):
             unit_or_event_value = extract_event_value(prop.get("parameters", {}).get("value"))
         return instance, unit_or_event_value
