@@ -794,7 +794,7 @@ class DeviceRegistry:
 
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug("No MQTT topic found for capability: %r", key)
+            logger.warning("No MQTT topic found for capability: %r", key)
             return None
 
         try:
@@ -884,7 +884,7 @@ class DeviceRegistry:
             return None
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug("No MQTT topic found for property: %r", key)
+            logger.warning("No MQTT topic found for property: %r", key)
             return None
         try:
             msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value)
