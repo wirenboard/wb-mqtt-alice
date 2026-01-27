@@ -270,7 +270,12 @@ class DeviceRegistry:
 
         self.devices: Dict[str, Dict[str, Any]] = {}  # "id" to full json block
         self.topic2info: Dict[str, Tuple[str, str, int, AliceDeviceEventRate]] = {}
-        self.cap_index: Dict[Tuple[str, str, Optional[str]], str] = {}
+        # Map (device_id, type, instance, instance_value) → MQTT topic
+        # - device_id: unique device identifier
+        # - type: capability/property type (e.g., "devices.capabilities.on_off")
+        # - instance: capability instance (e.g., "on", "rgb", "temperature") or None
+        # - instance_value: event value (e.g., "opened") for event properties, None for others
+        self.cap_index: Dict[Tuple[str, str, Optional[str], Optional[str]], str] = {}
         self.rooms: Dict[str, Dict[str, Any]] = {}  # "room_id" to block
 
         self._load_config(cfg_path)
@@ -344,7 +349,6 @@ class DeviceRegistry:
                     prop["type"],
                     instance,
                     instance_value
-
                 )
                 self.cap_index[index_key] = full
 
@@ -790,7 +794,7 @@ class DeviceRegistry:
 
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug("No MQTT topic found for capability: %r", key)
+            logger.warning("No MQTT topic found for capability: %r", key)
             return None
 
         try:
@@ -815,7 +819,7 @@ class DeviceRegistry:
             logger.warning("Failed to convert value for %r: %r", key, e)
             return None
 
-    def _extract_instance_with_value(self, prop: Dict[str, Any])->Tuple[str, str]:
+    def _extract_instance_with_value(self, prop: Dict[str, Any])->Tuple[Optional[str], Optional[str]]:
         """
         Extract the indexing tuple for a property configuration
 
@@ -825,10 +829,10 @@ class DeviceRegistry:
                 (for events) "value".
 
         Returns:
-            Tuple[str, str]: (instance, unit_or_event_value)
-                - instance: the 'instance' parameter (e.g. "open", "temperature").
+            Tuple[Optional[str], Optional[str]]: (instance, unit_or_event_value)
+                - instance: the 'instance' parameter (e.g. "open", "temperature"), or None if not present.
                 - unit_or_event_value: for event properties, the extracted event
-                value (e.g. "opened"); for non-event properties, an empty string.
+                value (e.g. "opened"); for non-event properties, None.
 
         Example:
             >>> _extract_instance_with_value({"type": "devices.properties.event",
@@ -841,17 +845,36 @@ class DeviceRegistry:
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
         if not instance:
-            # we have capatibilities
+            # we have events => we have Enum values
             instance = prop.get("state", {}).get("instance")
             unit_or_event_value = prop.get("parameters", {}).get("value")
         else:
-            # we have properties
-            unit_or_event_value = prop.get("parameters", {}).get("unit")
+            # we have digit values
+            # TODO (v.fedorov): need to check Float properties with enum values (battery_level, food_level, etc.)
+            unit_or_event_value = None
         if is_property_event(prop["type"]):
             unit_or_event_value = extract_event_value(prop.get("parameters", {}).get("value"))
         return instance, unit_or_event_value
 
     async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Asynchronously read the current state of a device property from MQTT and convert it to Yandex Smart Home format
+
+        For event properties, returns None since they are not retrievable.
+
+        Args:
+            device_id (str): The unique identifier of the device.
+            prop (Dict[str, Any]): The property configuration dictionary containing type and parameters.
+
+        Returns:
+            Optional[Dict[str, Any]]: A dictionary with 'type' and 'state' keys representing the property state in Yandex format,
+            or None if the property is an event, no MQTT topic is found, or reading fails.
+        Note:
+            Event properties are not retrievable and will always return None.
+            key for cap_index: (device_id, prop_type, instance, instance_value)
+            cap_index: maps to full MQTT topic.
+            instance_value is used only for event properties, for other properties it is None.
+        """
         prop_type = prop["type"]
         instance, instance_value = self._extract_instance_with_value(prop)
         key = (device_id, prop_type, instance, instance_value)
@@ -861,7 +884,7 @@ class DeviceRegistry:
             return None
         topic = self.cap_index.get(key)
         if not topic:
-            logger.debug("No MQTT topic found for property: %r", key)
+            logger.warning("No MQTT topic found for property: %r", key)
             return None
         try:
             msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value)

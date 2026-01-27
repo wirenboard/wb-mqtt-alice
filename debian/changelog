@@ -2,7 +2,13 @@ wb-mqtt-alice (0.8.0) stable; urgency=medium
 
   * Set the minimum allowed version of homeui
 
- -- Victor Fedorov <victor.fedorov@wirenboard.com>  Fri, 23 Jan 2026 10:30:00 +0300
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 27 Jan 2026 14:20:00 +0300
+
+wb-mqtt-alice (0.7.4) stable; urgency=medium
+
+  * Fix range value problem
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 27 Jan 2026 10:20:00 +0300
 
 wb-mqtt-alice (0.7.3) stable; urgency=medium
 
