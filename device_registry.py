@@ -880,8 +880,16 @@ class DeviceRegistry:
         key = (device_id, prop_type, instance, instance_value)
         if is_property_event(prop_type):
             # TODO (victor.fedorov): need to know `retrievable` flag here to decide whether to read event property
-            logger.debug("Event properties are not retrievable: %r", key)
-            return None
+            # but if the event is subscribed to a single topic, try to read the current state
+            topic_count = 0
+            for _key, _values in self.cap_index.items():
+                if _key[:-1] == key[:-1]:
+                    topic_count += 1
+            if topic_count > 1:
+                logger.debug("Event properties are not retrievable: %r", key)
+                return None
+            # single topic
+            logger.warning("Event proprties on single topic")
         topic = self.cap_index.get(key)
         if not topic:
             logger.warning("No MQTT topic found for property: %r", key)
