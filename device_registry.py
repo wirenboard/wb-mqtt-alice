@@ -99,7 +99,7 @@ def is_event_single_topic(items: Iterable[Dict[Any, Any]]) -> bool:
 
 
 
-def merge_properties_list(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def merge_event_prop_by_instance(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Merge multiple event properties with same instance into single property with events array
     
@@ -170,7 +170,7 @@ def transform(obj: Any) -> Any:
     """
     Recursively transform device configuration, merging event properties
     
-    Traverses nested data structure and applies merge_properties_list to any
+    Traverses nested data structure and applies merge_event_prop_by_instance to any
     "properties" key containing a list of properties.
     
     Args:
@@ -183,7 +183,7 @@ def transform(obj: Any) -> Any:
         new = {}
         for key, value in obj.items():
             if key == "properties" and isinstance(value, list):
-                new[key] = merge_properties_list(value)
+                new[key] = merge_event_prop_by_instance(value)
             else:
                 new[key] = transform(value)
         return new
@@ -566,7 +566,7 @@ class DeviceRegistry:
 
         for _prop in props:
             if is_property_event(_prop.get("type","")):
-                return merge_properties_list(props)
+                return merge_event_prop_by_instance(props)
 
         return props
 
