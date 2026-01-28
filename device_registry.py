@@ -12,7 +12,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import (Any, Awaitable, Callable, Dict, Iterable, List, Optional,
-                    Tuple)
+                    Tuple, Set)
 
 import paho.mqtt.subscribe as subscribe
 
@@ -426,116 +426,149 @@ class DeviceRegistry:
             List of devices for /user/devices endpoint response
         """
         logger.debug("Building device list from %r devices", len(self.devices))
-
         devices_out: List[Dict[str, Any]] = []
 
         for dev_id, dev in self.devices.items():
             logger.debug("Processing device: %r - %r", dev_id, dev.get("name", "No name"))
-            room_name = ""
-            room_id = dev.get("room_id")
-            if room_id and room_id in self.rooms:
-                room_name = self.rooms[room_id].get("name", "")
 
-            device: Dict[str, Any] = {
-                "id": dev_id,
-                "name": dev.get("name", dev_id),
-                "status_info": dev.get("status_info", {"reportable": False}),
-                "description": dev.get("description", ""),
-                "room": room_name,
-                "type": dev["type"],
-            }
-
-            caps: List[Dict[str, Any]] = []
-
-            for cap in dev.get("capabilities", []):
-                if cap["type"] == CAP_COLOR_SETTING:
-                    continue  # Will be merged later
-                cap_dict = {"type": cap["type"], "retrievable": True}
-                if "parameters" in cap and cap["parameters"]:
-                    cap_dict["parameters"] = cap["parameters"].copy()
-                caps.append(cap_dict)
-
-            # Merge and append color_setting if present
-            color_params = self._merge_color_setting_params(dev.get("capabilities", []))
-            if color_params:
-                caps.append(
-                    {
-                        "type": CAP_COLOR_SETTING,
-                        "retrievable": True,
-                        "parameters": color_params,
-                    }
-                )
-
+            device = self._create_device_base_info(dev_id, dev)
+            caps = self._collect_capabilities(dev)
             if caps:
                 device["capabilities"] = caps
-
-            props: List[Dict[str, Any]] = []
-            for prop in dev.get("properties", []):
-                prop_obj = {
-                    "type": prop["type"],
-                    # 'retrievable' indicates whether Yandex is allowed to request (get) the current
-                    # state for this property. Event properties are not retrievable because
-                    # events do not have a stored persistent state and therefore cannot be queried.
-                    "retrievable": True if not is_property_event(prop["type"]) else False,
-                    "reportable": True,
-                }
-                # Always send "instance", but "unit" only if present in config
-                params = prop.get("parameters", {}) or {}
-                instance = params.get("instance")
-                if instance:
-                    prop_params: Dict[str, Any] = {"instance": instance}
-                    if is_property_event(prop["type"]):
-                        # Event property
-                        # "value" is required for event properties
-                        value_cfg = params.get("value")
-                        if isinstance(value_cfg, str) and value_cfg.strip():
-                            prop_params["value"] = value_cfg.strip()
-                        counter = 0
-                        for cur_prop in props:
-                            if cur_prop['parameters']['instance'] == instance:
-                                counter += 1
-                        # append default oppozit values for some events
-                        if counter == 0:
-                            _oppozit_obj = dict(prop_obj)
-                            _oppozit_params = dict(prop_params)
-                            _prefix, _value = value_cfg.strip().split('.')
-                            if instance in [EventType.OPEN, EventType.WATER_LEAK,EventType.MOTION]:
-                                oppozit_val = convert_mqtt_event_value(
-                                    event_type=instance, 
-                                    event_type_value = _value,
-                                    value=0,
-                                    event_single_topic=True,)
-                                _oppozit_params["value"] = _prefix + "." + oppozit_val
-                            _oppozit_obj["parameters"] = _oppozit_params
-                            props.append(_oppozit_obj)
-                    else:
-                        # Float property (or non-event property)
-                        # "unit" is required for float properties
-                        unit_cfg = params.get("unit")
-                        if isinstance(unit_cfg, str) and unit_cfg.strip():
-                            prop_params["unit"] = unit_cfg.strip()
-                    prop_obj["parameters"] = prop_params
-                else:
-                    logger.warning(
-                        "Property %r on device %r has no 'instance' in parameters",
-                        prop.get("type"),
-                        dev_id,
-                    )
-                props.append(prop_obj)
-
+            props = self._collect_properties(dev_id, dev)
             if props:
                 device["properties"] = props
-                for _prop in props:
-                    if is_property_event(_prop.get("type","")):
-                        device["properties"] = merge_properties_list(props)
-                        break
 
             devices_out.append(device)
 
         logger.debug("Final device list contains %r devices:", len(devices_out))
         for i, device in enumerate(devices_out):
             logger.debug("  %r. %r - %r", i + 1, device["id"], device["name"])
+
         return devices_out
+    
+    def _create_device_base_info(self, dev_id: str, dev: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create basic device metadata structure
+        """
+        room_name = ""
+        room_id = dev.get("room_id")
+        if room_id and room_id in self.rooms:
+            room_name = self.rooms[room_id].get("name", "")
+
+        device: Dict[str, Any] = {
+            "id": dev_id,
+            "name": dev.get("name", dev_id),
+            "status_info": dev.get("status_info", {"reportable": False}),
+            "description": dev.get("description", ""),
+            "room": room_name,
+            "type": dev["type"],
+        }
+
+        return device
+
+    def _collect_capabilities(self, dev: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Collect and format device capabilities
+        """
+        caps: List[Dict[str, Any]] = []
+
+        # Standard capabilities
+        for cap in dev.get("capabilities", []):
+            if cap["type"] == CAP_COLOR_SETTING:
+                continue  # Will be merged later
+
+            cap_dict = {
+                "type": cap["type"],
+                "retrievable": True,
+                "reportable": True  # "reportable" if not set - False, but need True for yandex scenarios usage
+            }
+            if "parameters" in cap and cap["parameters"]:
+                cap_dict["parameters"] = cap["parameters"].copy()
+            caps.append(cap_dict)
+
+        # Merge and append color_setting if present
+        color_params = self._merge_color_setting_params(dev.get("capabilities", []))
+        if color_params:
+            caps.append(
+                {
+                    "type": CAP_COLOR_SETTING,
+                    "retrievable": True,
+                    "reportable": True,   # "reportable" if not set - False, but need True for yandex scenarios usage
+                    "parameters": color_params,
+                }
+            )
+
+        return caps
+
+    def _collect_properties(self, dev_id: str, dev: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Collect and format properties, handling event logic
+        """
+        props: List[Dict[str, Any]] = []
+        for prop in dev.get("properties", []):
+            is_event = is_property_event(prop["type"])
+
+            prop_obj = {
+                "type": prop["type"],
+                # 'retrievable' indicates whether Yandex is allowed to request (get) the current
+                # state for this property. Event properties are not retrievable because
+                # events do not have a stored persistent state and therefore cannot be queried.
+                "retrievable": True if not is_event else False,
+                "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
+            }
+            # Always send "instance", but "unit" only if present in config
+            params = prop.get("parameters", {}) or {}
+            instance = params.get("instance")
+            if not instance:
+                logger.warning(
+                    "Property %r on device %r has no 'instance' in parameters",
+                    prop.get("type"),
+                    dev_id,
+                )
+                props.append(prop_obj)
+                continue
+
+            prop_params: Dict[str, Any] = {"instance": instance}
+            if is_event:
+                # Event property
+                # "value" is required for event properties
+                value_cfg = params.get("value")
+                if isinstance(value_cfg, str) and value_cfg.strip():
+                    prop_params["value"] = value_cfg.strip()
+                counter = 0
+                for cur_prop in props:
+                    if cur_prop['parameters']['instance'] == instance:
+                        counter += 1
+                # append default oppozit values for some events
+                if counter == 0:
+                    _oppozit_obj = dict(prop_obj)
+                    _oppozit_params = dict(prop_params)
+                    _prefix, _value = value_cfg.strip().split('.')
+                    if instance in [EventType.OPEN, EventType.WATER_LEAK,EventType.MOTION]:
+                        oppozit_val = convert_mqtt_event_value(
+                            event_type=instance, 
+                            event_type_value = _value,
+                            value=0,
+                            event_single_topic=True,)
+                        _oppozit_params["value"] = _prefix + "." + oppozit_val
+                    _oppozit_obj["parameters"] = _oppozit_params
+                    props.append(_oppozit_obj)
+            else:
+                # Float property (or non-event property)
+                # "unit" is required for float properties
+                unit_cfg = params.get("unit")
+                if isinstance(unit_cfg, str) and unit_cfg.strip():
+                    prop_params["unit"] = unit_cfg.strip()
+
+            prop_obj["parameters"] = prop_params
+            props.append(prop_obj)
+
+        for _prop in props:
+            if is_property_event(_prop.get("type","")):
+                return merge_properties_list(props)
+
+        return props
 
     def _convert_cap_to_yandex(
         self, 
