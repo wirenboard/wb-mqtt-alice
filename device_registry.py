@@ -166,33 +166,6 @@ def merge_event_prop_by_instance(props: List[Dict[str, Any]]) -> List[Dict[str, 
     return other_props + merged_events_props
 
 
-def transform(obj: Any) -> Any:
-    """
-    Recursively transform device configuration, merging event properties
-    
-    Traverses nested data structure and applies merge_event_prop_by_instance to any
-    "properties" key containing a list of properties.
-    
-    Args:
-        obj: Data structure to transform (dict, list, or primitive)
-        
-    Returns:
-        Transformed object with event properties merged where found
-    """
-    if isinstance(obj, dict):
-        new = {}
-        for key, value in obj.items():
-            if key == "properties" and isinstance(value, list):
-                new[key] = merge_event_prop_by_instance(value)
-            else:
-                new[key] = transform(value)
-        return new
-    elif isinstance(obj, list):
-        return [transform(cur_obj) for cur_obj in obj]
-    else:
-        return obj
-
-
 def extract_event_value(value: Any) -> str:
     """
     Convert parameter ``value`` to an event string
