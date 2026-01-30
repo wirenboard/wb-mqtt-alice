@@ -1,6 +1,6 @@
 wb-mqtt-alice (0.8.1) stable; urgency=medium
 
-  * Fix capabilities for usage in yandex scenario INT-767
+  * Fix capabilities for usage in yandex scenario
 
  -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Thu, 29 Jan 2026 19:00:00 +0300
 
