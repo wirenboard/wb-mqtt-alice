@@ -932,7 +932,7 @@ class DeviceRegistry:
             if cap_state:
                 capabilities_output.append(cap_state)
 
-        event_flag = False
+        has_only_event_properties = False
 
         for prop in device.get("properties", []):
             logger.debug("Reading property state: %r", prop)
@@ -945,13 +945,13 @@ class DeviceRegistry:
             #             To implement this, we would need to either: (1) support only a single topic instead of two/three, 
             #             or (2) add intermediate storage for Yandex-formatted states directly in our client.
             if is_property_event(prop.get("type")):
-                event_flag = True
+                has_only_event_properties = True
 
         # Build device output response
         device_output: Dict[str, Any] = {"id": device_id}
         # If nothing was read - handle based on device type
         if not capabilities_output and not properties_output:
-            if event_flag:
+            if has_only_event_properties:
                 logger.debug("Device %r has only event properties - no state to return", device_id)
                 return device_output
             logger.warning(
