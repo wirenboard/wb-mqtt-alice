@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: wb-cloud-agent
+Upstream-Name: wb-mqtt-alice
 Upstream-Contact: Wiren Board Team <info@wirenboard.com>
-Source: https://github.com/wirenboard/wb-alice-client
+Source: https://github.com/wirenboard/wb-mqtt-alice
 #
 # Please double check copyright with the licensecheck(1) command.
 
@@ -10,9 +10,12 @@ Files:     .gitignore
            README.md
            requirements.txt
            setup.py
-           wb-mqtt-alice-client.py
-           wb-mqtt-alice-config.py
-           mqtt_topic.py
+           wb_mqtt_alice_client/*
+           wb_mqtt_alice_config/*
+           wb_mqtt_alice_lib/*
+           wb_mqtt_alice_cli/*
+           configs/*
+           scripts/*
 Copyright: 2025, Wiren Board Team <info@wirenboard.com>
 License:   MIT-WB
 
