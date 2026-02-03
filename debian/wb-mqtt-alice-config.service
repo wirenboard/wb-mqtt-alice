@@ -9,7 +9,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/lib/wb-mqtt-alice/wb-mqtt-alice-config.py
+Environment=PYTHONPATH=/usr/lib/wb-mqtt-alice
+ExecStart=/usr/bin/python3 -m wb.mqtt_alice.config.main
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10

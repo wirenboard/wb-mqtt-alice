@@ -11,13 +11,26 @@ def get_version():
 setup(
     name="wb-mqtt-alice",
     version=get_version(),
-    description="Yandex Alice to MQTT integration for Wiren Board controllers",
-    license="MIT",
     author="Vitalii Gaponov",
     author_email="vitalii.gaponov@wirenboard.com",
     maintainer="Wiren Board Team",
     maintainer_email="info@wirenboard.com",
+    description="Yandex Alice to MQTT integration for Wiren Board controllers",
+    license="MIT",
     url="https://github.com/wirenboard/wb-mqtt-alice",
-    # Files installed by debian/install file
+    packages=[
+        "wb.mqtt_alice.lib",  # Shared files
+        "wb.mqtt_alice.cli",
+        "wb.mqtt_alice.config",  # Backend for WEBUI
+        
+        "wb.mqtt_alice.client",
+        "wb.mqtt_alice.client.downstream",
+        "wb.mqtt_alice.client.downstream.file_poll",
+        "wb.mqtt_alice.client.downstream.http_poll",
+        "wb.mqtt_alice.client.downstream.mqtt_wb_conv",
+        "wb.mqtt_alice.client.upstream",
+        "wb.mqtt_alice.client.upstream.wb_proxy_socketio",
+    ],
+    # Other files (scripts, configs and etc) installed by debian/install file
     # Requirements installed from debian/control file
 )

@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.9.0) stable; urgency=medium
+
+  * Add batching when send notify
+  * Implement internal devices state storage
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Thu, 02 Feb 2026 19:00:00 +0300
+
 wb-mqtt-alice (0.8.1) stable; urgency=medium
 
   * Fix capabilities for usage in yandex scenario

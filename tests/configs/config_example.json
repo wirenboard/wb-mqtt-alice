@@ -1,0 +1,47 @@
+{
+  "rooms": {
+    "without_rooms": {
+      "name": "Без комнаты",
+      "devices": ["dev1"]
+    }
+  },
+  "devices": {
+    "dev1": {
+      "name": "Demo device",
+      "status_info": null,
+      "description": null,
+      "room_id": "without_rooms",
+      "type": "devices.types.sensor",
+      "capabilities": [
+        {
+          "type": "devices.capabilities.on_off",
+          "mqtt": "wb/dev1/relay",
+          "parameters": { "instance": "on" }
+        }
+      ],
+      "properties": [
+        {
+          "type": "devices.properties.float",
+          "retrievable": true,
+          "reportable": true,
+          "parameters": {
+            "instance": "temperature",
+            "unit": "unit.temperature.celsius"
+          }
+        }
+      ]
+    }
+  },
+
+  "bindings": [
+    {
+      "downstream": "mqtt_wb_conv",
+      "device": "dev1",
+      "point": "properties:devices.properties.float:temperature",
+      "address": { "value": "wb/dev1/temperature" }
+    }
+  ],
+
+  "link_url": null,
+  "unlink_url": "https://alice-dev.wirenboard.com"
+}
