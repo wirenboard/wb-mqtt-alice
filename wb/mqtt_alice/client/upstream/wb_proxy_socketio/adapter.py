@@ -37,7 +37,7 @@ class SocketIOAdapter(BaseUpstreamAdapter):
         self._manager: Optional[SioConnectionManager] = None
         
         # Извлекаем параметры из конфига с дефолтными значениями
-        self.server_url = config.get("url", "https://proxy.wirenboard.com")
+        self.server_url = config.get("url", "http://localhost:8042")
         self.controller_sn = config.get("controller_sn", "unknown_sn")
         self.client_pkg_ver = config.get("client_pkg_ver", "1.0.0")
         self.debug_logging = config.get("debug", False)

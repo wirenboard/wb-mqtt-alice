@@ -24,6 +24,7 @@ setup(
         "wb.mqtt_alice.config",  # Backend for WEBUI
         
         "wb.mqtt_alice.client",
+        "wb.mqtt_alice.client.bridge",
         "wb.mqtt_alice.client.downstream",
         "wb.mqtt_alice.client.downstream.file_poll",
         "wb.mqtt_alice.client.downstream.http_poll",

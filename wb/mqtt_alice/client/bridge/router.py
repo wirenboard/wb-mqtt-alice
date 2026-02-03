@@ -9,8 +9,8 @@ from typing import Any, Dict, Mapping
 from .binding_registry import BindingRegistry
 from .device_registry import DeviceRegistry
 from .state_store import StateStore
-from .downstream.base import DownstreamAdapter, DownstreamCodec
-from .downstream.models import DownstreamWrite, RawDownstreamMessage
+from wb.mqtt_alice.client.downstream.base import DownstreamAdapter, DownstreamCodec
+from wb.mqtt_alice.client.downstream.models import DownstreamWrite, RawDownstreamMessage
 
 logger = logging.getLogger(__name__)
 

@@ -7,11 +7,9 @@ import json
 import time
 from typing import Dict, Any
 
-# Импорты из созданных нами модулей
-from upstream.wb_proxy_socketio import SocketIOAdapter
-from upstream.types import UpstreamState
+from wb.mqtt_alice.client.upstream.wb_proxy_socketio.adapter import SocketIOAdapter
+from wb.mqtt_alice.client.upstream import UpstreamState
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -23,8 +21,8 @@ logger = logging.getLogger("Main")
 CONFIG = {
     "mode": "wb_proxy",
     "wb_proxy": {
-        "url": "https://proxy.wirenboard.com",  # Или ваш тестовый сервер
-        "controller_sn": "TEST_CONTROLLER_001", # Замените на реальный, если нужно
+        "url": "http://localhost:8042",
+        "controller_sn": "TEST_CONTROLLER_001",
         "client_pkg_ver": "0.1.0-alpha",
         "debug": False
     }
@@ -36,9 +34,9 @@ CURRENT_TEMP = -45.3
 
 class MockCore:
     """
-    Заглушка для Ядра (Core).
+    Заглушка для Ядра (Core)
     Нужна, чтобы зарегистрировать обязательные хендлеры в адаптере,
-    пока у нас нет настоящего Router и Registry.
+    пока у нас нет настоящего Router и Registry
     """
     async def handle_discovery(self, payload: dict) -> dict:
         logger.info(f"Incoming DISCOVERY request: {payload}")
@@ -56,7 +54,7 @@ class MockCore:
 
 async def notification_loop(adapter: SocketIOAdapter):
     """
-    Цикл, который каждые 5 секунд шлет обновленную температуру.
+    Цикл, который каждые 5 секунд шлет обновленную температуру
     """
     global CURRENT_TEMP
     
@@ -126,7 +124,7 @@ async def main():
         await adapter.start()
         
         # Опционально: Ждем готовности перед запуском цикла уведомлений, 
-        # но наш цикл сам умеет ждать внутри while, так что не блокируем main.
+        # но наш цикл сам умеет ждать внутри while, так что не блокируем main
         
         # 5. Запуск цикла уведомлений
         notify_task = asyncio.create_task(notification_loop(adapter))

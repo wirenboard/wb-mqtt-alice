@@ -3,7 +3,10 @@
 #       Standart files path "/usr/lib/python3/dist-packages/wb/mqtt-alice/..."
 
 # Scripts
-scripts /usr/lib/wb-mqtt-alice/
+scripts/configure-nginx-proxy.sh /usr/lib/wb-mqtt-alice/scripts
+
+# WB specific
+config_files/50wb-alice /etc/wb-configs.d/
 
 # General user side config files
 config_files/wb-mqtt-alice-client.conf /etc/
@@ -15,13 +18,10 @@ config_files/wb-mqtt-alice-webui.conf /usr/lib/wb-mqtt-alice/
 config_files/wb-mqtt-alice-server.conf /usr/lib/wb-mqtt-alice/
 config_files/wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/
 
-# WB specific
-config_files/50wb-alice /etc/wb-configs.d/
-
 # Nginx
 config_files/wb-mqtt-alice-nginx.conf /usr/share/wb-mqtt-homeui/nginx/includes/
 
-# Wrapper for CLI command run
+# Wrapper for CLI command run like "$ wb-mqtt-alice ..."
 scripts/wb-mqtt-alice /usr/bin/
 
 # Process this files!
