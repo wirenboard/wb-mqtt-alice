@@ -960,8 +960,6 @@ class DeviceRegistry:
             if is_property_event(prop.get("type")):
                 has_only_event_properties = True
 
-        # Build device output response
-        device_state_answer: Dict[str, Any] = {"id": device_id}
         # If nothing was read - handle based on device type
         if not capabilities_output and not properties_output:
             if has_only_event_properties:
@@ -983,6 +981,8 @@ class DeviceRegistry:
             }
             return err_device_state_answer
         # If at least something was read - return it
+        # Build device output response
+        device_state_answer: Dict[str, Any] = {"id": device_id}
         if capabilities_output:
             device_state_answer["capabilities"] = capabilities_output
         if properties_output:
