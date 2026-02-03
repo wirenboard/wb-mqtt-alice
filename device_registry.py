@@ -951,7 +951,8 @@ class DeviceRegistry:
         if not capabilities_output and not properties_output:
             if event_flag:
                 logger.debug("There is only Event in device, temporary there is no state returned")
-                return
+                device_output: Dict[str, Any] = {"id": device_id}
+                return device_output
             logger.warning(
                 "%r: no live or retained data — marking DEVICE_UNREACHABLE",
                 device_id,
