@@ -947,11 +947,12 @@ class DeviceRegistry:
             if is_property_event(prop.get("type")):
                 event_flag = True
 
-        # If nothing was read - mark as unreachable
+        # Build device output response
+        device_output: Dict[str, Any] = {"id": device_id}
+        # If nothing was read - handle based on device type
         if not capabilities_output and not properties_output:
             if event_flag:
-                logger.debug("There is only Event in device, temporary there is no state returned")
-                device_output: Dict[str, Any] = {"id": device_id}
+                logger.debug("Device %r has only event properties - no state to return", device_id)
                 return device_output
             logger.warning(
                 "%r: no live or retained data — marking DEVICE_UNREACHABLE",
@@ -962,9 +963,7 @@ class DeviceRegistry:
                 "error_code": "DEVICE_UNREACHABLE",
                 "error_message": "MQTT topics unavailable",
             }
-
         # If at least something was read - return it
-        device_output: Dict[str, Any] = {"id": device_id}
         if capabilities_output:
             device_output["capabilities"] = capabilities_output
         if properties_output:
