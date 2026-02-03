@@ -894,6 +894,14 @@ class DeviceRegistry:
             return None
         try:
             msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value)
+            # TODO (victor.fedorov): Differentiate return values for errors vs events.
+            #      Event properties are currently non-retrievable and therefore treated
+            #      as having no stored state. We should return a different result when
+            #      the device exposes only event properties than when it truly has no
+            #      MQTT data (unreachable).
+            #      Adding retrievable events would require
+            #      either supporting single-topic implementations or introducing an
+            #      intermediate storage for Yandex-formatted states.
             if msg is None:
                 logger.debug("No retained payload in %r", topic)
                 return None
@@ -940,33 +948,44 @@ class DeviceRegistry:
             if prop_state:
                 properties_output.append(prop_state)
             # TODO (v.fedorov): 
-            #             Currently we only support non-retrievable events. The problem is that we have no storage 
-            #             location for state these events, so we cannot implement retrievable events at this time. 
-            #             To implement this, we would need to either: (1) support only a single topic instead of two/three, 
-            #             or (2) add intermediate storage for Yandex-formatted states directly in our client.
+            #           The problem with event properties is that they are not retrievable.
+            #           So if a device has only event properties, we cannot return any state for it.
+            #           This means that if a device has only event properties, we should not mark it as DEVICE_UNREACHABLE,
+            #           but rather return an empty state. However, this is not ideal either, because
+            #           Yandex Smart Home expects at least some state to be returned for retrievable properties
+            #           Currently we only support non-retrievable events. The problem is that we have no storage 
+            #           location for state these events, so we cannot implement retrievable events at this time. 
+            #           To implement this, we would need to either: (1) support only a single topic instead of two/three, 
+            #           or (2) add intermediate storage for Yandex-formatted states directly in our client.
             if is_property_event(prop.get("type")):
                 has_only_event_properties = True
 
         # Build device output response
-        device_output: Dict[str, Any] = {"id": device_id}
+        device_state_answer: Dict[str, Any] = {"id": device_id}
         # If nothing was read - handle based on device type
         if not capabilities_output and not properties_output:
             if has_only_event_properties:
+                # Event properties are non-retrievable; when a device exposes only
+                # such properties we cannot provide any state. In this situation
+                # do not mark the device as DEVICE_UNREACHABLE — return an empty
+                # state instead so Yandex receives a valid (but empty) response.
                 logger.debug("Device %r has only event properties - no state to return", device_id)
-                return device_output
+                empty_device_state_answer = {"id": device_id}
+                return empty_device_state_answer
             logger.warning(
                 "%r: no live or retained data — marking DEVICE_UNREACHABLE",
                 device_id,
             )
-            return {
+            err_device_state_answer = {
                 "id": device_id,
                 "error_code": "DEVICE_UNREACHABLE",
                 "error_message": "MQTT topics unavailable",
             }
+            return err_device_state_answer
         # If at least something was read - return it
         if capabilities_output:
-            device_output["capabilities"] = capabilities_output
+            device_state_answer["capabilities"] = capabilities_output
         if properties_output:
-            device_output["properties"] = properties_output
+            device_state_answer["properties"] = properties_output
 
-        return device_output
+        return device_state_answer
