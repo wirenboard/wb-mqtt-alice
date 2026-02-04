@@ -276,6 +276,8 @@ def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, ev
                 value = event_type_value if convert_to_bool(value) else MotionEventValue.NOT_DETECTED
             elif event_type_value == MotionEventValue.NOT_DETECTED:
                 value = event_type_value if convert_to_bool(value) else MotionEventValue.DETECTED
+        else:
+            value = event_type_value if convert_to_bool(value) else None
     else:
         value = event_type_value if convert_to_bool(value) else None
 

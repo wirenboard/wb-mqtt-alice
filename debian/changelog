@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.8.2) stable; urgency=medium
+
+  * Fix event state responses to Yandex
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 3 Feb 2026 12:20:00 +0300
+
 wb-mqtt-alice (0.8.1) stable; urgency=medium
 
   * Fix capabilities for usage in yandex scenario
