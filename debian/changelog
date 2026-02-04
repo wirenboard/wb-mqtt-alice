@@ -2,7 +2,7 @@ wb-mqtt-alice (0.8.3) stable; urgency=medium
 
   * Add a custom file to HomeUI to make the configurator menu item appear
 
- -- Mikhail Burchu <mikhail.burchu@wirenboard.com>  Thu, 4 Feb 2026 15:40:00 +0300
+ -- Mikhail Burchu <mikhail.burchu@wirenboard.com>  Wed, 4 Feb 2026 15:40:00 +0300
 
 wb-mqtt-alice (0.8.2) stable; urgency=medium
 
