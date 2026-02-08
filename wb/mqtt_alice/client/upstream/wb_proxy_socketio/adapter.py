@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import time
 from typing import Any, Dict, Optional
 
 from ..base import BaseUpstreamAdapter
@@ -109,10 +110,13 @@ class SocketIOAdapter(BaseUpstreamAdapter):
         try:
             # Протокол требует обернуть данные в событие 'alice_devices_state'
             # Формат payload должен соответствовать спецификации Яндекса
-            payload = {"payload": notification_data}
+            payload = {
+                "ts": time.time(),
+                "payload": notification_data
+            }
             
             # Используем emit менеджера
-            await self._manager.emit("alice_devices_state", payload)
+            await self._manager.emit("device_state", payload)
         except Exception as e:
             logger.error(f"Failed to send notification to Cloud: {e}")
 

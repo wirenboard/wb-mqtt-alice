@@ -4,11 +4,10 @@
 import asyncio
 import logging
 import json
-import time
 from typing import Dict, Any
 
 from wb.mqtt_alice.client.upstream.wb_proxy_socketio.adapter import SocketIOAdapter
-from wb.mqtt_alice.client.upstream import UpstreamState
+from wb.mqtt_alice.client.upstream.types import UpstreamState
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,8 +28,8 @@ CONFIG = {
 }
 
 # --- Данные тестового устройства ---
-DEVICE_ID = "d5a5a2ea-4bb4-4daa-99f5-ddbfde30a09d"
-CURRENT_TEMP = -45.3
+DEVICE_ID = "60ba5cbd-260128210654-604e8e10-748e-43f5-a028-1f3ce82b22e3"
+CURRENT_TEMP = 0
 
 class MockCore:
     """
