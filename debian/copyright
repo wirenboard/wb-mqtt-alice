@@ -10,10 +10,10 @@ Files:     .gitignore
            README.md
            requirements.txt
            setup.py
-           wb_mqtt_alice_client/*
-           wb_mqtt_alice_config/*
-           wb_mqtt_alice_lib/*
-           wb_mqtt_alice_cli/*
+           wb/mqtt_alice/client/*
+           wb/mqtt_alice/config/*
+           wb/mqtt_alice/common/*
+           wb/mqtt_alice/cli/*
            configs/*
            scripts/*
 Copyright: 2025, Wiren Board Team <info@wirenboard.com>

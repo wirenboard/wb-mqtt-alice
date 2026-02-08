@@ -15,11 +15,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from wb.mqtt_alice.lib.constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
-from wb.mqtt_alice.lib.fetch_url import fetch_url
-from wb.mqtt_alice.lib.models import (Capability, ClientConfig, Config, Device, Property, Room,
+from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
+from wb.mqtt_alice.common.fetch_url import fetch_url
+from wb.mqtt_alice.common.models import (Capability, ClientConfig, Config, Device, Property, Room,
                     RoomID)
-from wb.mqtt_alice.lib.wb_mqtt_load_config import (get_board_revision, get_key_id,
+from wb.mqtt_alice.common.wb_mqtt_load_config import (get_board_revision, get_key_id,
                                  load_server_config)
 
 # FastAPI initialization

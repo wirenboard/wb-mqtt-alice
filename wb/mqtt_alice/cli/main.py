@@ -6,13 +6,13 @@ import sys
 from enum import IntEnum
 from http import HTTPStatus
 
-from wb.mqtt_alice.lib.fetch_url import fetch_url
-from wb.mqtt_alice.lib.wb_mqtt_load_config import (
+from wb.mqtt_alice.common.fetch_url import fetch_url
+from wb.mqtt_alice.common.wb_mqtt_load_config import (
     get_board_revision,
     get_key_id,
     load_server_config
 )
-from wb.mqtt_alice.lib.constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
+from wb.mqtt_alice.common.constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
 
 # Exit codes for get_link_status / CLI
 class ExitCode(IntEnum):

@@ -19,7 +19,7 @@ setup(
     license="MIT",
     url="https://github.com/wirenboard/wb-mqtt-alice",
     packages=[
-        "wb.mqtt_alice.lib",  # Shared files
+        "wb.mqtt_alice.common",  # Shared files via several modules
         "wb.mqtt_alice.cli",
         "wb.mqtt_alice.config",  # Backend for WEBUI
         

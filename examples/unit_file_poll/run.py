@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from wb_alice_config.downstream.file_poll.adapter import FilePollAdapter, FilePollConfig
-from wb_alice_config.downstream.models import RawDownstreamMessage
+from wb.mqtt_alice.client.downstream.file_poll.adapter import FilePollAdapter, FilePollConfig
+from wb.mqtt_alice.client.downstream.models import RawDownstreamMessage
 
 
 @dataclass
