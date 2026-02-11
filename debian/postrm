@@ -80,7 +80,6 @@ main() {
     else
         log_info "No changes made, nginx reload skipped"
     fi
-   
     log_info "Cleanup completed successfully"
 }
 
