@@ -80,3 +80,7 @@ journalctl -u wb-mqtt-alice-client -f
 ```terminal
 journalctl -t wb-mqtt-alice-cli -f
 ```
+
+## Веб-интерфейс
+Для отображения/скрытия пункта меню "Яндекс Алиса" небходим конфигурационный файл alice-navigation.json, который устанавливается в папку "/usr/share/wb-mqtt-homeui/custom-menu".
+Это необходимо для дальнейшей реализации механизма отображения/скрытия пунктов меню в homeui.
