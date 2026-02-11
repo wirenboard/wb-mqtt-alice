@@ -6,7 +6,6 @@ set -e
 
 CONFFILE_DEVICES='/etc/wb-mqtt-alice-devices.conf'
 CONFFILE_DEVICES_DEFAULT='/etc/wb-mqtt-alice-devices.conf.default'
-MENU_FILE="/usr/share/wb-mqtt-homeui/custom-menu/alice-menu-item.json"
 
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
@@ -73,12 +72,6 @@ main() {
     # Note: we NOT remove SSL directive "ssl_engine ateccx08;" from nginx.conf
     # We can't guarantee they were added by us or not used elsewhere
     cleanup_nginx_site
-
-    # Delete the menu item file for the web interface
-    if [ -f "${MENU_FILE}" ] || [ -L "${MENU_FILE}" ]; then
-        rm -f "${MENU_FILE}"
-        log_info "Removed web interface menu item: ${MENU_FILE}"
-    fi
     
     # Only reload nginx if any changes were made
     if [ "${CHANGES_MADE}" = 'true' ]; then
