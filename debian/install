@@ -24,3 +24,4 @@ wb_mqtt_alice_cli.py /usr/lib/wb-mqtt-alice/
 wb_mqtt_load_config.py /usr/lib/wb-mqtt-alice/
 wb-mqtt-alice /usr/bin/
 wb-mqtt-alice-server.conf /usr/lib/wb-mqtt-alice/
+alice-navigation.json usr/share/wb-mqtt-homeui/custom-menu
