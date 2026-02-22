@@ -39,8 +39,8 @@ def fetch_url(
     """
 
     # Checking for certificate availability
-    cert_path = Path(BUNDLE_CRT_PATH)
-    if not cert_path.exists():
+    cert_path_obj = Path(cert_path)
+    if not cert_path_obj.exists():
         return {
                 "status_code": None,
                 "data": None,
@@ -69,7 +69,7 @@ def fetch_url(
         "curl",
         "-X", "POST",
         *retry_opts,
-        "--cert", cert_path,
+        "--cert", str(cert_path_obj),
         "--engine", engine,
         "--key-type", key_type,
         "--key", key_id,
