@@ -1,0 +1,13 @@
+{
+  "id": "integrations",
+  "children": [
+    {
+      "id": "alice",
+      "url": "integrations/alice",
+      "title": {
+        "ru": "Яндекс Алиса",
+        "en": "Yandex Alice"
+      }
+    }
+  ]
+}

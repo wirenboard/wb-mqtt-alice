@@ -1,4 +1,4 @@
-# Python packets
+# - - Python packets - -
 # NOTE: Installed by setup.py
 #       Standart files path "/usr/lib/python3/dist-packages/wb/mqtt-alice/..."
 
@@ -26,6 +26,9 @@ config_files/wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/
 
 # Nginx
 config_files/wb-mqtt-alice-nginx.conf /usr/share/wb-mqtt-homeui/nginx/includes/
+
+# WB specific
+alice-navigation.json usr/share/wb-mqtt-homeui/custom-menu
 
 # Process this files!
 # wb_alice_migrate_client_config.py /usr/lib/wb-mqtt-alice/
