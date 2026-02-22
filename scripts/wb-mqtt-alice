@@ -5,7 +5,7 @@ import logging
 from logging.handlers import SysLogHandler
 
 from wb.mqtt_alice.common.constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
-from wb.mqtt_alice.cli import main
+from wb.mqtt_alice.cli.main import main
 
 handler = SysLogHandler(address='/dev/log', facility=SysLogHandler.LOG_USER)
 # use logger name as prefix — journald recognizes it as SYSLOG_IDENTIFIER
