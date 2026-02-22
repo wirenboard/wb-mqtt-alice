@@ -39,8 +39,8 @@ PROP_EVENT = "devices.properties.event"
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 DEVICE_PATH = "/etc/wb-mqtt-alice-devices.conf"
-CONFIG_EVENTS_RATE_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-event-rates.json"
-SERVER_CONFIG_PATH = "/usr/lib/wb-mqtt-alice/wb-mqtt-alice-server.conf"
+CONFIG_EVENTS_RATE_PATH = "/usr/lib/wb-mqtt-alice/configs/wb-mqtt-alice-event-rates.json"
+SERVER_CONFIG_PATH = "/usr/lib/wb-mqtt-alice/configs/wb-mqtt-alice-server.conf"
 CLIENT_CONFIG_PATH = "/etc/wb-mqtt-alice-client.conf"
 # Board info paths
 BOARD_REVISION_PATH = "/proc/device-tree/wirenboard/board-revision"
