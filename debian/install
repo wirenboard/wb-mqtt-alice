@@ -22,9 +22,9 @@ configs/wb-mqtt-alice-devices.conf /etc/
 configs/wb-mqtt-alice-devices.conf.example /etc/
 
 # Internal config files
-configs/wb-mqtt-alice-webui.conf /usr/lib/wb-mqtt-alice/
-configs/wb-mqtt-alice-server.conf /usr/lib/wb-mqtt-alice/
-configs/wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/
+configs/wb-mqtt-alice-webui.conf /usr/lib/wb-mqtt-alice/configs/
+configs/wb-mqtt-alice-server.conf /usr/lib/wb-mqtt-alice/configs/
+configs/wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/configs/
 
 # Nginx
 configs/wb-mqtt-alice-nginx.conf /usr/share/wb-mqtt-homeui/nginx/includes/
