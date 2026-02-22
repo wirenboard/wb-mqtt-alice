@@ -9,7 +9,7 @@ scripts/configure-nginx-proxy.sh /usr/lib/wb-mqtt-alice/scripts
 
 # WB specific
 scripts/50wb-alice /etc/wb-configs.d/
-wb_alice_migrate_client_config.py /usr/lib/wb-mqtt-alice/scripts
+scripts/wb_alice_migrate_client_config.py /usr/lib/wb-mqtt-alice/scripts
 
 # Wrapper for CLI command run like "$ wb-mqtt-alice ..."
 scripts/wb-mqtt-alice /usr/bin/
