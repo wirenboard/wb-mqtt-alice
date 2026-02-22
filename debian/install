@@ -2,11 +2,17 @@
 # NOTE: Installed by setup.py
 #       Standart files path "/usr/lib/python3/dist-packages/wb/mqtt-alice/..."
 
-# Scripts
+# - - Scripts - -
+
 scripts/configure-nginx-proxy.sh /usr/lib/wb-mqtt-alice/scripts
 
 # WB specific
-config_files/50wb-alice /etc/wb-configs.d/
+scripts/50wb-alice /etc/wb-configs.d/
+
+# Wrapper for CLI command run like "$ wb-mqtt-alice ..."
+scripts/wb-mqtt-alice /usr/bin/
+
+# - - Configs - -
 
 # General user side config files
 config_files/wb-mqtt-alice-client.conf /etc/
@@ -20,9 +26,6 @@ config_files/wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/
 
 # Nginx
 config_files/wb-mqtt-alice-nginx.conf /usr/share/wb-mqtt-homeui/nginx/includes/
-
-# Wrapper for CLI command run like "$ wb-mqtt-alice ..."
-scripts/wb-mqtt-alice /usr/bin/
 
 # Process this files!
 # wb_alice_migrate_client_config.py /usr/lib/wb-mqtt-alice/
