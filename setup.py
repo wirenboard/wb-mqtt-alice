@@ -32,6 +32,10 @@ setup(
         "wb.mqtt_alice.client.upstream",
         "wb.mqtt_alice.client.upstream.wb_proxy_socketio",
     ],
-    # Other files (scripts, configs and etc) installed by debian/install file
-    # Requirements installed from debian/control file
+
+    # Other files (scripts, configs and etc):
+    # - Installed by debian/install file
+
+    # Requirements:
+    # - Installed from debian/control file
 )
