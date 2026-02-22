@@ -30,4 +30,4 @@ config_files/wb-mqtt-alice-event-rates.json /usr/lib/wb-mqtt-alice/
 config_files/wb-mqtt-alice-nginx.conf /usr/share/wb-mqtt-homeui/nginx/includes/
 
 # WB specific
-alice-navigation.json usr/share/wb-mqtt-homeui/custom-menu
+config_files/alice-navigation.json usr/share/wb-mqtt-homeui/custom-menu
