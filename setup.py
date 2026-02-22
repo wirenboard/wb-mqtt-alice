@@ -19,6 +19,9 @@ setup(
     license="MIT",
     url="https://github.com/wirenboard/wb-mqtt-alice",
     packages=[
+        # "wb"                   # Explicitly excluded: provided by base package
+        # "wb.mqtt_alice"        # Explicitly excluded: avoid namespace collision
+
         "wb.mqtt_alice.common",  # Shared files via several modules
         "wb.mqtt_alice.cli",
         "wb.mqtt_alice.config",  # Backend for WEBUI
