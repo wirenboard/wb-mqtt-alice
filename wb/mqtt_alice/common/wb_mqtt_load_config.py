@@ -1,7 +1,7 @@
 import logging
 import json
 from pathlib import Path
-from constants import SERVER_CONFIG_PATH, BOARD_REVISION_PATH, BOARD_MODEL_PATH
+from .constants import SERVER_CONFIG_PATH, BOARD_REVISION_PATH, BOARD_MODEL_PATH
 import re
 
 BOARD_REVISION_PATH = Path(BOARD_REVISION_PATH)
