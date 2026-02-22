@@ -1,10 +1,6 @@
 """
   File with all constants in project
 """
-
-from enum import Enum
-
-
 class EventType:
     """Yandex Smart Home event types"""
     BUTTON = "button"
