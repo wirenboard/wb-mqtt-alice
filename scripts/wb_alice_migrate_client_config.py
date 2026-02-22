@@ -8,7 +8,7 @@ This migration is applied during upgrades of wb-mqtt-alice to version 0.6.0 and 
 """
 import json
 import sys
-from models import ClientConfig
+from wb.mqtt_alice.common.models import ClientConfig
 
 # Default configuration with all required fields
 DEFAULTS = ClientConfig().dict()
