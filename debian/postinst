@@ -6,7 +6,7 @@ set -e
 # Paths
 NEW_CONF="/etc/wb-mqtt-alice-client.conf"
 MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
-MIGRATION_SCRIPT="/usr/lib/wb-mqtt-alice/wb_alice_migrate_client_config.py"
+MIGRATION_SCRIPT="/usr/lib/wb-mqtt-alice/scripts/wb_alice_migrate_client_config.py"
 
 case "$1" in
     configure)

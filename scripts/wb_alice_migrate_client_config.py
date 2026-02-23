@@ -2,13 +2,13 @@
 """
 This script is used to migrate the wb-mqtt-alice client configuration.
 It updates the `client_enabled` flag in the configuration file that was moved from
-`/usr/lib/wb-mqtt-alice/wb-mqtt-alice-webui.conf` to
+`/usr/lib/wb-mqtt-alice/configs/wb-mqtt-alice-webui.conf` to
 `/etc/wb-mqtt-alice-client.conf`, preserving all other fields.
 This migration is applied during upgrades of wb-mqtt-alice to version 0.6.0 and later.
 """
 import json
 import sys
-from models import ClientConfig
+from wb.mqtt_alice.common.models import ClientConfig
 
 # Default configuration with all required fields
 DEFAULTS = ClientConfig().dict()

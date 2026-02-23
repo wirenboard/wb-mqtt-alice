@@ -15,11 +15,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
-from fetch_url import fetch_url
-from models import (Capability, ClientConfig, Config, Device, Property, Room,
+from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
+from wb.mqtt_alice.common.fetch_url import fetch_url
+from wb.mqtt_alice.common.models import (Capability, ClientConfig, Config, Device, Property, Room,
                     RoomID)
-from wb_mqtt_load_config import (get_board_revision, get_key_id,
+from wb.mqtt_alice.common.wb_mqtt_load_config import (get_board_revision, get_key_id,
                                  load_server_config)
 
 # FastAPI initialization
@@ -38,7 +38,7 @@ SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
 BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
 BOARD_MODEL_PATH = Path("/proc/device-tree/model")
 DEVICES_CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
-SETTING_PATH = Path("/usr/lib/wb-mqtt-alice/wb-mqtt-alice-webui.conf")
+SETTING_PATH = Path("/usr/lib/wb-mqtt-alice/configs/wb-mqtt-alice-webui.conf")
 CLIENT_SERVICE_NAME = "wb-mqtt-alice-client"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {

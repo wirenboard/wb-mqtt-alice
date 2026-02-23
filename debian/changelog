@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.9.0) stable; urgency=medium
+
+  * Add 4 py packages from project files
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Mon, 23 Feb 2026 19:00:00 +0300
+
 wb-mqtt-alice (0.8.3) stable; urgency=medium
 
   * Add a custom file to HomeUI to make the configurator menu item appear

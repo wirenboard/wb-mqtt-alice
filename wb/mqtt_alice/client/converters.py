@@ -9,7 +9,7 @@ Handles type conversions between WirenBoard and Yandex Smart Home formats
 import logging
 from typing import Any, Optional
 
-from constants import (EventType, MotionEventValue, OpenEventValue,
+from wb.mqtt_alice.common.constants import (EventType, MotionEventValue, OpenEventValue,
                        WaterLeakEventValue)
 
 logger = logging.getLogger(__name__)

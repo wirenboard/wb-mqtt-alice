@@ -31,12 +31,12 @@ from importlib.metadata import PackageNotFoundError, version
 import socketio
 import engineio
 
-from constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CONFIG_PATH
-from device_registry import DeviceRegistry
-from wb_alice_device_state_sender import AliceDeviceStateSender
-from yandex_handlers import send_to_yandex_state, set_emit_callback
-from sio_alice_handlers import SioAliceHandlers
-from sio_connection_manager import SioConnectionManager
+from wb.mqtt_alice.common.constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CONFIG_PATH
+from .device_registry import DeviceRegistry
+from .wb_alice_device_state_sender import AliceDeviceStateSender
+from .yandex_handlers import send_to_yandex_state, set_emit_callback
+from .sio_alice_handlers import SioAliceHandlers
+from .sio_connection_manager import SioConnectionManager
 
 # Configuration constants
 MQTT_HOST = "localhost"

@@ -6,7 +6,7 @@ from collections import defaultdict
 from os import getenv
 from typing import Dict, List
 
-from device_registry import DeviceRegistry
+from .device_registry import DeviceRegistry
 
 logging.basicConfig(
     level=logging.INFO,
