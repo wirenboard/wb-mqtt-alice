@@ -12,46 +12,13 @@ AddressValue = Union[str, Dict[str, str]]
 
 
 @dataclass(frozen=True)
-class PointSpec:
-    """
-    Canonical description of a point inside a device.
-
-    This is built from config.devices[device_id].capabilities/properties.
-
-    Fields:
-      - device_id: device identifier from config
-      - point: canonical point reference (human-editable), e.g.
-          "capabilities:devices.capabilities.on_off:on"
-          "properties:devices.properties.float:temperature"
-      - y_type: full Yandex type string, e.g. "devices.capabilities.on_off"
-      - instance: instance string, e.g. "on" or "temperature"
-      - parameters: original "parameters" object from config
-
-    Example (output):
-        PointSpec(
-            device_id="dev1",
-            point="capabilities:devices.capabilities.on_off:on",
-            y_type="devices.capabilities.on_off",
-            instance="on",
-            parameters={"instance":"on"}
-        )
-    """
-
-    device_id: str
-    point: str
-    y_type: str
-    instance: str
-    parameters: Dict[str, Any]
-
-
-@dataclass(frozen=True)
 class Binding:
     """
-    New (preferred) binding record.
+    New (preferred) binding record
 
-    Each binding connects a canonical point to downstream addresses.
+    Each binding connects a canonical point to downstream addresses
 
-    Input source: config["bindings"] items.
+    Input source: config["bindings"] items
 
     Example (input JSON):
         {
@@ -79,9 +46,9 @@ class Binding:
 @dataclass(frozen=True)
 class InboundRoute:
     """
-    Inbound route for reverse lookup by (downstream, address).
+    Inbound route for reverse lookup by (downstream, address)
 
-    This is used when a downstream adapter receives a raw message.
+    This is used when a downstream adapter receives a raw message
 
     Example (when binding.address.value is a scalar):
         ("mqtt_wb_conv", "wb/dev1/temperature") ->
@@ -108,9 +75,9 @@ class InboundRoute:
 @dataclass(frozen=True)
 class OutboundTarget:
     """
-    Outbound target for forward lookup by (device_id, point, value_path).
+    Outbound target for forward lookup by (device_id, point, value_path)
 
-    This is used when the router wants to write canonical values to downstream.
+    This is used when the router wants to write canonical values to downstream
 
     Example:
         ("dev1", "prop.float.temperature", "value") -> [
