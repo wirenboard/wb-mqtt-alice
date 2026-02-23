@@ -87,6 +87,9 @@ async def main():
     downstream_adapter = MqttWbConvAdapter(cfg=mqtt_config, subscriptions=[TEST_TOPIC])
     codec = MqttWbConvCodec()
 
+    # Сохраняем ссылку на текущий (главный) event loop
+    main_loop = asyncio.get_running_loop()
+
     # 4. Обработчик входящих сообщений от MQTT
     def on_mqtt_message(raw_msg: RawDownstreamMessage):
         if upstream_adapter._state != UpstreamState.READY:
@@ -123,11 +126,10 @@ async def main():
             ]
         }
 
-        # В paho-mqtt коллбек вызывается в отдельном потоке,
-        # поэтому нужно закинуть корутину в основной asyncio-цикл
-        loop = asyncio.get_running_loop()
+        # Используем main_loop, так как этот коллбек вызывается в фоновом потоке paho-mqtt
         asyncio.run_coroutine_threadsafe(
-            upstream_adapter.send_notification(notification_data), loop
+            upstream_adapter.send_notification(notification_data), 
+            main_loop
         )
 
     # 5. Регистрация обработчика состояний Upstream (Связь с Алисой)
