@@ -6,6 +6,12 @@ import logging
 
 from wb.mqtt_alice.client.upstream.wb_proxy_socketio.adapter import SocketIOAdapter
 from wb.mqtt_alice.client.upstream.types import UpstreamState
+from wb.mqtt_alice.client.downstream.models import PointSpec, RawDownstreamMessage
+from wb.mqtt_alice.client.downstream.mqtt_wb_conv.adapter import (
+    MqttWbConvAdapter,
+    MqttConnectionConfig,
+)
+from wb.mqtt_alice.client.downstream.mqtt_wb_conv.codec import MqttWbConvCodec
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,13 +27,25 @@ CONFIG = {
         "url": "http://localhost:8042",
         "controller_sn": "TEST_CONTROLLER_001",
         "client_pkg_ver": "0.1.0-alpha",
-        "debug": False
-    }
+        "debug": False,
+    },
 }
 
 # --- Данные тестового устройства ---
 DEVICE_ID = "60ba5cbd-260128210654-604e8e10-748e-43f5-a028-1f3ce82b22e3"
-CURRENT_TEMP = 0
+TEST_TOPIC = "/devices/alice_devices/controls/color_temperature_k"
+
+# --- Спецификация для Кодека ---
+# В реальном Диспетчере это собирается динамически из конфигурации
+TEST_POINT_SPEC = PointSpec(
+    device_id=DEVICE_ID,
+    point="properties:devices.properties.float:temperature",
+    y_type="devices.properties.float",
+    instance="temperature",
+    parameters={"instance": "temperature", "unit": "unit.temperature.celsius"},
+    is_single_topic=False,
+)
+
 
 class MockCore:
     """
@@ -35,6 +53,7 @@ class MockCore:
     Нужна, чтобы зарегистрировать обязательные хендлеры в адаптере,
     пока у нас нет настоящего Router и Registry
     """
+
     async def handle_discovery(self, payload: dict) -> dict:
         logger.info(f"Incoming DISCOVERY request: {payload}")
         # Возвращаем пустой список или тестовый девайс
@@ -49,82 +68,84 @@ class MockCore:
         return {"request_id": payload.get("request_id"), "payload": {"devices": []}}
 
 
-async def notification_loop(adapter: SocketIOAdapter):
-    """
-    Цикл, который каждые 5 секунд шлет обновленную температуру
-    """
-    global CURRENT_TEMP
-    
-    logger.info("Starting notification loop...")
-    
-    while True:
-        # 1. Проверяем, готова ли связь
-        if adapter._state != UpstreamState.READY:
-            logger.debug("Upstream not ready, waiting...")
-            await asyncio.sleep(1)
-            continue
-
-        # 2. Инкрементируем значение
-        CURRENT_TEMP += 1.0
-        
-        # 3. Формируем пайлоад для Яндекса
-        # Нам нужно отправить только то, что изменилось.
-        # Формат: State Update Object
-        notification_data = {
-            "devices": [{
-                "id": DEVICE_ID,
-                "properties": [{
-                    "type": "devices.properties.float",
-                    "state": {
-                        "instance": "temperature",
-                        "value": round(CURRENT_TEMP, 1)
-                    }
-                }]
-            }]
-        }
-
-        logger.info(f"Sending notification: Temp = {CURRENT_TEMP}")
-
-        try:
-            # 4. Отправляем через адаптер
-            await adapter.send_notification(notification_data)
-        except Exception as e:
-            logger.error(f"Failed to send notification: {e}")
-
-        # 5. Ждем 5 секунд
-        await asyncio.sleep(5)
-
-
 async def main():
-    # 1. Инициализация адаптера
+    # 1. Инициализация Upstream адаптера (Алиса)
     logger.info("Initializing Upstream Adapter...")
-    adapter = SocketIOAdapter(CONFIG["wb_proxy"])
+    upstream_adapter = SocketIOAdapter(CONFIG["wb_proxy"])
 
     # 2. Инициализация "фейкового" ядра и регистрация хендлеров
     # Адаптер не запустится (или будет сыпать ошибками), если хендлеры не назначены
-    core = MockCore()
-    adapter.register_discovery_handler(core.handle_discovery)
-    adapter.register_command_handler(core.handle_action)
-    adapter.register_query_handler(core.handle_query)
+    dispatcher = MockCore()
+    upstream_adapter.register_discovery_handler(dispatcher.handle_discovery)
+    upstream_adapter.register_command_handler(dispatcher.handle_action)
+    upstream_adapter.register_query_handler(dispatcher.handle_query)
 
-    # 3. Регистрация обработчика состояний (для логирования)
+    # 3. Инициализация Downstream (Устройства)
+    logger.info("Initializing Downstream Adapter...")
+    mqtt_config = MqttConnectionConfig(host="localhost", port=1883)
+    downstream_adapter = MqttWbConvAdapter(cfg=mqtt_config, subscriptions=[TEST_TOPIC])
+    codec = MqttWbConvCodec()
+
+    # 4. Обработчик входящих сообщений от MQTT
+    def on_mqtt_message(raw_msg: RawDownstreamMessage):
+        if upstream_adapter._state != UpstreamState.READY:
+            logger.debug("Upstream not ready, dropping MQTT message")
+            return
+
+        # Декодируем сырые байты в число
+        canonical_value = codec.decode(
+            spec=TEST_POINT_SPEC, value_path="value", raw=raw_msg.payload
+        )
+        if canonical_value is None:
+            logger.warning(f"Failed to decode value from topic: {raw_msg.address}")
+            return
+
+        logger.info(
+            f"MQTT msg received: topic={raw_msg.address}, decoded_val={canonical_value}"
+        )
+
+        # Формируем пайлоад для Яндекса
+        notification_data = {
+            "devices": [
+                {
+                    "id": DEVICE_ID,
+                    "properties": [
+                        {
+                            "type": TEST_POINT_SPEC.y_type,
+                            "state": {
+                                "instance": TEST_POINT_SPEC.instance,
+                                "value": canonical_value,
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+
+        # В paho-mqtt коллбек вызывается в отдельном потоке,
+        # поэтому нужно закинуть корутину в основной asyncio-цикл
+        loop = asyncio.get_running_loop()
+        asyncio.run_coroutine_threadsafe(
+            upstream_adapter.send_notification(notification_data), loop
+        )
+
+    # 5. Регистрация обработчика состояний Upstream (Связь с Алисой)
     async def on_state_change(state: UpstreamState):
         if state == UpstreamState.READY:
-            logger.info(">>> UPSTREAM IS READY! (MQTT Subscriptions would start here) <<<")
+            logger.info(">>> UPSTREAM IS READY! Resuming MQTT Subscriptions <<<")
+            downstream_adapter.resume_subscriptions()
         elif state == UpstreamState.UNAVAILABLE:
-            logger.warning(">>> UPSTREAM UNAVAILABLE! (MQTT Subscriptions paused) <<<")
-    
-    adapter.register_state_handler(on_state_change)
+            logger.warning(">>> UPSTREAM UNAVAILABLE! Pausing MQTT Subscriptions <<<")
+            downstream_adapter.pause_subscriptions()
 
-    # 4. Запуск адаптера
+    upstream_adapter.register_state_handler(on_state_change)
+
+    # 6. Запуск компонентов
     try:
-        await adapter.start()
-        
-        # Опционально: Ждем готовности перед запуском цикла уведомлений, 
-        # но наш цикл сам умеет ждать внутри while, так что не блокируем main
-        
-        # 5. Запуск цикла уведомлений
-        notify_task = asyncio.create_task(notification_loop(adapter))
+        # Запускаем downstream. Изначально мы не подписываемся на топики,
+        # так как это произойдет в on_state_change при READY
+        downstream_adapter.start(on_mqtt_message)
+        await upstream_adapter.start()
 
         # Бесконечное ожидание, чтобы программа не закрылась
         # В реальном приложении тут будет работа с другими компонентами
@@ -134,8 +155,10 @@ async def main():
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Stopping...")
     finally:
-        await adapter.stop()
+        await upstream_adapter.stop()
+        downstream_adapter.stop()
         logger.info("Shutdown complete.")
+
 
 if __name__ == "__main__":
     try:
