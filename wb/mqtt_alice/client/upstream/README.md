@@ -7,7 +7,7 @@ Yandex Smart Home (Алиса). Модуль абстрагирует транс
 
 ## Архитектура
 
-Архитектура строится том что адаптер не знает о существовании бизнес-логики,\
+Архитектура строится на том, что адаптер не знает о существовании бизнес-логики,\
 реестров устройств или MQTT. Он лишь транслирует события через зарегистрированные\
 коллбеки (Handlers).
 
@@ -24,12 +24,12 @@ Yandex Smart Home (Алиса). Модуль абстрагирует транс
 ## Жизненный цикл и Состояния
 
 Управление состоянием критически важно для корректной работы системы.\
-Ядро (Core) использует состояние адаптера, чтобы решать, нужно\
+Диспетчер использует состояние адаптера, чтобы решать, нужно\
 ли подписываться на MQTT-топики устройств.
 
 Состояния определены в `UpstreamState`:
 
-| Состояние | Описание | Реакция Ядра (Core) |
+| Состояние | Описание | Реакция Диспетчера |
 | :--- | :--- | :--- |
 | `INITIALIZING` | Адаптер создан, но не запущен. | Ожидание. |
 | **`READY`** | Канал связи установлен, адаптер готов к работе. | **Подключить MQTT**, начать обработку событий. |
@@ -40,7 +40,7 @@ Yandex Smart Home (Алиса). Модуль абстрагирует транс
 
 ## Интерфейс (Handlers)
 
-Ядро инжектирует свою логику в адаптер через методы регистрации:
+Диспетчер инжектирует свою логику в адаптер через методы регистрации:
 
 1.  **`register_discovery_handler(func)`**:
     * Вызывается, когда Яндекс просит список устройств.
@@ -103,33 +103,115 @@ class MyCustomAdapter(BaseUpstreamAdapter):
 
 ### Правила для разработчика адаптера
 
-1. **Не импортируйте Core**
-   В коде адаптера не должно быть импортов из `core/`, `infrastructure/` или `downstream/`
+1. **Не импортируйте Диспетчер**
+   В коде адаптера не должно быть импортов из `dispatcher/` или `downstream/`
 
 2. **Используйте Helpers**
-   Для вызова логики ядра используйте методы родительского класса:
+   Для вызова логики диспетчера используйте методы родительского класса:
 
 * `self._handle_incoming_discovery(payload)`
 * `self._handle_incoming_command(payload)`
 * `self._handle_incoming_query(payload)`
 
-1. **Управляйте состоянием**
+3. **Управляйте состоянием**
    Обязательно вызывайте `await self._set_state(...)` при потере\
    и восстановлении связи. Это управляет остальной системой.
 
----
+
+## Как использовать адаптер
+
+В вызывающем коде (например, в main.py или в тестах) работа с адаптером\
+строится по следующему алгоритму:
+
+1. Импортируем наш кастомный адаптер, написанный по шаблону выше
+2. Создание экземпляра адаптера
+3. Описание функций-обработчиков для последующего использования в адаптере
+4. Регистрация обработчиков запросов
+   Инъекция методов Диспетчера (discovery, command, query) в адаптер.\
+   Без этого адаптер не будет знать, как отвечать на запросы платформы\
+   умного дома
+5. Регистрация обработчика состояний.
+   Диспетчеру нужно знать, когда связь установлена (READY), чтобы поднять\
+   подписки на устройства (Downstream), и когда она потеряна (UNAVAILABLE),\
+   чтобы эти подписки поставить на паузу.
+6. Запуск адаптера (start()).
+7. Корректная остановка (stop()) при завершении работы приложения.
+
+Абстрактный минимальный пример вызывающего кода:
+
+```python
+import asyncio
+import logging
+from wb.mqtt_alice.client.upstream.types import UpstreamState
+
+# 1. Импортируем наш кастомный адаптер, написанный по шаблону выше
+from my_project.upstream import MyCustomAdapter
+
+logging.basicConfig(level=logging.INFO)
+
+
+# 2. Описание функций-обработчиков для последующего использования в адаптере
+async def handle_discovery(payload: dict) -> dict:
+    return {"request_id": payload.get("request_id"), "payload": {"devices": []}}
+
+async def handle_query(payload: dict) -> dict:
+    return {"request_id": payload.get("request_id"), "payload": {"devices": []}}
+
+async def handle_action(payload: dict) -> dict:
+    return {"request_id": payload.get("request_id"), "payload": {"devices": []}}
+
+async def main():
+    # 3. Создание экземпляра адаптера
+    adapter = MyCustomAdapter()
+    
+    # 4. Регистрация обработчиков запросов от платформы
+    adapter.register_discovery_handler(handle_discovery)
+    adapter.register_command_handler(handle_action)
+    adapter.register_query_handler(handle_query)
+
+    # 5. Регистрация обработчика состояний
+    async def on_state_change(state: UpstreamState):
+        if state == UpstreamState.READY:
+            logging.info(">>> UPSTREAM ГОТОВ! (Здесь запускаются подписки на устройства)")
+        elif state == UpstreamState.UNAVAILABLE:
+            logging.warning(">>> UPSTREAM НЕДОСТУПЕН! (Здесь подписки ставятся на паузу)")
+            
+    adapter.register_state_handler(on_state_change)
+
+    # 6. Запуск адаптера
+    try:
+        await adapter.start()
+        
+        # Бесконечный цикл для поддержания работы (заглушка)
+        while True:
+            await asyncio.sleep(1)
+            
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logging.info("Остановка приложения...")
+    finally:
+        # 7. Корректная остановка
+        await adapter.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
 
 ## Структура папок
 
+Актуальная структура upstream модуля связи выглядит следующим образом:
+
 ```text
 upstream/
-├── __init__.py          # Экспорт адаптеров
-├── base.py              # Базовый абстрактный класс
-├── types.py             # Enums и DTO
-├── socketio/            # Адаптер: Cloud Proxy
+├── __init__.py
+├── base.py                  # Базовый абстрактный класс (BaseUpstreamAdapter)
+├── types.py                 # Enums (UpstreamState) и DTO
+├── wb_proxy_socketio/       # Адаптер: Cloud Proxy (Socket.IO)
 │   ├── __init__.py
 │   └── adapter.py
-└── fastapi/             # Адаптер: Local Server
+├── direct_connect_fastapi/  # Адаптер: Local Server (FastAPI)
+│   ├── __init__.py
+│   └── adapter.py
+└── offline_debug/           # Адаптер: Для локальной отладки
     ├── __init__.py
     └── adapter.py
 ```
