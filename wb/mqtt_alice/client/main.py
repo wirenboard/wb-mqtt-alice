@@ -3,8 +3,6 @@
 
 import asyncio
 import logging
-import json
-from typing import Dict, Any
 
 from wb.mqtt_alice.client.upstream.wb_proxy_socketio.adapter import SocketIOAdapter
 from wb.mqtt_alice.client.upstream.types import UpstreamState
@@ -106,8 +104,8 @@ async def main():
     # Адаптер не запустится (или будет сыпать ошибками), если хендлеры не назначены
     core = MockCore()
     adapter.register_discovery_handler(core.handle_discovery)
-    adapter.register_query_handler(core.handle_query)
     adapter.register_command_handler(core.handle_action)
+    adapter.register_query_handler(core.handle_query)
 
     # 3. Регистрация обработчика состояний (для логирования)
     async def on_state_change(state: UpstreamState):
