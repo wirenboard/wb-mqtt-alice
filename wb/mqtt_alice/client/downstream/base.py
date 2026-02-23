@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from .models import DownstreamWrite, RawDownstreamMessage
 from ..models import PointSpec
@@ -20,26 +20,61 @@ class DownstreamAdapter(ABC):
           (MQTT/HTTP/etc) and producing RawDownstreamMessage to handler
       - write(req): write raw messages to transport (publish/post/etc), router
         sends raw payload to a downstream address
+      - read(address, timeout): one-off async read for current state queries
       - stop(): optional, for cleanup
+      - pause/resume_subscriptions(): optional, for connection issues
     """
 
     @property
     @abstractmethod
     def downstream_name(self) -> str:
+        """
+        Identifier for this downstream transport
+        """
         raise NotImplementedError
 
     @abstractmethod
     def start(self, handler: RawMessageHandler) -> None:
+        """
+        Start receiving messages from transport and pass them to handler
+        """
         raise NotImplementedError
 
     @abstractmethod
     def stop(self) -> None:
+        """
+        Stop the adapter and clean up connections
+        """
         raise NotImplementedError
 
     @abstractmethod
     def write(self, req: DownstreamWrite) -> None:
+        """
+        Send raw payload to the downstream address
+        """
         raise NotImplementedError
 
+    @abstractmethod
+    async def read(self, address: str, timeout: float = 2.0) -> Optional[RawDownstreamMessage]:
+        """
+        One-off read of current state (e.g. retained message)
+        Used by Dispatcher to answer platform Query requests
+        """
+        raise NotImplementedError
+
+    def pause_subscriptions(self) -> None:
+        """
+        Pause receiving events from transport
+        Implementation is optional, default is no-op
+        """
+        pass
+
+    def resume_subscriptions(self) -> None:
+        """
+        Resume receiving events from transport
+        Implementation is optional, default is no-op
+        """
+        pass
 
 class DownstreamCodec(ABC):
     """
@@ -57,6 +92,9 @@ class DownstreamCodec(ABC):
     @property
     @abstractmethod
     def downstream_name(self) -> str:
+        """
+        Identifier for this downstream codec
+        """
         raise NotImplementedError
 
     @abstractmethod
