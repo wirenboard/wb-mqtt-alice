@@ -25,7 +25,15 @@ setup(
         "wb.mqtt_alice.common",  # Shared files via several modules
         "wb.mqtt_alice.cli",
         "wb.mqtt_alice.config",  # Backend for WEBUI
+        
         "wb.mqtt_alice.client",
+        "wb.mqtt_alice.client.dispatcher",
+        "wb.mqtt_alice.client.downstream",
+        "wb.mqtt_alice.client.downstream.file_poll",
+        "wb.mqtt_alice.client.downstream.http_poll",
+        "wb.mqtt_alice.client.downstream.mqtt_wb_conv",
+        "wb.mqtt_alice.client.upstream",
+        "wb.mqtt_alice.client.upstream.wb_proxy_socketio",
     ],
 
     # Other files (scripts, configs and etc):
