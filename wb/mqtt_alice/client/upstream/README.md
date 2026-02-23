@@ -62,7 +62,8 @@ Yandex Smart Home (Алиса). Модуль абстрагирует транс
 
 ## Как реализовать новый адаптер
 
-Чтобы добавить новый способ связи (например, прямой MQTT-мост или CLI для тестов), нужно наследоваться от `BaseUpstreamAdapter`.
+Чтобы добавить новый способ связи (например, прямой MQTT-мост или CLI для\
+тестов), нужно наследоваться от `BaseUpstreamAdapter`.
 
 ### Шаблон реализации
 
@@ -90,7 +91,7 @@ class MyCustomAdapter(BaseUpstreamAdapter):
         # Отправить данные в Яндекс
         # Если транспорта нет — игнорировать или логировать
         if self._state == UpstreamState.READY:
-             transport.send(notification_data)
+            transport.send(notification_data)
 
     # --- Прием данных извне ---
     
