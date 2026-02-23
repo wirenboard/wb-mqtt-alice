@@ -6,12 +6,13 @@ import logging
 
 from wb.mqtt_alice.client.upstream.wb_proxy_socketio.adapter import SocketIOAdapter
 from wb.mqtt_alice.client.upstream.types import UpstreamState
-from wb.mqtt_alice.client.downstream.models import PointSpec, RawDownstreamMessage
+from wb.mqtt_alice.client.downstream.models import RawDownstreamMessage
 from wb.mqtt_alice.client.downstream.mqtt_wb_conv.adapter import (
     MqttWbConvAdapter,
     MqttConnectionConfig,
 )
 from wb.mqtt_alice.client.downstream.mqtt_wb_conv.codec import MqttWbConvCodec
+from .models import PointSpec
 
 logging.basicConfig(
     level=logging.INFO,

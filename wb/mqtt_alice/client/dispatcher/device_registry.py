@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from .models import PointSpec
+from ..models import PointSpec
 
 
 def _make_point_ref(group: str, y_type: str, instance: str) -> str:
