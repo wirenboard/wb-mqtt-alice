@@ -1,3 +1,11 @@
+wb-mqtt-alice (0.10.0) stable; urgency=medium
+
+  * Add batching when send notify
+  * Implement internal devices state storage
+  * Split client structure
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Wed, 25 Feb 2026 19:00:00 +0300
+
 wb-mqtt-alice (0.9.0) stable; urgency=medium
 
   * Add 4 py packages from project files

@@ -31,3 +31,8 @@ configs/wb-mqtt-alice-nginx.conf /usr/share/wb-mqtt-homeui/nginx/includes/
 
 # WB specific
 configs/alice-navigation.json usr/share/wb-mqtt-homeui/custom-menu
+
+# Process this files!
+# wb_alice_migrate_client_config.py /usr/lib/wb-mqtt-alice/
+# mqtt_topic.py /usr/lib/wb-mqtt-alice/
+# fetch_url.py /usr/lib/wb-mqtt-alice/
