@@ -629,10 +629,12 @@ async def update_room(request: Request, room_id: str, room_data: Room):
     config = load_config()
     # Validate room exists
     validate_room_exists(room_id, config, language)
+    # Validate room name
+    validate_room_name(room_data.name, language)
     # Exclude current room
     other_rooms = {k: v for k, v in config.rooms.items() if k != room_id}
     # Validate room name is unique
-    validate_room_name_unique(room_data.name, config.rooms, language)
+    validate_room_name_unique(room_data.name, other_rooms, language)
     # Update room
     response = room_data.put_response()
     config.rooms[room_id] = response
