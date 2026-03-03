@@ -34,7 +34,7 @@ import engineio
 from wb.mqtt_alice.common.constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CONFIG_PATH
 from .device_registry import DeviceRegistry
 from .wb_alice_device_state_sender import AliceDeviceStateSender
-from .yandex_handlers import send_to_yandex_state, set_emit_callback
+from .yandex_handlers import convert_to_yandex_block, set_emit_callback
 from .sio_alice_handlers import SioAliceHandlers
 from .sio_connection_manager import SioConnectionManager
 
@@ -654,7 +654,7 @@ async def main() -> int:
     try:
         ctx.registry = DeviceRegistry(
             cfg_path=DEVICE_PATH,
-            send_to_yandex=send_to_yandex_state,
+            send_to_yandex=convert_to_yandex_block,
             publish_to_mqtt=publish_to_mqtt,
         )
         logger.debug("Registry created with %r devices", len(ctx.registry.devices))

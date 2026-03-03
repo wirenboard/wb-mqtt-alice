@@ -233,7 +233,7 @@ class DeviceRegistry:
         self,
         cfg_path: str,
         *,
-        send_to_yandex: Callable[[str, str, Optional[str], Any], None],
+        send_to_yandex: Callable[[str, str, Optional[str], Any], Optional[Dict[str, Any]]],
         publish_to_mqtt: Callable[[str, str], Awaitable[None]],
         cfg_events_path: Optional[str] = CONFIG_EVENTS_RATE_PATH,
     ) -> None:
@@ -642,13 +642,18 @@ class DeviceRegistry:
             return extract_event_value(value)
         return raw
 
-    def forward_mqtt_to_yandex(self, topic: str, raw: str) -> None:
+    def convert_mqtt_to_yandex_block(self, topic: str, raw: str) -> Optional[Dict[str, Any]]:
         """
-        Forwards MQTT message to Yandex Smart Home
+        Convert MQTT message to Yandex Smart Home device state block
 
         Args:
-            topic: MQTT topic in full format (/devices/device/controls/control)
-            raw: Raw payload string from MQTT message
+            - topic: MQTT topic in full format (/devices/device/controls/control)
+            - raw: Raw payload string from MQTT message
+        
+        Returns:
+            - Device state block dict
+              {"id": ..., "status": ..., "capabilities"/"properties": [...]}
+            - or None if topic unknown, conversion failed, or event value is None
         """
         if topic not in self.topic2info:
             return None
@@ -670,11 +675,16 @@ class DeviceRegistry:
                     value=raw,
                     event_single_topic=event_single_topic
                 )
+                if value is None:
+                    # Event not triggered (e.g. button release "0") — skip silently
+                    logger.debug("Event value is None for topic %r, skipping", topic)
+                    return None
             else:
                 value = self._convert_cap_to_yandex(raw, cap_type, instance, blk.get("parameters"))
-            self._send_to_yandex(device_id, cap_type, instance, value)
+            return self._send_to_yandex(device_id, cap_type, instance, value)
         except (ValueError, TypeError) as e:
             logger.warning("Failed to convert MQTT→Yandex for topic %r: %r", topic, e)
+            return None
 
     def _convert_cap_to_mqtt(
         self, 
