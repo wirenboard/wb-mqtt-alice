@@ -9,12 +9,6 @@ from typing import Any, Dict, List, Optional
 from .device_registry import DeviceRegistry
 from .yandex_handlers import emit_batched_states
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
 MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
@@ -53,7 +47,7 @@ class AliceDeviceStateSender:
         Start the background send loop
         """
         logger.info(
-            "Starting alice device state sender (batch_interval=%.1fs)", BATCH_INTERVAL
+            "Starting alice device state sender (BATCH_INTERVAL=%.1fs)", BATCH_INTERVAL
         )
         self.running = True
         asyncio.create_task(self.send_to_yandex_loop())
@@ -124,7 +118,7 @@ class AliceDeviceStateSender:
                         if current_time - last_send_time <= rate:
                             continue  # Rate limit not passed yet
 
-                        # Rate limit passed → aggregate and convert
+                        # Rate limit passed - do aggregate and convert
                         aggregated = self.modify_messages_by_rule(
                             rule=messages[-1]["origin_rate"].rule,
                             messages=messages,
@@ -145,16 +139,21 @@ class AliceDeviceStateSender:
 
                 # --- Stage 2: Batch flush ---
                 batch_age = current_time - last_batch_time
+                flush_triggered = self.flush_event.is_set()
                 should_flush = (
                     self.batch_buffer
-                    and (batch_age >= BATCH_INTERVAL or self.flush_event.is_set())
+                    and (batch_age >= BATCH_INTERVAL or flush_triggered)
                 )
                 if should_flush:
                     self.flush_event.clear()
                     merged = merge_device_blocks(self.batch_buffer)
                     logger.debug(
-                        "Batch flush: %d block(s) → %d device(s)",
-                        len(self.batch_buffer), len(merged),
+                        "Batch flush: age=%.2fs, interval=%.1fs, event_trigger=%s, %d block(s) in %d device(s)",
+                        batch_age,
+                        BATCH_INTERVAL,
+                        flush_triggered,
+                        len(self.batch_buffer),
+                        len(merged),
                     )
                     emit_batched_states(merged)
                     self.batch_buffer.clear()

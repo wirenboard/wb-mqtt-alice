@@ -627,7 +627,7 @@ async def main() -> int:
 
     # Apply log level from client config
     log_level_name = str(client_cfg.get("log_level", "INFO")).upper()
-    logger.setLevel(log_level_name)
+    logging.getLogger().setLevel(log_level_name) # Change root logger
 
     if not client_cfg.get("client_enabled", False):
         logger.info("Alice integration is DISABLED in configuration")
