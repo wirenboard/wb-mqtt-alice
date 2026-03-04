@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 from .device_registry import DeviceRegistry
 from .yandex_handlers import emit_batched_states
 
+PROP_EVENT_TYPE = "devices.properties.event"
+
 logger = logging.getLogger(__name__)
 
 MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
@@ -31,7 +33,7 @@ class AliceDeviceStateSender:
     """
 
     def __init__(self, device_registry: DeviceRegistry):
-        self.buffers = defaultdict(list)
+        self.topic_buffers = defaultdict(list)
         self.last_send_times = {}  # dict of last times by topic
         self.lock = asyncio.Lock()
         self.running = False
@@ -82,22 +84,26 @@ class AliceDeviceStateSender:
                 "origin_rate": event_rate,
             }
             logger.debug("add message: message %s", message)
-            self.buffers[topic_str].append(message)
+            self.topic_buffers[topic_str].append(message)
             # Limit buffer size (sliding window)
-            if len(self.buffers[topic_str]) > MAX_BUFFER_SIZE:
-                self.buffers[topic_str] = self.buffers[topic_str][-MAX_BUFFER_SIZE:]
+            if len(self.topic_buffers[topic_str]) > MAX_BUFFER_SIZE:
+                self.topic_buffers[topic_str] = self.topic_buffers[topic_str][-MAX_BUFFER_SIZE:]
 
-            # Event property trigger immediate batch flush
-            blk = self.device_registry.devices[device_id][cap_prop][idx]
-            if blk.get("type", "").lower() == "devices.properties.event":
-                logger.debug("Event on %r, triggering batch flush", topic_str)
-                self.flush_event.set()
+
+    def _is_event_topic(self, topic: str) -> bool:
+        """
+        Check if topic is configured as event property
+        """
+        device_id, cap_prop, idx, _ = self.device_registry.topic2info.get(topic)
+        blk_type = self.device_registry.devices[device_id][cap_prop][idx].get("type", "")
+        return blk_type.lower() == PROP_EVENT_TYPE
 
 
     async def send_to_yandex_loop(self):
         """
-        Send message to yandex device
-        This is background loop: stage 1 (rate limiter) + stage 2 (batch flush)
+        Background loop for send batched messages to yandex device in 2 stages:
+          1. Rate limiter
+          2. Batch flush
         """
         last_batch_time = time.time()
 
@@ -107,7 +113,7 @@ class AliceDeviceStateSender:
                 # --- Stage 1: Per-topic rate limiter ---
                 # Only pass topics whose time_rate elapsed, result goes to batch_buffer
                 async with self.lock:
-                    for topic, messages in self.buffers.items():
+                    for topic, messages in self.topic_buffers.items():
                         if not messages:
                             logger.debug("not message info for topic=%s", topic)
                             continue
@@ -123,18 +129,23 @@ class AliceDeviceStateSender:
                             rule=messages[-1]["origin_rate"].rule,
                             messages=messages,
                         )
-                        raw = str(aggregated["payload"])
+                        aggregated_payload = str(aggregated["payload"])
                         # send message to Yandex
                         if os.getenv("__DEBUG__"):
-                            logger.info("[DEBUG] rate-passed: topic=%s, raw=%s", topic, raw)
+                            logger.info("[DEBUG] rate-passed: topic=%s, aggregated_payload=%s", topic, aggregated_payload)
                         else:
                             block = self.device_registry.convert_mqtt_to_yandex_block(
-                                topic=topic, raw=raw
+                                topic=topic, raw=aggregated_payload
                             )
                             if block is not None:
                                 self.batch_buffer.append(block)
 
-                        self.buffers[topic].clear()
+                                # Event property trigger immediate batch flush
+                                if self._is_event_topic(topic):
+                                    logger.debug("Event on %r, triggering batch flush", topic)
+                                    self.flush_event.set()
+
+                        self.topic_buffers[topic].clear()
                         self.last_send_times[topic] = current_time
 
                 # --- Stage 2: Batch flush ---
@@ -172,11 +183,9 @@ class AliceDeviceStateSender:
 
         logger.info("send loop finished")
 
-    def get_device_info_by_topic(self, topic):
-        return self.device_registry.topic2info.get(topic)
 
     @staticmethod
-    def modify_messages_by_rule(rule: str, messages: List[dict]):
+    def modify_messages_by_rule(rule: str, messages: List[dict]) -> dict:
         """
         Apply aggregation rule to buffered messages for one topic
         Returns single message dict with aggregated payload
