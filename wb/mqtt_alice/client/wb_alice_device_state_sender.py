@@ -24,6 +24,101 @@ logger = logging.getLogger(__name__)
 MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
 BATCH_INTERVAL = float(getenv("BATCH_INTERVAL", "1.0"))
 
+class BatchDeviceStore:
+    """
+    Deduplicated storage for device state blocks awaiting batch flush
+
+    Blocks are added and merged by device_id, capabilities and properties
+    are deduplicated by (type, instance) - only latest value is kept
+
+    Methods:
+        merge_block(block) - add or update a block
+        drain() - return merged list and clear storage
+        is_empty   - check if storage has data
+
+    Internal structure (self._devices):
+        {
+            "60ba5cbd-...-d7d7": {
+                "status": "online",
+                "capabilities": {
+                    ("devices.capabilities.on_off", "on"):
+                        {"type": "devices.capabilities.on_off",
+                         "state": {"instance": "on", "value": True}},
+                    ("devices.capabilities.range", "brightness"):
+                        {"type": "devices.capabilities.range",
+                         "state": {"instance": "brightness", "value": 75}},
+                },
+                "properties": {
+                    ("devices.properties.float", "temperature"):
+                        {"type": "devices.properties.float",
+                         "state": {"instance": "temperature", "value": 22.5}},
+                    ("devices.properties.event", "open"):
+                        {"type": "devices.properties.event",
+                         "state": {"instance": "open", "value": "opened"}},
+                },
+            },
+            "abc123-...-e2e3": {
+                "status": "online",
+                "capabilities": {},
+                "properties": {
+                    ("devices.properties.float", "temperature"):
+                        {"type": "devices.properties.float",
+                         "state": {"instance": "temperature", "value": -3.2}},
+                },
+            },
+        }
+    """
+
+    def __init__(self) -> None:
+        self._devices: Dict[str, Dict[str, Any]] = {}
+
+    def __len__(self) -> int:
+        """
+        Number of devices in storage
+        """
+        return len(self._devices)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self._devices
+
+    def merge_block(self, block: Dict[str, Any]) -> None:
+        """
+        Merge block into storage with deduplication by (device_id, type, instance)
+        If same (type, instance) already exists for this device, value is overwritten
+        """
+        device_id = block["id"]
+        if device_id not in self._devices:
+            self._devices[device_id] = {
+                "status": block.get("status", "online"),
+                "capabilities": {},
+                "properties": {},
+            }
+        device = self._devices[device_id]
+        for cap in block.get("capabilities", []):
+            key = (cap["type"], cap["state"]["instance"])
+            device["capabilities"][key] = cap
+        for prop in block.get("properties", []):
+            key = (prop["type"], prop["state"]["instance"])
+            device["properties"][key] = prop
+
+    def drain(self) -> List[Dict[str, Any]]:
+        """
+        Return all accumulated devices as list and clear storage
+        After this call, is_empty is True
+        """
+        result: List[Dict[str, Any]] = []
+        for device_id, device in self._devices.items():
+            entry: Dict[str, Any] = {"id": device_id, "status": device["status"]}
+            caps = list(device["capabilities"].values())
+            props = list(device["properties"].values())
+            if caps:
+                entry["capabilities"] = caps
+            if props:
+                entry["properties"] = props
+            result.append(entry)
+        self._devices.clear()
+        return result
 
 class AliceDeviceStateSender:
     """
@@ -35,9 +130,9 @@ class AliceDeviceStateSender:
       Only when time_rate has elapsed does the topic "pass" to stage 2
 
     Stage 2 — Batch accumulator:
-      Converted Yandex blocks from stage 1 accumulate in batch_buffer
-      Flushed every BATCH_INTERVAL seconds or immediately when
-      an event property arrives. Blocks are merged by device_id
+      Converted Yandex blocks from Stage 1 accumulate in BatchDeviceStore
+      Flushed every BATCH_INTERVAL seconds or on event property arrival
+      Blocks are deduplicated by (device_id, type, instance)
     """
 
     def __init__(self, device_registry: DeviceRegistry):
@@ -47,30 +142,8 @@ class AliceDeviceStateSender:
         self.running = False
         self.device_registry = device_registry
 
-        # Batch accumulator for converted Yandex blocks
-        # Struct example:
-        # batch_buffer = [
-        #     # temperature
-        #     {
-        #         "id": "60ba5cbd-260128210608-79782ee3-c3a2-4143-9caf-ca83c523d7d7",
-        #         "status": "online",
-        #         "properties": [{
-        #             "type": "devices.properties.float",
-        #             "state": {"instance": "temperature", "value": 11.3}
-        #         }]
-        #     },
-        #     # First on_off
-        #     {
-        #         "id": "60ba5cbd-260128210608-79782ee3-c3a2-4143-9caf-ca83c523d7d7",
-        #         "status": "online",
-        #         "capabilities": [{
-        #             "type": "devices.capabilities.on_off",
-        #             "state": {"instance": "on", "value": True}
-        #         }]
-        #     },
-        # ]
-        self.batch_buffer: List[Dict[str, Any]] = []
         self.flush_event = asyncio.Event()
+        self._batch_store = BatchDeviceStore()
         self._task: Optional[asyncio.Task] = None
 
 
@@ -177,7 +250,7 @@ class AliceDeviceStateSender:
                         self.last_send_times[topic] = current_time
 
 
-                # Only pass topics whose time_rate elapsed, result goes to batch_buffer
+                # Only pass topics whose time_rate elapsed, result goes to _batch_store
                 # If All ok - send message to Yandex
                 for topic, aggregated_payload in topics_to_convert:
                     if os.getenv("__DEBUG__"):
@@ -187,7 +260,7 @@ class AliceDeviceStateSender:
                             topic=topic, raw=aggregated_payload
                         )
                         if block is not None:
-                            self.batch_buffer.append(block)
+                            self._batch_store.merge_block(block)
 
                             # Event property trigger immediate batch flush
                             if self._needs_immediate_flush(topic):
@@ -201,22 +274,24 @@ class AliceDeviceStateSender:
                 batch_age = current_time - last_batch_time
                 flush_triggered = self.flush_event.is_set()
                 should_flush = (
-                    self.batch_buffer
+                    not self._batch_store.is_empty
                     and (batch_age >= BATCH_INTERVAL or flush_triggered)
                 )
                 if should_flush:
                     self.flush_event.clear()
-                    merged = merge_device_blocks(self.batch_buffer)
                     logger.debug(
-                        "Batch flush: age=%.2fs, interval=%.1fs, event_trigger=%s, %d block(s) in %d device(s)",
+                        "Now will be flushed batch: age=%.2fs, interval=%.1fs, event_trigger=%s, %d block(s)",
                         batch_age,
                         BATCH_INTERVAL,
                         flush_triggered,
-                        len(self.batch_buffer),
+                        len(self._batch_store),
+                    )
+                    merged = self._batch_store.drain()
+                    logger.debug(
+                        "Batch flush: done - flushed %d device(s)",
                         len(merged),
                     )
                     emit_batched_states(merged)
-                    self.batch_buffer.clear()
                     last_batch_time = current_time
 
             except Exception as e:
@@ -224,10 +299,9 @@ class AliceDeviceStateSender:
             await asyncio.sleep(0.1)
 
         # Final flush on shutdown
-        if self.batch_buffer:
-            merged = merge_device_blocks(self.batch_buffer)
+        if not self._batch_store.is_empty:
+            merged = self._batch_store.drain()
             emit_batched_states(merged)
-            self.batch_buffer.clear()
             logger.debug("Final flush on shutdown: %d device(s)", len(merged))
 
         logger.info("send loop finished")
@@ -239,6 +313,8 @@ class AliceDeviceStateSender:
         Apply aggregation rule to buffered messages for one topic
         Returns single message dict with aggregated payload
         """
+        if not rule:
+            return messages[-1]
         if rule.lower() == "last_value":
             # last message value return
             return messages[-1]
@@ -258,46 +334,3 @@ class AliceDeviceStateSender:
             return message
         # process by default = last value
         return messages[-1]
-
-def merge_device_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Merge multiple device state blocks by device_id
-
-    If the same device_id appears in multiple blocks (e.g. on_off and brightness
-    changed in the same batch window), their capabilities and properties lists
-    are concatenated into a single device entry
-    """
-    merged: Dict[str, Dict[str, Any]] = {}
-
-    for block in blocks:
-        device_id = block["id"]
-        if device_id not in merged:
-            merged[device_id] = {
-                "id": device_id,
-                "status": block.get("status", "online"),
-                "capabilities": {},  # Keyed by (type, instance)
-                "properties": {},    # Keyed by (type, instance)
-            }
-        for cap in block.get("capabilities", []):
-            key = (cap["type"], cap["state"]["instance"])
-            merged[device_id]["capabilities"][key] = cap
-        for prop in block.get("properties", []):
-            key = (prop["type"], prop["state"]["instance"])
-            merged[device_id]["properties"][key] = prop
-
-    # Remove empty lists before sending
-    result: List[Dict[str, Any]] = []
-    for device in merged.values():
-        caps = list(device["capabilities"].values())
-        props = list(device["properties"].values())
-        if caps:
-            device["capabilities"] = caps
-        else:
-            del device["capabilities"]
-        if props:
-            device["properties"] = props
-        else:
-            del device["properties"]
-        result.append(device)
-
-    return result
