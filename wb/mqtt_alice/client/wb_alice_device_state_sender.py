@@ -16,7 +16,7 @@ PROP_EVENT_TYPE = "devices.properties.event"
 # accumulated batch is flushed immediately instead of waiting
 IMMEDIATE_FLUSH_TYPES: frozenset = frozenset({
     "devices.properties.event",  # Events MUST be send fast
-    "devices.capabilities.on_off",  # on_off have minimum latency in event-rates
+    # Can add new types on this place
 })
 
 logger = logging.getLogger(__name__)
