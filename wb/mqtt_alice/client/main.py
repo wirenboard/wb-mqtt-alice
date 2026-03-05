@@ -130,7 +130,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
         logger.debug("            Payload: %r", json.dumps(data))
         return None
 
-    logger.debug("Attempting to emit %r with payload: %r", event, data)
+    logger.debug("Attempting to emit %r with payload: %r", event, json.dumps(data))
     sio_client = ctx.sio_manager.client
     
     try:
