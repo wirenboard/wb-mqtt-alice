@@ -48,6 +48,27 @@ class AliceDeviceStateSender:
         self.device_registry = device_registry
 
         # Batch accumulator for converted Yandex blocks
+        # Struct example:
+        # batch_buffer = [
+        #     # temperature
+        #     {
+        #         "id": "60ba5cbd-260128210608-79782ee3-c3a2-4143-9caf-ca83c523d7d7",
+        #         "status": "online",
+        #         "properties": [{
+        #             "type": "devices.properties.float",
+        #             "state": {"instance": "temperature", "value": 11.3}
+        #         }]
+        #     },
+        #     # First on_off
+        #     {
+        #         "id": "60ba5cbd-260128210608-79782ee3-c3a2-4143-9caf-ca83c523d7d7",
+        #         "status": "online",
+        #         "capabilities": [{
+        #             "type": "devices.capabilities.on_off",
+        #             "state": {"instance": "on", "value": True}
+        #         }]
+        #     },
+        # ]
         self.batch_buffer: List[Dict[str, Any]] = []
         self.flush_event = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
@@ -254,20 +275,28 @@ def merge_device_blocks(blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             merged[device_id] = {
                 "id": device_id,
                 "status": block.get("status", "online"),
-                "capabilities": [],
-                "properties": [],
+                "capabilities": {},  # Keyed by (type, instance)
+                "properties": {},    # Keyed by (type, instance)
             }
-        if "capabilities" in block:
-            merged[device_id]["capabilities"].extend(block["capabilities"])
-        if "properties" in block:
-            merged[device_id]["properties"].extend(block["properties"])
+        for cap in block.get("capabilities", []):
+            key = (cap["type"], cap["state"]["instance"])
+            merged[device_id]["capabilities"][key] = cap
+        for prop in block.get("properties", []):
+            key = (prop["type"], prop["state"]["instance"])
+            merged[device_id]["properties"][key] = prop
 
     # Remove empty lists before sending
     result: List[Dict[str, Any]] = []
     for device in merged.values():
-        if not device["capabilities"]:
+        caps = list(device["capabilities"].values())
+        props = list(device["properties"].values())
+        if caps:
+            device["capabilities"] = caps
+        else:
             del device["capabilities"]
-        if not device["properties"]:
+        if props:
+            device["properties"] = props
+        else:
             del device["properties"]
         result.append(device)
 
