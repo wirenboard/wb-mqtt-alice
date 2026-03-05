@@ -11,6 +11,14 @@ from .yandex_handlers import emit_batched_states
 
 PROP_EVENT_TYPE = "devices.properties.event"
 
+# Types that trigger immediate batch flush (bypass BATCH_INTERVAL)
+# When a block of this type passes Stage 1 rate limiter,
+# accumulated batch is flushed immediately instead of waiting
+IMMEDIATE_FLUSH_TYPES: frozenset = frozenset({
+    "devices.properties.event",  # Events MUST be send fast
+    "devices.capabilities.on_off",  # on_off have minimum latency in event-rates
+})
+
 logger = logging.getLogger(__name__)
 
 MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
@@ -42,6 +50,7 @@ class AliceDeviceStateSender:
         # Batch accumulator for converted Yandex blocks
         self.batch_buffer: List[Dict[str, Any]] = []
         self.flush_event = asyncio.Event()
+        self._task: Optional[asyncio.Task] = None
 
 
     async def start(self):
@@ -52,7 +61,7 @@ class AliceDeviceStateSender:
             "Starting alice device state sender (BATCH_INTERVAL=%.1fs)", BATCH_INTERVAL
         )
         self.running = True
-        asyncio.create_task(self.send_to_yandex_loop())
+        self._task = asyncio.create_task(self.send_to_yandex_loop())
 
     async def stop(self):
         """
@@ -62,6 +71,11 @@ class AliceDeviceStateSender:
         self.running = False
         self.flush_event.set()
         logger.info("Stopping alice device state sender")
+        if self._task is not None:
+            try:
+                await self._task
+            except Exception:
+                logger.error("Error in send loop task during shutdown", exc_info=True)
 
     async def add_message(self, topic_str: str, payload_str: str):
         """
@@ -90,13 +104,19 @@ class AliceDeviceStateSender:
                 self.topic_buffers[topic_str] = self.topic_buffers[topic_str][-MAX_BUFFER_SIZE:]
 
 
-    def _is_event_topic(self, topic: str) -> bool:
+    def _needs_immediate_flush(self, topic: str) -> bool:
         """
-        Check if topic is configured as event property
+        Check if topic type is in IMMEDIATE_FLUSH_TYPES
         """
-        device_id, cap_prop, idx, _ = self.device_registry.topic2info.get(topic)
-        blk_type = self.device_registry.devices[device_id][cap_prop][idx].get("type", "")
-        return blk_type.lower() == PROP_EVENT_TYPE
+        info = self.device_registry.topic2info.get(topic)
+        if info is None:
+            return False
+        device_id, cap_prop, idx, _ = info
+        try:
+            blk_type = self.device_registry.devices[device_id][cap_prop][idx].get("type", "").lower()
+        except (KeyError, IndexError):
+            return False
+        return blk_type in IMMEDIATE_FLUSH_TYPES
 
 
     async def send_to_yandex_loop(self):
@@ -111,7 +131,8 @@ class AliceDeviceStateSender:
             try:
                 current_time = time.time()
                 # --- Stage 1: Per-topic rate limiter ---
-                # Only pass topics whose time_rate elapsed, result goes to batch_buffer
+                # Collect data under lock, convert outside
+                topics_to_convert: List[tuple] = []
                 async with self.lock:
                     for topic, messages in self.topic_buffers.items():
                         if not messages:
@@ -130,23 +151,30 @@ class AliceDeviceStateSender:
                             messages=messages,
                         )
                         aggregated_payload = str(aggregated["payload"])
-                        # send message to Yandex
-                        if os.getenv("__DEBUG__"):
-                            logger.info("[DEBUG] rate-passed: topic=%s, aggregated_payload=%s", topic, aggregated_payload)
-                        else:
-                            block = self.device_registry.convert_mqtt_to_yandex_block(
-                                topic=topic, raw=aggregated_payload
-                            )
-                            if block is not None:
-                                self.batch_buffer.append(block)
-
-                                # Event property trigger immediate batch flush
-                                if self._is_event_topic(topic):
-                                    logger.debug("Event on %r, triggering batch flush", topic)
-                                    self.flush_event.set()
-
-                        self.topic_buffers[topic].clear()
+                        topics_to_convert.append((topic, aggregated_payload))
+                        messages.clear()
                         self.last_send_times[topic] = current_time
+
+
+                # Only pass topics whose time_rate elapsed, result goes to batch_buffer
+                # If All ok - send message to Yandex
+                for topic, aggregated_payload in topics_to_convert:
+                    if os.getenv("__DEBUG__"):
+                        logger.info("[DEBUG] rate-passed: topic=%s, aggregated_payload=%s", topic, aggregated_payload)
+                    else:
+                        block = self.device_registry.convert_mqtt_to_yandex_block(
+                            topic=topic, raw=aggregated_payload
+                        )
+                        if block is not None:
+                            self.batch_buffer.append(block)
+
+                            # Event property trigger immediate batch flush
+                            if self._needs_immediate_flush(topic):
+                                logger.debug(
+                                    "Triggered immediate batch flush, because got update topic: %r",
+                                    topic
+                                )
+                                self.flush_event.set()
 
                 # --- Stage 2: Batch flush ---
                 batch_age = current_time - last_batch_time
