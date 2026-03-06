@@ -5,12 +5,24 @@ import time
 import threading
 from collections import defaultdict
 from os import getenv
+from asyncio import AbstractEventLoop, TimerHandle
 from typing import Any, Dict, List, Optional
 
 from .device_registry import DeviceRegistry
 from .yandex_handlers import emit_batched_states
 
+logger = logging.getLogger(__name__)
+
 PROP_EVENT_TYPE = "devices.properties.event"
+
+MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
+
+# Batch flush windows (seconds)
+# NORMAL: default window for regular state updates (temperature, brightness, etc.)
+# FAST: shortened window for time-sensitive types (events, etc.)
+#       50ms is enough to batch simultaneous events, but fast enough for UX
+BATCH_WINDOW_NORMAL = float(getenv("BATCH_WINDOW_NORMAL", "1.0"))
+BATCH_WINDOW_FAST = float(getenv("BATCH_WINDOW_FAST", "0.05"))
 
 # Types that trigger immediate batch flush (bypass BATCH_INTERVAL)
 # When a block of this type passes Stage 1 rate limiter,
@@ -19,11 +31,6 @@ IMMEDIATE_FLUSH_TYPES: frozenset = frozenset({
     "devices.properties.event",  # Events MUST be send fast
     # Can add new types on this place
 })
-
-logger = logging.getLogger(__name__)
-
-MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
-BATCH_INTERVAL = float(getenv("BATCH_INTERVAL", "1.0"))
 
 class BatchDeviceStore:
     """
@@ -162,8 +169,10 @@ class AliceDeviceStateSender:
         self.running = False
         self.device_registry = device_registry
 
-        self.flush_event = asyncio.Event()
         self._batch_store = BatchDeviceStore()
+        self._flush_handle: Optional[TimerHandle] = None
+        self._current_window: float = 0.0
+        self._loop: Optional[AbstractEventLoop] = None
         self._task: Optional[asyncio.Task] = None
 
 
@@ -172,7 +181,9 @@ class AliceDeviceStateSender:
         Start the background send loop
         """
         logger.info(
-            "Starting alice device state sender (BATCH_INTERVAL=%.1fs)", BATCH_INTERVAL
+            "Starting alice device state sender (normal=%.2fs, fast=%.3fs)",
+            BATCH_WINDOW_NORMAL,
+            BATCH_WINDOW_FAST,
         )
         self.running = True
         self._task = asyncio.create_task(self.send_to_yandex_loop())
@@ -183,7 +194,6 @@ class AliceDeviceStateSender:
         Wakes loop so it can do a final flush before exiting
         """
         self.running = False
-        self.flush_event.set()
         logger.info("Stopping alice device state sender")
         if self._task is not None:
             try:
@@ -232,11 +242,49 @@ class AliceDeviceStateSender:
             return False
         return blk_type in IMMEDIATE_FLUSH_TYPES
 
+    def _schedule_flush(self, time_sensitive: bool = False) -> None:
+        """
+        Schedule or shorten batch flush timer
+
+        Rules:
+          - First block in empty batch: schedule after FAST or NORMAL window
+          - Time-sensitive block during NORMAL window: shorten to FAST
+          - Time-sensitive block during FAST window: do nothing (already fast)
+          - Normal block during any window: do nothing (keep current timer)
+        """
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
+
+        window = BATCH_WINDOW_FAST if time_sensitive else BATCH_WINDOW_NORMAL
+
+        if self._flush_handle is None:
+            # No timer yet — schedule new one
+            self._current_window = window
+            self._flush_handle = self._loop.call_later(window, self._do_flush)
+            logger.debug("Flush scheduled in %.3fs (time_sensitive=%s)", window, time_sensitive)
+
+        elif time_sensitive and self._current_window > BATCH_WINDOW_FAST:
+            # Shorten: cancel current timer and reschedule with fast window
+            self._flush_handle.cancel()
+            self._current_window = BATCH_WINDOW_FAST
+            self._flush_handle = self._loop.call_later(BATCH_WINDOW_FAST, self._do_flush)
+            logger.debug("Flush rescheduled to %.3fs (time_sensitive block arrived)", BATCH_WINDOW_FAST)
+
+
+    def _do_flush(self) -> None:
+        """
+        Timer callback: reset timer state and flush.
+        Called by loop.call_later — must be sync.
+        """
+        self._flush_handle = None
+        self._current_window = 0.0
+        self._try_flush()
+
+
     def _try_flush(self) -> bool:
         """
-        Stage 2: flush batch store if not empty
-        Extracted as method to allow calling from both
-        polling loop (current) and call_later (future variant C)
+        Flush batch store if not empty
+        Called from _do_flush (timer) and shutdown
 
         Returns:
             True if data was flushed, False if store was empty
@@ -248,14 +296,21 @@ class AliceDeviceStateSender:
         emit_batched_states(merged)
         return True
 
+    def _cancel_flush_timer(self) -> None:
+        """
+        Cancel scheduled flush if any
+        """
+        if self._flush_handle is not None:
+            self._flush_handle.cancel()
+            self._flush_handle = None
+            self._current_window = 0.0
+
     async def send_to_yandex_loop(self):
         """
         Background loop for send batched messages to yandex device in 2 stages:
-          1. Rate limiter
-          2. Batch flush
+          Stage 1: per-topic rate limiter
+          Stage 2: (batch flush) is handled by _schedule_flush / call_later
         """
-        last_batch_time = time.time()
-
         while self.running:
             try:
                 current_time = time.time()
@@ -297,27 +352,21 @@ class AliceDeviceStateSender:
                         if block is not None:
                             self._batch_store.merge_block(block)
 
-                            # Event property trigger immediate batch flush
-                            if self._needs_immediate_flush(topic):
+                            # Schedule batch flush with appropriate window
+                            time_sensitive = self._needs_immediate_flush(topic)
+                            self._schedule_flush(time_sensitive=time_sensitive)
+                            if time_sensitive:
                                 logger.debug(
-                                    "Triggered immediate batch flush, because got update topic: %r",
+                                    "Triggered fast batch flush, because got update time-sensitive block from topic: %r",
                                     topic
                                 )
-                                self.flush_event.set()
-
-                # --- Stage 2: Batch flush ---
-                batch_age = current_time - last_batch_time
-                flush_triggered = self.flush_event.is_set()
-                if batch_age >= BATCH_INTERVAL or flush_triggered:
-                    self.flush_event.clear()
-                    if self._try_flush():
-                        last_batch_time = current_time
 
             except Exception as e:
                 logger.error("Error in send loop: %s", e, exc_info=True)
             await asyncio.sleep(0.1)
 
-        # Final flush on shutdown
+        # Shutdown: cancel pending timer and flush remaining
+        self._cancel_flush_timer()
         self._try_flush()
         logger.info("Send loop finished")
 
