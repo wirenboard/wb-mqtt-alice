@@ -24,9 +24,9 @@ MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
 BATCH_WINDOW_NORMAL = float(getenv("BATCH_WINDOW_NORMAL", "1.0"))
 BATCH_WINDOW_FAST = float(getenv("BATCH_WINDOW_FAST", "0.05"))
 
-# Types that trigger immediate batch flush (bypass BATCH_INTERVAL)
+# Types that use fast delivery window (BATCH_WINDOW_FAST instead of BATCH_WINDOW_NORMAL)
 # When a block of this type passes Stage 1 rate limiter,
-# accumulated batch is flushed immediately instead of waiting
+# the batch flush timer is set/shortened to BATCH_WINDOW_FAST
 IMMEDIATE_FLUSH_TYPES: frozenset = frozenset({
     "devices.properties.event",  # Events MUST be send fast
     # Can add new types on this place
@@ -158,7 +158,8 @@ class AliceDeviceStateSender:
 
     Stage 2 — Batch accumulator:
       Converted Yandex blocks from Stage 1 accumulate in BatchDeviceStore
-      Flushed every BATCH_INTERVAL seconds or on event property arrival
+      Flushed after BATCH_WINDOW_NORMAL (1s) or BATCH_WINDOW_FAST (50ms)
+      for time-sensitive types. Timer is managed by call_later.
       Blocks are deduplicated by (device_id, type, instance)
     """
 
