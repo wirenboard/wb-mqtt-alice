@@ -1,3 +1,13 @@
+wb-mqtt-alice (0.9.3) stable; urgency=medium
+
+  * Add batching for device state notifications to Yandex Smart Home:
+    merge multiple MQTT updates into a single Socket.IO emit
+    per BATCH_WINDOW_NORMAL, time-sensitive types
+    (events) use BATCH_WINDOW_FAST
+  * Skip event properties with None value (e.g. button release)
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Fri, 06 Mar 2026 16:00:00 +0300
+
 wb-mqtt-alice (0.9.2) stable; urgency=medium
 
   * Add room name validation on update
