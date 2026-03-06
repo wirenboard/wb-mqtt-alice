@@ -124,7 +124,7 @@ class BatchDeviceStore:
 
         After this call, is_empty is True
         Uses reference swap: new writes go to a fresh dict,
-        result is built from the old one — safe if merge_block()
+        result is built from the old one - safe if merge_block()
         is called during _build_result() processing
         """
         with self._lock:
@@ -151,12 +151,12 @@ class AliceDeviceStateSender:
     """
     Two-stage sender for device state updates to Yandex Smart Home
 
-    Stage 1 — Per-topic rate limiter (existing logic):
+    Stage 1: Per-topic rate limiter (existing logic)
       Each topic has its own time_rate. Messages arriving faster than
       time_rate are buffered and aggregated (last_value / average_value)
       Only when time_rate has elapsed does the topic "pass" to stage 2
 
-    Stage 2 — Batch accumulator:
+    Stage 2: Batch accumulator
       Converted Yandex blocks from Stage 1 accumulate in BatchDeviceStore
       Flushed after BATCH_WINDOW_NORMAL or BATCH_WINDOW_FAST
       for time-sensitive types. Timer is managed by call_later.
@@ -259,7 +259,7 @@ class AliceDeviceStateSender:
         window = BATCH_WINDOW_FAST if time_sensitive else BATCH_WINDOW_NORMAL
 
         if self._flush_handle is None:
-            # No timer yet — schedule new one
+            # No timer yet - schedule new one
             self._current_window = window
             self._flush_handle = self._loop.call_later(window, self._do_flush)
             logger.debug("Flush scheduled in %.3fs (time_sensitive=%s)", window, time_sensitive)
@@ -275,7 +275,7 @@ class AliceDeviceStateSender:
     def _do_flush(self) -> None:
         """
         Timer callback: reset timer state and flush.
-        Called by loop.call_later — must be sync.
+        Called by loop.call_later - must be sync.
         """
         self._flush_handle = None
         self._current_window = 0.0
