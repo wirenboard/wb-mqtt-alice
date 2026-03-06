@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import threading
 from collections import defaultdict
 from os import getenv
 from typing import Any, Dict, List, Optional
@@ -28,6 +29,10 @@ class BatchDeviceStore:
     """
     Deduplicated storage for device state blocks awaiting batch flush
 
+    Thread safety:
+        All public methods are protected by threading.Lock
+        Safe to call from any context (sync, async, threaded)
+    
     Blocks are added and merged by device_id, capabilities and properties
     are deduplicated by (type, instance) - only latest value is kept
 
@@ -71,44 +76,60 @@ class BatchDeviceStore:
 
     def __init__(self) -> None:
         self._devices: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
     def __len__(self) -> int:
         """
         Number of devices in storage
         """
-        return len(self._devices)
+        with self._lock:
+            return len(self._devices)
 
     @property
     def is_empty(self) -> bool:
-        return not self._devices
+        with self._lock:
+            return not self._devices
 
     def merge_block(self, block: Dict[str, Any]) -> None:
         """
         Merge block into storage with deduplication by (device_id, type, instance)
         If same (type, instance) already exists for this device, value is overwritten
         """
-        device_id = block["id"]
-        if device_id not in self._devices:
-            self._devices[device_id] = {
-                "status": block.get("status", "online"),
-                "capabilities": {},
-                "properties": {},
-            }
-        device = self._devices[device_id]
-        for cap in block.get("capabilities", []):
-            key = (cap["type"], cap["state"]["instance"])
-            device["capabilities"][key] = cap
-        for prop in block.get("properties", []):
-            key = (prop["type"], prop["state"]["instance"])
-            device["properties"][key] = prop
+        with self._lock:
+            device_id = block["id"]
+            if device_id not in self._devices:
+                self._devices[device_id] = {
+                    "status": block.get("status", "online"),
+                    "capabilities": {},
+                    "properties": {},
+                }
+            device = self._devices[device_id]
+            for cap in block.get("capabilities", []):
+                key = (cap["type"], cap["state"]["instance"])
+                device["capabilities"][key] = cap
+            for prop in block.get("properties", []):
+                key = (prop["type"], prop["state"]["instance"])
+                device["properties"][key] = prop
 
     def drain(self) -> List[Dict[str, Any]]:
         """
         Return all accumulated devices as list and clear storage
+
         After this call, is_empty is True
+        Uses reference swap: new writes go to a fresh dict,
+        result is built from the old one — safe if merge_block()
+        is called during _build_result() processing
         """
+        with self._lock:
+            # swap: merge_block() will now writes to new dict
+            snapshot = self._devices
+            self._devices = {}
+        return self._build_result(snapshot)
+
+    @staticmethod
+    def _build_result(devices: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         result: List[Dict[str, Any]] = []
-        for device_id, device in self._devices.items():
+        for device_id, device in devices.items():
             entry: Dict[str, Any] = {"id": device_id, "status": device["status"]}
             caps = list(device["capabilities"].values())
             props = list(device["properties"].values())
@@ -117,7 +138,6 @@ class BatchDeviceStore:
             if props:
                 entry["properties"] = props
             result.append(entry)
-        self._devices.clear()
         return result
 
 class AliceDeviceStateSender:
@@ -138,7 +158,7 @@ class AliceDeviceStateSender:
     def __init__(self, device_registry: DeviceRegistry):
         self.topic_buffers = defaultdict(list)
         self.last_send_times = {}  # dict of last times by topic
-        self.lock = asyncio.Lock()
+        self._topic_buffers_lock = asyncio.Lock()
         self.running = False
         self.device_registry = device_registry
 
@@ -178,7 +198,7 @@ class AliceDeviceStateSender:
         """
         logger.debug("add message %s %s", topic_str, payload_str)
 
-        async with self.lock:
+        async with self._topic_buffers_lock:
             info = self.device_registry.topic2info.get(topic_str)
             if info is None:
                 logger.debug("Unknown topic %r, ignoring", topic_str)
@@ -227,7 +247,7 @@ class AliceDeviceStateSender:
                 # --- Stage 1: Per-topic rate limiter ---
                 # Collect data under lock, convert outside
                 topics_to_convert: List[tuple] = []
-                async with self.lock:
+                async with self._topic_buffers_lock:
                     for topic, messages in self.topic_buffers.items():
                         if not messages:
                             logger.debug("not message info for topic=%s", topic)
@@ -280,7 +300,7 @@ class AliceDeviceStateSender:
                 if should_flush:
                     self.flush_event.clear()
                     logger.debug(
-                        "Now will be flushed batch: age=%.2fs, interval=%.1fs, event_trigger=%s, %d block(s)",
+                        "Now will be flushed batch: age=%.2fs, interval=%.1fs, event_trigger=%s, %d device(s)",
                         batch_age,
                         BATCH_INTERVAL,
                         flush_triggered,
