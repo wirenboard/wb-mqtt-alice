@@ -321,7 +321,7 @@ class AliceDeviceStateSender:
                 async with self._topic_buffers_lock:
                     for topic, messages in self.topic_buffers.items():
                         if not messages:
-                            logger.debug("not message info for topic=%s", topic)
+                            # logger.debug("not message info for topic=%s", topic)
                             continue
                         last_send_time = self.last_send_times.get(topic, 0)
                         rate = messages[-1]["origin_rate"].time_rate
