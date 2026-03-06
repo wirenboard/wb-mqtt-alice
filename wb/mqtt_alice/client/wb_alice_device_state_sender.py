@@ -232,6 +232,21 @@ class AliceDeviceStateSender:
             return False
         return blk_type in IMMEDIATE_FLUSH_TYPES
 
+    def _try_flush(self) -> bool:
+        """
+        Stage 2: flush batch store if not empty
+        Extracted as method to allow calling from both
+        polling loop (current) and call_later (future variant C)
+
+        Returns:
+            True if data was flushed, False if store was empty
+        """
+        if self._batch_store.is_empty:
+            return False
+        merged = self._batch_store.drain()
+        logger.debug("Batch flush: done - flushed %d device(s)", len(merged))
+        emit_batched_states(merged)
+        return True
 
     async def send_to_yandex_loop(self):
         """
@@ -293,38 +308,18 @@ class AliceDeviceStateSender:
                 # --- Stage 2: Batch flush ---
                 batch_age = current_time - last_batch_time
                 flush_triggered = self.flush_event.is_set()
-                should_flush = (
-                    not self._batch_store.is_empty
-                    and (batch_age >= BATCH_INTERVAL or flush_triggered)
-                )
-                if should_flush:
+                if batch_age >= BATCH_INTERVAL or flush_triggered:
                     self.flush_event.clear()
-                    logger.debug(
-                        "Now will be flushed batch: age=%.2fs, interval=%.1fs, event_trigger=%s, %d device(s)",
-                        batch_age,
-                        BATCH_INTERVAL,
-                        flush_triggered,
-                        len(self._batch_store),
-                    )
-                    merged = self._batch_store.drain()
-                    logger.debug(
-                        "Batch flush: done - flushed %d device(s)",
-                        len(merged),
-                    )
-                    emit_batched_states(merged)
-                    last_batch_time = current_time
+                    if self._try_flush():
+                        last_batch_time = current_time
 
             except Exception as e:
                 logger.error("Error in send loop: %s", e, exc_info=True)
             await asyncio.sleep(0.1)
 
         # Final flush on shutdown
-        if not self._batch_store.is_empty:
-            merged = self._batch_store.drain()
-            emit_batched_states(merged)
-            logger.debug("Final flush on shutdown: %d device(s)", len(merged))
-
-        logger.info("send loop finished")
+        self._try_flush()
+        logger.info("Send loop finished")
 
 
     @staticmethod
