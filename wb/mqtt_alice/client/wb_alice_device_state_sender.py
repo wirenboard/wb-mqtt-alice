@@ -22,7 +22,7 @@ MAX_BUFFER_SIZE = int(getenv("MAX_BUFFER_SIZE", "10"))
 # FAST: shortened window for time-sensitive types (events, etc.)
 #       50ms is enough to batch simultaneous events, but fast enough for UX
 BATCH_WINDOW_NORMAL = float(getenv("BATCH_WINDOW_NORMAL", "1.0"))
-BATCH_WINDOW_FAST = float(getenv("BATCH_WINDOW_FAST", "0.05"))
+BATCH_WINDOW_FAST = float(getenv("BATCH_WINDOW_FAST", "0.1"))
 
 # Types that use fast delivery window (BATCH_WINDOW_FAST instead of BATCH_WINDOW_NORMAL)
 # When a block of this type passes Stage 1 rate limiter,
@@ -158,7 +158,7 @@ class AliceDeviceStateSender:
 
     Stage 2 — Batch accumulator:
       Converted Yandex blocks from Stage 1 accumulate in BatchDeviceStore
-      Flushed after BATCH_WINDOW_NORMAL (1s) or BATCH_WINDOW_FAST (50ms)
+      Flushed after BATCH_WINDOW_NORMAL or BATCH_WINDOW_FAST
       for time-sensitive types. Timer is managed by call_later.
       Blocks are deduplicated by (device_id, type, instance)
     """
