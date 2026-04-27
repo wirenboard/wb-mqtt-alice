@@ -1,9 +1,10 @@
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel
 from uuid import UUID
 
 class StatusInfo(BaseModel):
     reportable: bool = False
+
 
 class Room(BaseModel):
     name: str
@@ -23,15 +24,18 @@ class Room(BaseModel):
             "devices": self.devices
         }
 
+
 class Capability(BaseModel):
     type: str
     mqtt: str
     parameters: Optional[dict] = None
 
+
 class Property(BaseModel):
     type: str
     mqtt: str
     parameters: Optional[dict] = None
+
 
 class Device(BaseModel):
     name: str
@@ -55,14 +59,23 @@ class Device(BaseModel):
             }
         }
 
+
 class RoomID(BaseModel):
     room_id: str
+
 
 class Config(BaseModel):
     rooms: Dict[str, Room]
     devices: Dict[str, Device]
     link_url: Optional[str] = None
     unlink_url: Optional[str] = None
+
+
+class ControllerLinkStatus(BaseModel):
+    linked: bool
+    link_url: Optional[str] = None
+    unlink_url: Optional[str] = None
+
 
 class ClientConfig(BaseModel):
     client_enabled: bool = False
