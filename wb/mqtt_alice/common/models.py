@@ -67,6 +67,8 @@ class RoomID(BaseModel):
 class Config(BaseModel):
     rooms: Dict[str, Room]
     devices: Dict[str, Device]
+    link_url: Optional[str] = None
+    unlink_url: Optional[str] = None
 
 
 class ControllerLinkStatus(BaseModel):

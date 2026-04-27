@@ -52,6 +52,8 @@ DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
     "rooms": {"without_rooms": {"name": "Без комнаты", "devices": []}},
     "devices": {},
+    "link_url": None,
+    "unlink_url": None,
 }
 
 # Global variables (will be initialized in init_globals())
@@ -346,26 +348,41 @@ def should_enable_client() -> bool:
     return client_config.client_enabled
 
 
+def sync_registration_status(config: Config) -> Config:
+    """
+    Synchronize controller registration status with remote server for legacy Home UI.
+    """
+    logger.debug("Synchronizing registration status with server...")
+
+    try:
+        link_status = build_controller_link_status()
+    except HTTPException as e:
+        logger.error("Failed to fetch registration status: %r", e.detail)
+        link_status = None
+
+    return apply_link_status(config, link_status)
+
+
 def get_unlink_base_url() -> str:
     """Build the base URL used by Home UI for unlink actions."""
     return f"https://{server_address.split(':')[0]}"
 
 
-def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> ControllerLinkStatus:
+def fetch_server_link_flag(language: str = DEFAULT_LANGUAGE) -> bool:
     """
-    Fetch and normalize controller link status from the remote registration API.
+    Fetch explicit controller link status from the remote server.
 
     Returns:
-        ControllerLinkStatus: Explicit linked/not-linked status for Home UI.
+        bool: True if controller is linked.
 
     Raises:
         HTTPException: If remote status cannot be retrieved or parsed reliably.
     """
-    logger.debug("Fetching controller link status from server...")
+    logger.debug("Fetching controller link flag from server...")
 
     response = fetch_url(
-        url=f"https://{server_address}/request-registration",
-        data={"controller_version": f"{controller_version}"},
+        url=f"https://{server_address}/request-link-status",
+        data={},
         key_id=key_id,
     )
 
@@ -400,9 +417,62 @@ def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> Controller
             detail=get_translation("server_invalid_response", language),
         )
 
-    if not data:
-        logger.debug("Controller is not linked: empty payload")
-        return ControllerLinkStatus(linked=False)
+    if isinstance(data, dict) and isinstance(data.get("linked"), bool):
+        return data["linked"]
+
+    logger.error("Link status payload is not recognized: %r", response)
+    raise HTTPException(
+        status_code=HTTPStatus.BAD_GATEWAY,
+        detail=get_translation("server_invalid_response", language),
+    )
+
+
+def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> ControllerLinkStatus:
+    """
+    Build normalized controller link status for local Home UI/backend usage.
+
+    Returns:
+        ControllerLinkStatus: Explicit linked/not-linked status for Home UI.
+
+    Raises:
+        HTTPException: If remote status cannot be retrieved or parsed reliably.
+    """
+    if fetch_server_link_flag(language):
+        logger.debug("Controller is linked")
+        return ControllerLinkStatus(
+            linked=True,
+            unlink_url=get_unlink_base_url(),
+        )
+
+    response = fetch_url(
+        url=f"https://{server_address}/request-registration",
+        data={"controller_version": f"{controller_version}"},
+        key_id=key_id,
+    )
+
+    if not isinstance(response, dict):
+        logger.error("Invalid registration response type: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_invalid_response", language),
+        )
+
+    status_code = int(response.get("status_code") or 0)
+    data = response.get("data")
+
+    if status_code == 0:
+        logger.error("Registration request failed: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_unavailable", language),
+        )
+
+    if status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+        logger.error("Registration server error: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_unavailable", language),
+        )
 
     if isinstance(data, dict) and "registration_url" in data:
         logger.debug("Controller is not linked: registration URL returned")
@@ -411,18 +481,30 @@ def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> Controller
             link_url=data["registration_url"],
         )
 
-    if isinstance(data, dict) and data.get("detail"):
-        logger.debug("Controller is linked")
-        return ControllerLinkStatus(
-            linked=True,
-            unlink_url=get_unlink_base_url(),
+    if status_code >= HTTPStatus.BAD_REQUEST:
+        logger.error("Registration contract error: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=get_translation("server_invalid_response", language),
         )
 
-    logger.error("Link status payload is not recognized: %r", response)
+    logger.error("Registration payload is not recognized: %r", response)
     raise HTTPException(
         status_code=HTTPStatus.BAD_GATEWAY,
         detail=get_translation("server_invalid_response", language),
     )
+
+
+def apply_link_status(config: Config, link_status=None) -> Config:
+    """Copy normalized link status into legacy config fields for backward compatibility."""
+    if link_status is None:
+        config.link_url = None
+        config.unlink_url = None
+        return config
+
+    config.link_url = link_status.link_url
+    config.unlink_url = link_status.unlink_url
+    return config
 
 
 async def restore_client_status_if_needed() -> None:
@@ -604,7 +686,13 @@ async def language_middleware(request: Request, call_next):
 @app.get("/integrations/alice", response_model=Config, status_code=HTTPStatus.OK)
 async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
-    return load_config()
+    config = load_config()
+    config = sync_registration_status(config)
+
+    # Keep legacy link fields in sync for old Home UI clients.
+    finalize_config_change(config, force_client_reload=False)
+
+    return config
 
 
 @app.get(
@@ -815,16 +903,19 @@ async def enable_integration(request: Request):
     request_data = await request.json()
     requested_status = request_data.get("enabled", False)
 
+    # Preserve legacy Home UI behavior: persist requested state before returning
+    # PRECONDITION_FAILED, so the old frontend can keep the toggle enabled
+    # and fetch the binding link from GET /integrations/alice.
+    client_config.client_enabled = requested_status
+    save_client_config(client_config)
+
     if requested_status:
-        link_status = build_controller_link_status(language)
-        if not link_status.linked:
+        if not fetch_server_link_flag(language):
             raise HTTPException(
-                status_code=HTTPStatus.CONFLICT,
+                status_code=HTTPStatus.PRECONDITION_FAILED,
                 detail=get_translation("controller_not_linked", language),
             )
 
-    client_config.client_enabled = requested_status
-    save_client_config(client_config)
     force_client_reload_config()
     return {"message": get_translation("integration_enabled", language)}
 
@@ -935,6 +1026,11 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def startup_event():
     """Application startup tasks"""
     init_globals()
+    config = load_config()
+
+    config = sync_registration_status(config)
+    finalize_config_change(config, force_client_reload=False)
+
     await restore_client_status_if_needed()
 
 
