@@ -52,8 +52,6 @@ DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
     "rooms": {"without_rooms": {"name": "Без комнаты", "devices": []}},
     "devices": {},
-    "link_url": None,
-    "unlink_url": None,
 }
 
 # Global variables (will be initialized in init_globals())
@@ -212,14 +210,8 @@ def finalize_config_change(config: Config, *, force_client_reload: bool = False)
             This needed when not need restart client for load new dev-config
     """
     save_devices_config(config)
-
-    # TODO(vg): Currently, the controller binding status (registration/linking)
-    #           is only re-evaluated when configuration operations occur.
-    #           This approach works but may skip updates if the controller
-    #           state changes independently. A more robust event-based sync
-    #           mechanism will be introduced in future revisions.
     try:
-        status_changed = sync_client_enabled_status(config)
+        status_changed = sync_client_enabled_status()
     except Exception:
         logger.exception("Failed to sync client enabled status")
         status_changed = False
@@ -233,22 +225,17 @@ def finalize_config_change(config: Config, *, force_client_reload: bool = False)
         )
 
 
-def sync_client_enabled_status(config: Config) -> bool:
+def sync_client_enabled_status() -> bool:
     """
-    Synchronize client enabled status based on current config state
+    Synchronize client enabled status based on the client config flag.
 
     Returns:
         bool: True if status was changed and client needs restart
-
-    Example:
-        - Not integrations flagged, registered: False
-        - integrations flagged, not registered: False
-        - integrations flagged, registered: True
     """
     client_config = load_client_config()
 
     old_status = client_config.client_enabled
-    new_status = should_enable_client(config)
+    new_status = should_enable_client()
     if old_status == new_status:
         return False  # No need to sync client "enabled" state
 
@@ -256,8 +243,8 @@ def sync_client_enabled_status(config: Config) -> bool:
     save_client_config(client_config)
 
     logger.info(
-        "Client status changed: %s -> %s (registered: %s)",
-        old_status, new_status, bool(client_config.client_enabled)
+        "Client status changed: %s -> %s",
+        old_status, new_status
     )
     return True
 
@@ -348,40 +335,15 @@ def move_device_to_room(device_id, room_id, config):
     return None
 
 
-def should_enable_client(config: Config) -> bool:
+def should_enable_client() -> bool:
     """
-    Check the minimum conditions for enabling the client
-
-    One condition must be met for client to be enabled:
-    - Integrations flagged
-    Args:
-        config: Configuration object
-    Returns:
-        - flag from "client_enabled" in client_config
+    Return the desired enabled state stored in client config.
     """
 
     client_config = load_client_config()
     logger.debug("[should_enable_client] : flag in config file - %s", client_config.client_enabled)
 
     return client_config.client_enabled
-
-
-def sync_registration_status(config: Config) -> Config:
-    """
-    Synchronize controller registration status with remote server.
-
-    Legacy clients still read link_url/unlink_url from Config, so we keep these
-    fields updated from the normalized status endpoint contract.
-    """
-    logger.debug("Synchronizing registration status with server...")
-
-    try:
-        link_status = build_controller_link_status()
-    except HTTPException as e:
-        logger.error("Failed to fetch registration status: %r", e.detail)
-        link_status = None
-
-    return apply_link_status(config, link_status)
 
 
 def get_unlink_base_url() -> str:
@@ -463,36 +425,21 @@ def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> Controller
     )
 
 
-def apply_link_status(config: Config, link_status=None) -> Config:
-    """Copy normalized link status into legacy config fields for backward compatibility."""
-    if link_status is None:
-        config.link_url = None
-        config.unlink_url = None
-        return config
-
-    config.link_url = link_status.link_url
-    config.unlink_url = link_status.unlink_url
-    return config
-
-
-async def restore_client_status_if_needed(config: Config) -> None:
+async def restore_client_status_if_needed() -> None:
     """
-    Restore client enabled status based on current configuration state
-    
-    Args:
-        config: Configuration object with actual registration status
+    Restore client-enabled status based on the current configuration state
     """
     logger.info("Checking if client status needs restoration...")
     
     try:
-        status_changed = sync_client_enabled_status(config)
+        status_changed = sync_client_enabled_status()
         
         if status_changed:
             logger.info("Client status restored on startup")
             
             # Start client service if it should be enabled
             # Service may stop long time - need do it non-blocking
-            if should_enable_client(config):
+            if should_enable_client():
                 asyncio.create_task(async_restart_service(CLIENT_SERVICE_NAME))
         else:
             logger.debug("Client status is already correct, no restoration needed")
@@ -657,14 +604,7 @@ async def language_middleware(request: Request, call_next):
 @app.get("/integrations/alice", response_model=Config, status_code=HTTPStatus.OK)
 async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
-
-    config = load_config()
-    config = sync_registration_status(config)
-
-    # Don't force client reload because this doesn't change devices
-    finalize_config_change(config, force_client_reload=False)
-
-    return config
+    return load_config()
 
 
 @app.get(
@@ -995,12 +935,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def startup_event():
     """Application startup tasks"""
     init_globals()
-    config = load_config()
-
-    config = sync_registration_status(config)
-    finalize_config_change(config, force_client_reload=False)
-    
-    await restore_client_status_if_needed(config)
+    await restore_client_status_if_needed()
 
 
 if __name__ == "__main__":
