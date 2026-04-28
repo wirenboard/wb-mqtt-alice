@@ -342,7 +342,7 @@ def test_nginx_http_response(
       msg: str
     """
     method = "POST"
-    path = "/request-registration"
+    path = "/api/v1/controller/link"
     
     start_t = time.perf_counter()
     try:
@@ -400,7 +400,7 @@ async def probe_nginx_until_stable(
       can block 6–20s while DNS/TLS warms up
     - If we call sio.connect() in that window, it may hit its 10s timeout
       and we treat startup as failed
-    - So we "pre-flight" nginx here: POST /request-registration, expect fast
+    - So we "pre-flight" nginx here: POST /api/v1/controller/link, expect fast
       HTTP 422 (< acceptable_latency_s). We retry a few times until it's fast
 
     Returns:

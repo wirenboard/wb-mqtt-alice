@@ -73,7 +73,9 @@ def unlink_controller():
             return ExitCode.UNLINK_FAILED
 
         response = fetch_url(
-            url=f"https://{server_address}/request-unlink",
+            url=f"https://{server_address}/api/v1/controller/link",
+            method="DELETE",
+            data={},
             key_id=key_id,
         )
 
@@ -126,8 +128,9 @@ def get_link_status():
             return ExitCode.INIT_ERROR
 
         response = fetch_url(
-            url=f"https://{server_address}/request-registration",
-            data={"controller_version": f"{controller_version}"},
+            url=f"https://{server_address}/api/v1/controller/link",
+            method="GET",
+            data=None,
             key_id=key_id,
         )
 
@@ -149,14 +152,12 @@ def get_link_status():
 
         data = response.get("data") or {}
 
-        # Controller is not linked if registration_url present or data is empty
-        if not data or ("registration_url" in data):
+        if isinstance(data, dict) and data.get("linked") is False:
             logger.info("%s not linked", CURRENT_LINK_STATUS_PREF)
             print("%s not linked" % CURRENT_LINK_STATUS_PREF)
             return ExitCode.STATUS_NOT_LINKED
 
-        # Controller linked if detail exists and is truthy
-        if isinstance(data, dict) and data.get("detail"):
+        if isinstance(data, dict) and data.get("linked") is True:
             logger.info("%s linked", CURRENT_LINK_STATUS_PREF)
             print("%s linked" % CURRENT_LINK_STATUS_PREF)
             return ExitCode.STATUS_LINKED

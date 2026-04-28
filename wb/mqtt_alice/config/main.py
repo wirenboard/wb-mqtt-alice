@@ -17,8 +17,16 @@ from pydantic import ValidationError
 
 from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
 from wb.mqtt_alice.common.fetch_url import fetch_url
-from wb.mqtt_alice.common.models import (Capability, ClientConfig, Config, Device, Property, Room,
-                    RoomID)
+from wb.mqtt_alice.common.models import (
+    Capability,
+    ClientConfig,
+    Config,
+    ControllerLinkStatus,
+    Device,
+    Property,
+    Room,
+    RoomID,
+)
 from wb.mqtt_alice.common.wb_mqtt_load_config import (get_board_revision, get_key_id,
                                  load_server_config)
 
@@ -44,8 +52,6 @@ DEFAULT_LANGUAGE = "en"
 DEFAULT_CONFIG = {
     "rooms": {"without_rooms": {"name": "Без комнаты", "devices": []}},
     "devices": {},
-    "link_url": None,
-    "unlink_url": None,
 }
 
 # Global variables (will be initialized in init_globals())
@@ -358,47 +364,119 @@ def should_enable_client(config: Config) -> bool:
     return client_config.client_enabled
 
 
-def sync_registration_status(config: Config) -> Config:
+def get_unlink_base_url() -> str:
+    """Build the base URL used by Home UI for unlink actions."""
+    return f"https://{server_address.split(':')[0]}"
+
+
+def fetch_server_link_status(language: str = DEFAULT_LANGUAGE) -> ControllerLinkStatus:
     """
-    Synchronize controller registration status with remote server
-    
-    Updates config.link_url and config.unlink_url based on current registration state:
-    - If not registered: sets link_url (registration URL)
-    - If registered: sets unlink_url (server base URL)
-    
-    Args:
-        config: Current configuration object
-        
-    Returns:
-        Updated configuration object with actual registration URLs
+    Fetch explicit controller link status from the server v1 API.
     """
-    logger.debug("Synchronizing registration status with server...")
-    
-    try:
-        response = fetch_url(
-            url=f"https://{server_address}/request-registration",
-            data={"controller_version": f"{controller_version}"},
-            key_id=key_id,
+    response = fetch_url(
+        url=f"https://{server_address}/api/v1/controller/link",
+        method="GET",
+        data=None,
+        key_id=key_id,
+    )
+
+    if not isinstance(response, dict):
+        logger.error("Invalid link status response type: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_invalid_response", language),
         )
 
-        if response["data"] and "registration_url" in response["data"]:
-            # Controller is not registered - provide registration link
-            config.link_url = response["data"]["registration_url"]
-            config.unlink_url = None
-            logger.debug("Controller not registered, link_url updated")
-        elif response["data"]["detail"]:
-            # Controller is registered - provide unlink capability
-            config.link_url = None
-            config.unlink_url = f"https://{server_address.split(':')[0]}"
-            logger.debug("Controller registered, unlink_url updated")
+    status_code = int(response.get("status_code") or 0)
+    data = response.get("data")
 
-    except Exception as e:
-        logger.error("Failed to fetch registration URL: %r", e)
-        # On error, assume registered and provide unlink URL
-        config.link_url = None
-        config.unlink_url = f"https://{server_address.split(':')[0]}"
+    if status_code == 0:
+        logger.error("Link status request failed: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_unavailable", language),
+        )
 
-    return config
+    if status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+        logger.error("Link status server error: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_unavailable", language),
+        )
+
+    if status_code >= HTTPStatus.BAD_REQUEST:
+        logger.error("Link status contract error: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=get_translation("server_invalid_response", language),
+        )
+
+    if isinstance(data, dict) and isinstance(data.get("linked"), bool):
+        if data["linked"]:
+            return ControllerLinkStatus(linked=True, unlink_url=get_unlink_base_url())
+        return ControllerLinkStatus(linked=False)
+
+    logger.error("Link status payload is not recognized: %r", response)
+    raise HTTPException(
+        status_code=HTTPStatus.BAD_GATEWAY,
+        detail=get_translation("server_invalid_response", language),
+    )
+
+
+def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> ControllerLinkStatus:
+    """
+    Build normalized controller link status for local Home UI/backend usage.
+    """
+    link_status = fetch_server_link_status(language)
+    if link_status.linked:
+        return link_status
+
+    response = fetch_url(
+        url=f"https://{server_address}/api/v1/controller/link",
+        method="POST",
+        data={"controller_version": f"{controller_version}"},
+        key_id=key_id,
+    )
+
+    if not isinstance(response, dict):
+        logger.error("Invalid link creation response type: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_invalid_response", language),
+        )
+
+    status_code = int(response.get("status_code") or 0)
+    data = response.get("data")
+
+    if status_code == 0:
+        logger.error("Link creation request failed: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_unavailable", language),
+        )
+
+    if status_code >= HTTPStatus.INTERNAL_SERVER_ERROR:
+        logger.error("Link creation server error: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail=get_translation("server_unavailable", language),
+        )
+
+    if status_code >= HTTPStatus.BAD_REQUEST:
+        logger.error("Link creation contract error: %r", response)
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=get_translation("server_invalid_response", language),
+        )
+
+    if isinstance(data, dict) and data.get("link_url"):
+        return ControllerLinkStatus(linked=False, link_url=data["link_url"])
+
+    logger.error("Link creation payload is not recognized: %r", response)
+    raise HTTPException(
+        status_code=HTTPStatus.BAD_GATEWAY,
+        detail=get_translation("server_invalid_response", language),
+    )
 
 
 async def restore_client_status_if_needed(config: Config) -> None:
@@ -585,12 +663,21 @@ async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
 
     config = load_config()
-    config = sync_registration_status(config)
 
     # Don't force client reload because this doesn't change devices
     finalize_config_change(config, force_client_reload=False)
 
     return config
+
+
+@app.get(
+    "/integrations/alice/link_status",
+    response_model=ControllerLinkStatus,
+    status_code=HTTPStatus.OK,
+)
+async def get_link_status(request: Request):
+    """Return explicit controller link status for future Home UI versions."""
+    return build_controller_link_status(get_language(request))
 
 
 @app.get("/integrations/alice/available", status_code=HTTPStatus.OK)
@@ -783,7 +870,7 @@ async def change_device_room(request: Request, device_id: str, device_data: Room
 
 @app.post("/integrations/alice/enable_client", status_code=HTTPStatus.OK)
 async def enable_integration(request: Request):
-    """Enable Yandex Alice integration"""
+    """Enable or disable Yandex Alice integration independently from link status."""
 
     language = get_language(request)
     client_config = load_client_config()
@@ -791,55 +878,9 @@ async def enable_integration(request: Request):
     request_data = await request.json()
     requested_status = request_data.get("enabled", False)
 
-    # Update integration config
     client_config.client_enabled = requested_status
     save_client_config(client_config)
-
-    if requested_status:
-        # Use fetch_url to check current link status
-        try:
-            response = fetch_url(
-                url=f"https://{server_address}/request-registration",
-                data={"controller_version": f"{controller_version}"},
-                key_id=key_id,
-            )
-
-            # Validate response
-            if not isinstance(response, dict):
-                logger.error("Invalid response from server: %r", response)
-                raise HTTPException(
-                    status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                    detail=get_translation("server_unavailable", language),
-                )
-
-            data = response.get("data", {})
-
-            # Controller not linked if registration_url present or data empty
-            if not data or ("registration_url" in data):
-                raise HTTPException(
-                    status_code=HTTPStatus.PRECONDITION_FAILED,
-                    detail=get_translation("controller_not_linked", language),
-                )
-
-            # Controller linked if detail exists
-            if not (isinstance(data, dict) and data.get("detail")):
-                raise HTTPException(
-                    status_code=HTTPStatus.PRECONDITION_FAILED,
-                    detail=get_translation("controller_status_unknown", language),
-                )
-
-        except HTTPException:
-            raise  # Re-raise HTTP exceptions
-        except Exception as e:
-            logger.error("Failed to check controller link status: %r", e)
-            raise HTTPException(
-                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
-                detail=get_translation("server_unavailable", language),
-            )
-        finally:
-            force_client_reload_config()
-    else:
-        force_client_reload_config()
+    force_client_reload_config()
     return {"message": get_translation("integration_enabled", language)}
 
 
@@ -863,7 +904,9 @@ async def unlink_controller(request: Request):
 
     try:
         response = fetch_url(
-            url=f"https://{server_address}/request-unlink",
+            url=f"https://{server_address}/api/v1/controller/link",
+            method="DELETE",
+            data={},
             key_id=key_id,
         )
         logger.info("response: %r", response)
@@ -951,7 +994,6 @@ async def startup_event():
     init_globals()
     config = load_config()
 
-    config = sync_registration_status(config)
     finalize_config_change(config, force_client_reload=False)
     
     await restore_client_status_if_needed(config)

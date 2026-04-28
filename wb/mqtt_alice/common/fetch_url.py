@@ -8,6 +8,7 @@ BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
 
 def fetch_url(
     url=None,
+    method="POST",
     cert_path=BUNDLE_CRT_PATH,
     engine="ateccx08",
     key_type="ENG",
@@ -18,10 +19,11 @@ def fetch_url(
     retry_opts: Optional[Iterable[str]] = None,
     ):
     """
-    Performs an authenticated POST request via curl with a hardware key
+    Performs an authenticated HTTP request via curl with a hardware key
 
     Parameters:
         url (str): Target URL.
+        method (str): HTTP method.
         cert_path (str): Path to the SSL certificate.
         engine (str): Cryptographic engine.
         key_type (str): Key type.
@@ -67,7 +69,7 @@ def fetch_url(
     # Create a curl command
     cmd = [
         "curl",
-        "-X", "POST",
+        "-X", method.upper(),
         *retry_opts,
         "--cert", str(cert_path_obj),
         "--engine", engine,
@@ -84,7 +86,9 @@ def fetch_url(
         cmd.extend(["--header", f"{key}: {value}"])
 
     # Add JSON data and target URL
-    cmd.extend(["--data", json.dumps(data), url])
+    if method.upper() != "GET":
+        cmd.extend(["--data", json.dumps(data)])
+    cmd.append(url)
 
     try:
         # Execute command
