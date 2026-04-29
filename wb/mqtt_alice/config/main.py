@@ -22,6 +22,7 @@ from wb.mqtt_alice.common.models import (
     ClientConfig,
     Config,
     ControllerLinkStatus,
+    ControllerLinkUrl,
     Device,
     Property,
     Room,
@@ -413,7 +414,7 @@ def fetch_server_link_status(language: str = DEFAULT_LANGUAGE) -> ControllerLink
 
     if isinstance(data, dict) and isinstance(data.get("linked"), bool):
         if data["linked"]:
-            return ControllerLinkStatus(linked=True, unlink_url=get_unlink_base_url())
+            return ControllerLinkStatus(linked=True, status_url=get_unlink_base_url())
         return ControllerLinkStatus(linked=False)
 
     logger.error("Link status payload is not recognized: %r", response)
@@ -423,14 +424,10 @@ def fetch_server_link_status(language: str = DEFAULT_LANGUAGE) -> ControllerLink
     )
 
 
-def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> ControllerLinkStatus:
+def create_controller_link(language: str = DEFAULT_LANGUAGE) -> ControllerLinkUrl:
     """
-    Build normalized controller link status for local Home UI/backend usage.
+    Create or fetch an explicit controller registration link.
     """
-    link_status = fetch_server_link_status(language)
-    if link_status.linked:
-        return link_status
-
     response = fetch_url(
         url=f"https://{server_address}/api/v1/controller/link",
         method="POST",
@@ -470,7 +467,7 @@ def build_controller_link_status(language: str = DEFAULT_LANGUAGE) -> Controller
         )
 
     if isinstance(data, dict) and data.get("link_url"):
-        return ControllerLinkStatus(linked=False, link_url=data["link_url"])
+        return ControllerLinkUrl(link_url=data["link_url"])
 
     logger.error("Link creation payload is not recognized: %r", response)
     raise HTTPException(
@@ -676,8 +673,18 @@ async def get_all_rooms_and_devices():
     status_code=HTTPStatus.OK,
 )
 async def get_link_status(request: Request):
-    """Return explicit controller link status for future Home UI versions."""
-    return build_controller_link_status(get_language(request))
+    """Return pure controller link status without side effects."""
+    return fetch_server_link_status(get_language(request))
+
+
+@app.post(
+    "/integrations/alice/link",
+    response_model=ControllerLinkUrl,
+    status_code=HTTPStatus.OK,
+)
+async def create_link(request: Request):
+    """Create a controller registration link for Home UI."""
+    return create_controller_link(get_language(request))
 
 
 @app.get("/integrations/alice/available", status_code=HTTPStatus.OK)

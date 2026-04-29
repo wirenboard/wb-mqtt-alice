@@ -65,8 +65,11 @@ class Config(BaseModel):
 
 class ControllerLinkStatus(BaseModel):
     linked: bool
-    link_url: Optional[str] = None
-    unlink_url: Optional[str] = None
+    status_url: Optional[str] = None
+
+
+class ControllerLinkUrl(BaseModel):
+    link_url: str
 
 class ClientConfig(BaseModel):
     client_enabled: bool = False
