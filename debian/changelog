@@ -1,4 +1,4 @@
-wb-mqtt-alice (0.9.5) stable; urgency=medium
+wb-mqtt-alice (0.10.0) stable; urgency=medium
 
   * Switch the controller backend to the new server v1 controller link API
   * Split local Home UI endpoints into explicit link status and link creation actions
