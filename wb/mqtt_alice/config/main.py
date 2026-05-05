@@ -28,8 +28,11 @@ from wb.mqtt_alice.common.models import (
     Room,
     RoomID,
 )
-from wb.mqtt_alice.common.wb_mqtt_load_config import (get_board_revision, get_key_id,
-                                 load_server_config)
+from wb.mqtt_alice.common.wb_mqtt_load_config import (
+    get_board_revision,
+    get_key_id,
+    load_server_config,
+)
 
 # FastAPI initialization
 app = FastAPI(
@@ -74,7 +77,7 @@ def init_globals():
         controller_version = get_board_revision()
         key_id = get_key_id(controller_version)
         config = load_config()
-        
+
         server_cfg = load_server_config()
         server_address = server_cfg.get("server_address")
         if not server_address:
@@ -136,10 +139,7 @@ def load_client_config() -> ClientConfig:
         return loaded_client_config
     except (json.JSONDecodeError, ValidationError) as e:
         # Invalid JSON or schema — recreate with default
-        logger.warning(
-            "Client config is invalid (%s: %r), recreating with defaults...",
-            type(e).__name__, e
-        )
+        logger.warning("Client config is invalid (%s: %r), recreating with defaults...", type(e).__name__, e)
         default_client_config = ClientConfig(client_enabled=False)
         save_client_config(default_client_config)
         return default_client_config
@@ -164,12 +164,12 @@ def save_client_config(client_config: ClientConfig) -> None:
 
         # Atomic write: write to temp file, then rename
         with tempfile.NamedTemporaryFile(
-            mode='w',
-            encoding='utf-8',
+            mode="w",
+            encoding="utf-8",
             dir=config_path.parent,
             delete=False,
-            prefix='.tmp_config_',
-            suffix='.json'
+            prefix=".tmp_config_",
+            suffix=".json",
         ) as tmp_file:
             tmp_file.write(content)
             tmp_path = Path(tmp_file.name)
@@ -191,8 +191,7 @@ def save_devices_config(config: Config) -> None:
     logger.debug("Saving yandex devices configuration file...")
     try:
         DEVICES_CONFIG_PATH.write_text(
-            json.dumps(config.dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8"
+            json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )
     except Exception as e:
         logger.error("Error saving yandex devices configuration file: %r", e)
@@ -228,7 +227,8 @@ def finalize_config_change(config: Config, *, force_client_reload: bool = False)
     else:
         logger.debug(
             "No restart needed (force_client_reload=%s, status_changed=%s)",
-            force_client_reload, status_changed
+            force_client_reload,
+            status_changed,
         )
 
 
@@ -256,7 +256,9 @@ def sync_client_enabled_status(config: Config) -> bool:
 
     logger.info(
         "Client status changed: %s -> %s (registered: %s)",
-        old_status, new_status, bool(client_config.client_enabled)
+        old_status,
+        new_status,
+        bool(client_config.client_enabled),
     )
     return True
 
@@ -479,25 +481,25 @@ def create_controller_link(language: str = DEFAULT_LANGUAGE) -> ControllerLinkUr
 async def restore_client_status_if_needed(config: Config) -> None:
     """
     Restore client enabled status based on current configuration state
-    
+
     Args:
         config: Configuration object with actual registration status
     """
     logger.info("Checking if client status needs restoration...")
-    
+
     try:
         status_changed = sync_client_enabled_status(config)
-        
+
         if status_changed:
             logger.info("Client status restored on startup")
-            
+
             # Start client service if it should be enabled
             # Service may stop long time - need do it non-blocking
             if should_enable_client(config):
                 asyncio.create_task(async_restart_service(CLIENT_SERVICE_NAME))
         else:
             logger.debug("Client status is already correct, no restoration needed")
-            
+
     except Exception as e:
         logger.error("Failed to restore client status: %r", e)
         # Don't raise - this is a recovery mechanism, shouldn't break startup
@@ -1002,7 +1004,7 @@ async def startup_event():
     config = load_config()
 
     finalize_config_change(config, force_client_reload=False)
-    
+
     await restore_client_status_if_needed(config)
 
 

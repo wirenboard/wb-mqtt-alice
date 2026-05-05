@@ -1,11 +1,11 @@
 import asyncio
 import logging
 import os
-import time
 import threading
+import time
+from asyncio import AbstractEventLoop, TimerHandle
 from collections import defaultdict
 from os import getenv
-from asyncio import AbstractEventLoop, TimerHandle
 from typing import Any, Dict, List, Optional
 
 from .device_registry import DeviceRegistry
@@ -27,10 +27,13 @@ BATCH_WINDOW_FAST = float(getenv("BATCH_WINDOW_FAST", "0.1"))
 # Types that use fast delivery window (BATCH_WINDOW_FAST instead of BATCH_WINDOW_NORMAL)
 # When a block of this type passes Stage 1 rate limiter,
 # the batch flush timer is set/shortened to BATCH_WINDOW_FAST
-IMMEDIATE_FLUSH_TYPES: frozenset = frozenset({
-    "devices.properties.event",  # Events MUST be send fast
-    # Can add new types on this place
-})
+IMMEDIATE_FLUSH_TYPES: frozenset = frozenset(
+    {
+        "devices.properties.event",  # Events MUST be send fast
+        # Can add new types on this place
+    }
+)
+
 
 class BatchDeviceStore:
     """
@@ -39,7 +42,7 @@ class BatchDeviceStore:
     Thread safety:
         All public methods are protected by threading.Lock
         Safe to call from any context (sync, async, threaded)
-    
+
     Blocks are added and merged by device_id, capabilities and properties
     are deduplicated by (type, instance) - only latest value is kept
 
@@ -147,6 +150,7 @@ class BatchDeviceStore:
             result.append(entry)
         return result
 
+
 class AliceDeviceStateSender:
     """
     Two-stage sender for device state updates to Yandex Smart Home
@@ -175,7 +179,6 @@ class AliceDeviceStateSender:
         self._current_window: float = 0.0
         self._loop: Optional[AbstractEventLoop] = None
         self._task: Optional[asyncio.Task] = None
-
 
     async def start(self):
         """
@@ -228,7 +231,6 @@ class AliceDeviceStateSender:
             if len(self.topic_buffers[topic_str]) > MAX_BUFFER_SIZE:
                 self.topic_buffers[topic_str] = self.topic_buffers[topic_str][-MAX_BUFFER_SIZE:]
 
-
     def _needs_immediate_flush(self, topic: str) -> bool:
         """
         Check if topic type is in IMMEDIATE_FLUSH_TYPES
@@ -271,7 +273,6 @@ class AliceDeviceStateSender:
             self._flush_handle = self._loop.call_later(BATCH_WINDOW_FAST, self._do_flush)
             logger.debug("Flush rescheduled to %.3fs (time_sensitive block arrived)", BATCH_WINDOW_FAST)
 
-
     def _do_flush(self) -> None:
         """
         Timer callback: reset timer state and flush.
@@ -280,7 +281,6 @@ class AliceDeviceStateSender:
         self._flush_handle = None
         self._current_window = 0.0
         self._try_flush()
-
 
     def _try_flush(self) -> bool:
         """
@@ -325,7 +325,7 @@ class AliceDeviceStateSender:
                             continue
                         last_send_time = self.last_send_times.get(topic, 0)
                         rate = messages[-1]["origin_rate"].time_rate
-                        
+
                         # check time-rate
                         if current_time - last_send_time <= rate:
                             continue  # Rate limit not passed yet
@@ -340,12 +340,13 @@ class AliceDeviceStateSender:
                         messages.clear()
                         self.last_send_times[topic] = current_time
 
-
                 # Only pass topics whose time_rate elapsed, result goes to _batch_store
                 # If All ok - send message to Yandex
                 for topic, aggregated_payload in topics_to_convert:
                     if os.getenv("__DEBUG__"):
-                        logger.info("[DEBUG] rate-passed: topic=%s, aggregated_payload=%s", topic, aggregated_payload)
+                        logger.info(
+                            "[DEBUG] rate-passed: topic=%s, aggregated_payload=%s", topic, aggregated_payload
+                        )
                     else:
                         block = self.device_registry.convert_mqtt_to_yandex_block(
                             topic=topic, raw=aggregated_payload
@@ -359,7 +360,7 @@ class AliceDeviceStateSender:
                             if time_sensitive:
                                 logger.debug(
                                     "Triggered fast batch flush, because got update time-sensitive block from topic: %r",
-                                    topic
+                                    topic,
                                 )
 
             except Exception as e:
@@ -370,7 +371,6 @@ class AliceDeviceStateSender:
         self._cancel_flush_timer()
         self._try_flush()
         logger.info("Send loop finished")
-
 
     @staticmethod
     def modify_messages_by_rule(rule: str, messages: List[dict]) -> dict:

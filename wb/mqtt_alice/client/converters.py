@@ -9,8 +9,12 @@ Handles type conversions between WirenBoard and Yandex Smart Home formats
 import logging
 from typing import Any, Optional
 
-from wb.mqtt_alice.common.constants import (EventType, MotionEventValue, OpenEventValue,
-                       WaterLeakEventValue)
+from wb.mqtt_alice.common.constants import (
+    EventType,
+    MotionEventValue,
+    OpenEventValue,
+    WaterLeakEventValue,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,18 +68,18 @@ def convert_to_float(raw: Any) -> float:
 def _rgb_to_int(red: int, green: int, blue: int) -> int:
     """
     Convert RGB components to a single integer value
-    
-    Combines red, green, and blue color components (0-255) into a single 
+
+    Combines red, green, and blue color components (0-255) into a single
     24-bit integer using bit shifting: (R << 16) | (G << 8) | B
-    
+
     Args:
         red: Red component (0-255)
-        green: Green component (0-255) 
+        green: Green component (0-255)
         blue: Blue component (0-255)
-        
+
     Returns:
         int: RGB value as 24-bit integer (0-16777215)
-        
+
     Example:
         >>> _rgb_to_int(255, 128, 0)
         16744448  # 0xFF8000
@@ -88,10 +92,10 @@ def _rgb_to_int(red: int, green: int, blue: int) -> int:
 
 def convert_rgb_int_to_wb(val: int) -> str:
     """
-    Convert RGB value from Yandex integer format to WirenBoard 
+    Convert RGB value from Yandex integer format to WirenBoard
     MQTT format (semicolon-separated)
-    
-    Extracts RGB components from a 24-bit integer and formats them 
+
+    Extracts RGB components from a 24-bit integer and formats them
     as semicolon-separated string for WirenBoard MQTT
 
     Args:
@@ -166,7 +170,7 @@ def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> in
 
     Returns:
         int: Temperature in Kelvin, rounded to nearest 100K
-    
+
     Examples:
         >>> convert_temp_percent_to_kelvin(0, 2700, 6500)
         2700
@@ -180,7 +184,11 @@ def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> in
     kelvin_rounded = int(round(kelvin_raw / 100.0) * 100)
     logger.debug(
         "Converted temp: %r%% → %rK → rounded %rK (range: %r-%rK)",
-        percent, kelvin_raw, kelvin_rounded, min_k, max_k
+        percent,
+        kelvin_raw,
+        kelvin_rounded,
+        min_k,
+        max_k,
     )
     return kelvin_rounded
 
@@ -194,10 +202,10 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
         kelvin: Temperature in Kelvin
         min_k: Minimum temperature in Kelvin (typically 2700K)
         max_k: Maximum temperature in Kelvin (typically 6500K)
-    
+
     Returns:
         float: Temperature in percentage (0-100)
-    
+
     Examples:
         >>> convert_temp_kelvin_to_percent(2700, 2700, 6500)
         0.0
@@ -213,38 +221,40 @@ def convert_temp_kelvin_to_percent(kelvin: int, min_k: int, max_k: int) -> float
     return round(percent, 1)
 
 
-def convert_mqtt_event_value(event_type:str, event_type_value:str, value:str, event_single_topic:bool=False)->Optional[str]:
+def convert_mqtt_event_value(
+    event_type: str, event_type_value: str, value: str, event_single_topic: bool = False
+) -> Optional[str]:
     """
     Transform raw value from MQTT topics to Yandex Smart Home event text values
-    
+
     Converts MQTT topic values to appropriate Yandex event values based on event type.
-    Handles both multi-topic events (separate topics for each state) and single-topic 
+    Handles both multi-topic events (separate topics for each state) and single-topic
     events (one topic with boolean values).
-    
+
     Args:
         event_type: Type of event (e.g., "button", "open", "water_leak", "motion")
-        event_type_value: Expected event value from Yandex format (e.g., "opened", "closed", 
+        event_type_value: Expected event value from Yandex format (e.g., "opened", "closed",
                          "dry", "leak", "detected", "not_detected")
         value: Raw value from MQTT topic (e.g., "1", "0", "true", "false", "on", "off")
         event_single_topic: If True, handles single-topic events with value inversion.
                            If False (default), handles multi-topic events
-    
+
     Returns:
         Optional[str]: Yandex event value string if event is triggered, None otherwise
-    
+
     Examples:
         Multi-topic events (default):
         >>> convert_mqtt_event_value("open", "opened", "1")
         "opened"
         >>> convert_mqtt_event_value("open", "closed", "0")
         None
-        
+
         Button events:
         >>> convert_mqtt_event_value("button", "click", "1")
         "click"
         >>> convert_mqtt_event_value("button", "click", "0")
         None
-        
+
         Single-topic events:
         >>> convert_mqtt_event_value("open", "opened", "1", event_single_topic=True)
         "opened"
