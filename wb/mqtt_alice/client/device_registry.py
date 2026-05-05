@@ -11,23 +11,28 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import (Any, Awaitable, Callable, Dict, Iterable, List, Optional,
-                    Tuple, Set)
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 import paho.mqtt.subscribe as subscribe
 
 from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
-from .converters import (EventType, convert_mqtt_event_value,
-                        convert_rgb_int_to_wb, convert_rgb_wb_to_int,
-                        convert_temp_kelvin_to_percent,
-                        convert_temp_percent_to_kelvin, convert_to_bool)
+
+from .converters import (
+    EventType,
+    convert_mqtt_event_value,
+    convert_rgb_int_to_wb,
+    convert_rgb_wb_to_int,
+    convert_temp_kelvin_to_percent,
+    convert_temp_percent_to_kelvin,
+    convert_to_bool,
+)
 from .mqtt_topic import MQTTTopic
 from .wb_alice_device_event_rate import AliceDeviceEventRate
 
 logger = logging.getLogger(__name__)
 
 
-def is_property_event(prop:str="")->bool:
+def is_property_event(prop: str = "") -> bool:
     """
     Check if property type is a Yandex Smart Home event property
 
@@ -83,42 +88,41 @@ def is_event_single_topic(items: Iterable[Dict[Any, Any]]) -> bool:
     # Group by instance
     by_instance: Dict[Any, List[Dict[Any, Any]]] = defaultdict(list)
     for item in items:
-        instance = item.get('instance')
+        instance = item.get("instance")
         by_instance[instance].append(item)
-    
+
     # For each group compare instance for keys
     for instance, group in by_instance.items():
         values_per_key: Dict[Any, Set[Any]] = defaultdict(set)
         for item in group:
             for key, value in item.items():
-                if key != 'instance':  
+                if key != "instance":
                     values_per_key[key].add(value)
                     if len(values_per_key[key]) > 1:
                         return False
     return True
 
 
-
 def merge_event_prop_by_instance(props: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Merge multiple event properties with same instance into single property with events array
-    
+
     Transforms individual event property entries into Yandex Smart Home format where
     events with the same instance are grouped under a single property with an events array.
-    
+
     Input format (multiple properties):
         [{"type": "devices.properties.event", "parameters": {"instance": "open", "value": "opened"}},
          {"type": "devices.properties.event", "parameters": {"instance": "open", "value": "closed"}}]
-    
+
     Output format (merged property):
         [{"type": "devices.properties.event", "parameters": {
             "instance": "open",
             "events": [{"value": "opened"}, {"value": "closed"}]
         }}]
-    
+
     Args:
         props: List of property dictionaries from device configuration
-        
+
     Returns:
         List with non-event properties unchanged and event properties merged by instance
     """
@@ -183,10 +187,14 @@ def extract_event_value(value: Any) -> str:
 
 
 async def read_topic_once(
-    topic: str, *, host: str = "localhost", retain: bool = True, timeout: float = 2.0,
-    prop_type: str="",
-    instance: Optional[str]=None,
-    unit_or_event_value: Optional[str]=None,
+    topic: str,
+    *,
+    host: str = "localhost",
+    retain: bool = True,
+    timeout: float = 2.0,
+    prop_type: str = "",
+    instance: Optional[str] = None,
+    unit_or_event_value: Optional[str] = None,
 ) -> Optional[Any]:
     """
     Reads a single retained MQTT message in a separate thread
@@ -211,7 +219,7 @@ async def read_topic_once(
                 res.payload = convert_mqtt_event_value(
                     event_type=instance,
                     event_type_value=unit_or_event_value,
-                    value=res.payload.decode().strip()
+                    value=res.payload.decode().strip(),
                 ).encode()
 
             logger.debug("Current topic %r state payload: %r", topic, payload)
@@ -304,7 +312,7 @@ class DeviceRegistry:
                 # Instance types for each capability
                 # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
                 instance, instance_value = self._extract_instance_with_value(cap)
-                self.cap_index[(device_id, cap["type"], instance, instance_value )] = full
+                self.cap_index[(device_id, cap["type"], instance, instance_value)] = full
 
             for i, prop in enumerate(device_data.get("properties", [])):
                 mqtt_topic = MQTTTopic(prop["mqtt"])
@@ -317,12 +325,7 @@ class DeviceRegistry:
                 event_rate = AliceDeviceEventRate(event_rate_info)
                 self.topic2info[full] = (device_id, "properties", i, event_rate)
                 instance, instance_value = self._extract_instance_with_value(prop)
-                index_key = (
-                    device_id,
-                    prop["type"],
-                    instance,
-                    instance_value
-                )
+                index_key = (device_id, prop["type"], instance, instance_value)
                 self.cap_index[index_key] = full
 
         logger.info(
@@ -334,32 +337,32 @@ class DeviceRegistry:
     def _merge_color_setting_params(self, capabilities: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Merge all color_setting sub-parameters into one capability
-        
+
         WirenBoard stores color_setting as separate capabilities (rgb, temperature_k, etc.),
         but Yandex expects them merged into single capability with combined parameters
-        
+
         Args:
             capabilities: List of device capabilities from config
-        
+
         Returns:
             Merged color_setting parameters dict, empty if no color capabilities found
         """
         color_params: Dict[str, Any] = {}
-        
+
         for cap in capabilities:
             cap_type = cap.get("type")
             if cap_type is None:
                 continue
             if cap_type != CAP_COLOR_SETTING:
                 continue
-                
+
             params = dict(cap.get("parameters", {}))
             params.pop("instance", None)  # Don't include 'instance' in discovery
-            
+
             # color_model: "rgb" | "hsv"
             if "color_model" in params and isinstance(params["color_model"], str):
                 color_params["color_model"] = params["color_model"]
-            
+
             # temperature_k: {min, max}
             if "temperature_k" in params and isinstance(params["temperature_k"], dict):
                 tk = params["temperature_k"]
@@ -367,7 +370,7 @@ class DeviceRegistry:
                     "min": tk.get("min"),
                     "max": tk.get("max"),
                 }
-            
+
             # Normalize color_scene data:
             # - WB frontend write data to config in format:
             #   "color_scene": {"scenes": [ "ocean", "sunset"]}
@@ -387,7 +390,7 @@ class DeviceRegistry:
                         )
                 if normalized_scenes:
                     color_params["color_scene"] = {"scenes": normalized_scenes}
-        
+
         return color_params
 
     def build_yandex_devices_list(self) -> List[Dict[str, Any]]:
@@ -419,7 +422,7 @@ class DeviceRegistry:
             logger.debug("  %r. %r - %r", i + 1, device["id"], device["name"])
 
         return devices_out
-    
+
     def _create_device_base_info(self, dev_id: str, dev: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create basic device metadata structure
@@ -454,7 +457,7 @@ class DeviceRegistry:
             cap_dict = {
                 "type": cap["type"],
                 "retrievable": True,
-                "reportable": True  # "reportable" if not set - False, but need True for yandex scenarios usage
+                "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
             }
             if "parameters" in cap and cap["parameters"]:
                 cap_dict["parameters"] = cap["parameters"].copy()
@@ -467,7 +470,7 @@ class DeviceRegistry:
                 {
                     "type": CAP_COLOR_SETTING,
                     "retrievable": True,
-                    "reportable": True,   # "reportable" if not set - False, but need True for yandex scenarios usage
+                    "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
                     "parameters": color_params,
                 }
             )
@@ -511,19 +514,20 @@ class DeviceRegistry:
                     prop_params["value"] = value_cfg.strip()
                 counter = 0
                 for cur_prop in props:
-                    if cur_prop['parameters']['instance'] == instance:
+                    if cur_prop["parameters"]["instance"] == instance:
                         counter += 1
                 # append default oppozit values for some events
                 if counter == 0:
                     _oppozit_obj = dict(prop_obj)
                     _oppozit_params = dict(prop_params)
-                    _prefix, _value = value_cfg.strip().split('.')
-                    if instance in [EventType.OPEN, EventType.WATER_LEAK,EventType.MOTION]:
+                    _prefix, _value = value_cfg.strip().split(".")
+                    if instance in [EventType.OPEN, EventType.WATER_LEAK, EventType.MOTION]:
                         oppozit_val = convert_mqtt_event_value(
-                            event_type=instance, 
-                            event_type_value = _value,
+                            event_type=instance,
+                            event_type_value=_value,
                             value=0,
-                            event_single_topic=True,)
+                            event_single_topic=True,
+                        )
                         _oppozit_params["value"] = _prefix + "." + oppozit_val
                     _oppozit_obj["parameters"] = _oppozit_params
                     props.append(_oppozit_obj)
@@ -538,17 +542,13 @@ class DeviceRegistry:
             props.append(prop_obj)
 
         for _prop in props:
-            if is_property_event(_prop.get("type","")):
+            if is_property_event(_prop.get("type", "")):
                 return merge_event_prop_by_instance(props)
 
         return props
 
     def _convert_cap_to_yandex(
-        self, 
-        raw: str, 
-        cap_type: str, 
-        instance: Optional[str] = None,
-        params: Optional[Dict[str, Any]] = None
+        self, raw: str, cap_type: str, instance: Optional[str] = None, params: Optional[Dict[str, Any]] = None
     ) -> Any:
         """
         Convert raw MQTT payload string to Yandex Smart Home capability format
@@ -578,13 +578,13 @@ class DeviceRegistry:
         """
         # Use empty dict if None provided
         params = params or {}
-        
+
         if cap_type.endswith("on_off"):
             return convert_to_bool(raw)
 
         elif cap_type.endswith("float") or cap_type.endswith("range"):
             return float(raw)
-        
+
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
                 rgb_int = convert_rgb_wb_to_int(raw)
@@ -592,7 +592,7 @@ class DeviceRegistry:
                     raise ValueError(f"Can't parse RGB value: {raw!r}")
                 logger.debug("Successfully parsed RGB: %r to %r", raw, rgb_int)
                 return rgb_int
-            
+
             elif instance == "temperature_k":
                 # Get temperature range from capability config
                 temp_params = params.get("temperature_k", {})
@@ -649,7 +649,7 @@ class DeviceRegistry:
         Args:
             - topic: MQTT topic in full format (/devices/device/controls/control)
             - raw: Raw payload string from MQTT message
-        
+
         Returns:
             - Device state block dict
               {"id": ..., "status": ..., "capabilities"/"properties": [...]}
@@ -673,7 +673,7 @@ class DeviceRegistry:
                     event_type=instance,
                     event_type_value=extract_event_value(blk.get("parameters", {}).get("value")),
                     value=raw,
-                    event_single_topic=event_single_topic
+                    event_single_topic=event_single_topic,
                 )
                 if value is None:
                     # Event not triggered (e.g. button release "0") — skip silently
@@ -687,11 +687,11 @@ class DeviceRegistry:
             return None
 
     def _convert_cap_to_mqtt(
-        self, 
+        self,
         value: Any,
-        cap_type: str, 
+        cap_type: str,
         instance: Optional[str] = None,
-        params: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Convert Yandex Smart Home value to MQTT payload string WirenBoard format
@@ -731,29 +731,27 @@ class DeviceRegistry:
                 temp_params = params.get("temperature_k", {})
                 min_k = temp_params.get("min", 2700)
                 max_k = temp_params.get("max", 6500)
-                
+
                 # Convert Yandex Kelvin to WB percentage (0-100)
                 try:
                     kelvin_value = int(float(value))
                 except (ValueError, TypeError):
                     raise ValueError(f"Invalid temperature value from Yandex: {value!r}")
                 percent_value = convert_temp_kelvin_to_percent(kelvin_value, min_k, max_k)
-                
+
                 logger.debug(
-                    "Converted temp %rK → %r%% (range: %r-%rK)",
-                    kelvin_value, percent_value, min_k, max_k
+                    "Converted temp %rK → %r%% (range: %r-%rK)", kelvin_value, percent_value, min_k, max_k
                 )
-                
+
                 return str(percent_value)
-            
+
             else:
                 # Other color_setting instances - passthrough
                 return str(value)
-        
+
         else:
             # Unknown capability types - passthrough as string
             return str(value)
-
 
     async def forward_yandex_to_mqtt(
         self,
@@ -792,7 +790,11 @@ class DeviceRegistry:
         except (ValueError, TypeError) as e:
             logger.warning(
                 "Failed to convert Yandex→MQTT for %r (device=%r, instance=%r, value=%r): %s",
-                cap_type, device_id, instance, value, e
+                cap_type,
+                device_id,
+                instance,
+                value,
+                e,
             )
             return None
 
@@ -835,7 +837,7 @@ class DeviceRegistry:
             logger.warning("Failed to convert value for %r: %r", key, e)
             return None
 
-    def _extract_instance_with_value(self, prop: Dict[str, Any])->Tuple[Optional[str], Optional[str]]:
+    def _extract_instance_with_value(self, prop: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         """
         Extract the indexing tuple for a property configuration
 
@@ -857,7 +859,7 @@ class DeviceRegistry:
             >>> _extract_instance_with_value({"type": "devices.properties.float",
                             "parameters": {"instance": "temperature"}})
             ("temperature", "")
-        """        
+        """
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
         if not instance:
@@ -903,7 +905,9 @@ class DeviceRegistry:
             logger.warning("No MQTT topic found for property: %r", key)
             return None
         try:
-            msg = await read_topic_once(topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value)
+            msg = await read_topic_once(
+                topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value
+            )
             # TODO (victor.fedorov): Differentiate return values for errors vs events.
             #      Event properties are currently non-retrievable and therefore treated
             #      as having no stored state. We should return a different result when
@@ -957,15 +961,15 @@ class DeviceRegistry:
             prop_state = await self._read_property_state(device_id, prop)
             if prop_state:
                 properties_output.append(prop_state)
-            # TODO (v.fedorov): 
+            # TODO (v.fedorov):
             #           The problem with event properties is that they are not retrievable.
             #           So if a device has only event properties, we cannot return any state for it.
             #           This means that if a device has only event properties, we should not mark it as DEVICE_UNREACHABLE,
             #           but rather return an empty state. However, this is not ideal either, because
             #           Yandex Smart Home expects at least some state to be returned for retrievable properties
-            #           Currently we only support non-retrievable events. The problem is that we have no storage 
-            #           location for state these events, so we cannot implement retrievable events at this time. 
-            #           To implement this, we would need to either: (1) support only a single topic instead of two/three, 
+            #           Currently we only support non-retrievable events. The problem is that we have no storage
+            #           location for state these events, so we cannot implement retrievable events at this time.
+            #           To implement this, we would need to either: (1) support only a single topic instead of two/three,
             #           or (2) add intermediate storage for Yandex-formatted states directly in our client.
             if is_property_event(prop.get("type")):
                 has_only_event_properties = True

@@ -1,14 +1,16 @@
-import logging
 import json
-from pathlib import Path
-from .constants import SERVER_CONFIG_PATH, BOARD_REVISION_PATH, BOARD_MODEL_PATH
+import logging
 import re
+from pathlib import Path
+
+from .constants import BOARD_MODEL_PATH, BOARD_REVISION_PATH, SERVER_CONFIG_PATH
 
 BOARD_REVISION_PATH = Path(BOARD_REVISION_PATH)
 BOARD_MODEL_PATH = Path(BOARD_MODEL_PATH)
 SERVER_CONFIG_PATH = Path(SERVER_CONFIG_PATH)
 
 logger = logging.getLogger(__name__)
+
 
 def load_server_config():
     """Load server configuration file"""
@@ -20,7 +22,6 @@ def load_server_config():
     except Exception as e:
         logger.error("Error reading server configuration file: %r", e)
         raise
-
 
 
 def get_board_revision():

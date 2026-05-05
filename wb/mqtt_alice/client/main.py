@@ -12,31 +12,36 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
 import logging
 import os
 import random
 import signal
+import socket
 import string
 import subprocess
 import sys
 import time
-from typing import Any, Dict, Optional, Tuple
-import http.client
-import socket
-
-import paho.mqtt.client as mqtt_client
-
 from importlib.metadata import PackageNotFoundError, version
-import socketio
-import engineio
+from typing import Any, Dict, Optional, Tuple
 
-from wb.mqtt_alice.common.constants import SERVER_CONFIG_PATH, DEVICE_PATH, SHORT_SN_PATH, CLIENT_CONFIG_PATH
+import engineio
+import paho.mqtt.client as mqtt_client
+import socketio
+
+from wb.mqtt_alice.common.constants import (
+    CLIENT_CONFIG_PATH,
+    DEVICE_PATH,
+    SERVER_CONFIG_PATH,
+    SHORT_SN_PATH,
+)
+
 from .device_registry import DeviceRegistry
-from .wb_alice_device_state_sender import AliceDeviceStateSender
-from .yandex_handlers import convert_to_yandex_block, set_emit_callback
 from .sio_alice_handlers import SioAliceHandlers
 from .sio_connection_manager import SioConnectionManager
+from .wb_alice_device_state_sender import AliceDeviceStateSender
+from .yandex_handlers import convert_to_yandex_block, set_emit_callback
 
 # Configuration constants
 MQTT_HOST = "localhost"
@@ -113,10 +118,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
     from any thread (async or not).
     """
     if not ctx.sio_manager or not ctx.sio_manager.client:
-        logger.warning(
-            "Emit blocked: Socket.IO client not init (event = %r)",
-            event
-        )
+        logger.warning("Emit blocked: Socket.IO client not init (event = %r)", event)
         logger.debug("            Payload: %r", json.dumps(data))
         return None
 
@@ -132,7 +134,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
 
     logger.debug("Attempting to emit %r with payload: %r", event, json.dumps(data))
     sio_client = ctx.sio_manager.client
-    
+
     try:
         # We're in an asyncio thread - safe to call create_task directly
         asyncio.get_running_loop()
@@ -148,9 +150,7 @@ def _emit_async(event: str, data: Dict[str, Any]) -> None:
             return None
 
         if ctx.main_loop.is_running():
-            fut = asyncio.run_coroutine_threadsafe(
-                sio_client.emit(event, data), ctx.main_loop
-            )
+            fut = asyncio.run_coroutine_threadsafe(sio_client.emit(event, data), ctx.main_loop)
             fut.add_done_callback(lambda f: _log_emit_exception(event, f))
         else:
             logger.error("ctx.main_loop is not running - cannot emit %r", event)
@@ -182,6 +182,7 @@ async def publish_to_mqtt(topic: str, payload: str) -> None:
 # ---------------------------------------------------------------------
 # MQTT callbacks
 # ---------------------------------------------------------------------
+
 
 def mqtt_on_connect(client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
     if rc != 0:
@@ -225,10 +226,7 @@ def mqtt_on_message(client: mqtt_client.Client, userdata: Any, message: mqtt_cli
     logger.debug("       - Message: %r", payload_str)
 
     # Pass message to wb_alice_device_state_sender
-    asyncio.run_coroutine_threadsafe(
-        ctx.time_rate_sender.add_message(topic_str, payload_str),
-        ctx.main_loop
-    )
+    asyncio.run_coroutine_threadsafe(ctx.time_rate_sender.add_message(topic_str, payload_str), ctx.main_loop)
 
 
 def generate_client_id(prefix: str = "wb-alice-client") -> str:
@@ -273,10 +271,11 @@ def get_controller_sn() -> Optional[str]:
         logger.error("Reading controller ID exception: %r", e)
         return None
 
+
 def get_client_pkg_ver() -> str:
     """
     Get wb-mqtt-alice package version from Debian system
-    
+
     Returns:
         - Package version string (e.g. '0.5.2~exp~PR+34~3~g1b68346')
         - 'unknown' if unable to determine
@@ -295,7 +294,7 @@ def get_client_pkg_ver() -> str:
             return version
         logger.warning("dpkg-query returned empty version")
         return "unknown"
-    
+
     except subprocess.CalledProcessError as e:
         logger.warning("Package not found (returncode: %d)", e.returncode)
         return "unknown"
@@ -328,9 +327,7 @@ def read_config(filename: str) -> Optional[Dict[str, Any]]:
 
 
 def test_nginx_http_response(
-    host: str = LOCAL_PROXY_HOST,
-    port: int = LOCAL_PROXY_PORT,
-    timeout: int = 5
+    host: str = LOCAL_PROXY_HOST, port: int = LOCAL_PROXY_PORT, timeout: int = 5
 ) -> Tuple[bool, Optional[int], float, str]:
     """
     Test connection to server via local nginx proxy before Socket.IO connect
@@ -343,27 +340,32 @@ def test_nginx_http_response(
     """
     method = "POST"
     path = "/api/v1/controller/link"
-    
+
     start_t = time.perf_counter()
     try:
         conn = http.client.HTTPConnection(host, port, timeout=timeout)
-        
+
         # Send empty body to get 422 status code
         conn.request(method, path)
         response = conn.getresponse()
-    
+
         status = response.status
         reason = response.reason
 
         raw_body = response.read()
         conn.close()
-        elapsed_s = time.perf_counter() - start_t        
-        
+        elapsed_s = time.perf_counter() - start_t
+
         logger.debug(
             "HTTP probe response: %s %s -> %s %s (%.3fs), raw_body=%r",
-            method, path, status, reason, elapsed_s, raw_body
+            method,
+            path,
+            status,
+            reason,
+            elapsed_s,
+            raw_body,
         )
-        
+
         # We need get correct answer:
         # 422 - server work correctly, but see empty body
         if status == 422:
@@ -371,25 +373,26 @@ def test_nginx_http_response(
 
         # Any other status means proxy answered, but unexpected state.
         return False, status, elapsed_s, f"Nginx unexpected status: {status}"
-        
-    except socket.timeout:    
+
+    except socket.timeout:
         elapsed_s = time.perf_counter() - start_t
         return False, None, elapsed_s, f"TIMEOUT (>{timeout}s) - proxy or DNS resolution issue"
 
     except ConnectionRefusedError:
         elapsed_s = time.perf_counter() - start_t
         return False, None, elapsed_s, "Connection refused"
-        
+
     except Exception as e:
         elapsed_s = time.perf_counter() - start_t
         return False, None, elapsed_s, f"Error: {type(e).__name__}: {e}"
+
 
 async def probe_nginx_until_stable(
     *,
     max_attempts: int = 5,
     acceptable_latency_s: float = 1.5,
     per_attempt_timeout_s: int = 10,
-    sleep_between_attempts_s: float = 7, # [Chip work 0.1s - TTL may be 30s]
+    sleep_between_attempts_s: float = 7,  # [Chip work 0.1s - TTL may be 30s]
 ) -> bool:
     """
     Probe local nginx multiple times before opening the long-lived Socket.IO
@@ -414,9 +417,7 @@ async def probe_nginx_until_stable(
     last_msg: Optional[str] = None
 
     for attempt in range(1, max_attempts + 1):
-        http_ok, status_code, elapsed_time, http_msg = test_nginx_http_response(
-            timeout=per_attempt_timeout_s
-        )
+        http_ok, status_code, elapsed_time, http_msg = test_nginx_http_response(timeout=per_attempt_timeout_s)
 
         last_status_code = status_code
         last_elapsed_time = elapsed_time
@@ -442,7 +443,7 @@ async def connect_controller(server_address: str) -> bool:
     """
     Create and connect Socket.IO client to Alice integration server
     with using provided configuration
-    
+
     Returns:
         True if connection successful, False otherwise
     """
@@ -603,7 +604,7 @@ async def graceful_shutdown() -> None:
 async def main() -> int:
 
     # Early register signal handlers for graceful shutdown
-    ctx.stop_event = asyncio.Event() # Keeps the loop alive until a signal arrives
+    ctx.stop_event = asyncio.Event()  # Keeps the loop alive until a signal arrives
     ctx.main_loop = asyncio.get_running_loop()
     ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
     ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
@@ -615,7 +616,8 @@ async def main() -> int:
 
     server_address = server_cfg.get("server_address")  # Used by Nginx proxy
     if not server_address:
-        logger.error("'server_address' not specified in server config %r",
+        logger.error(
+            "'server_address' not specified in server config %r",
             SERVER_CONFIG_PATH,
         )
         return 0  # 0 mean - exit without service restart
@@ -627,14 +629,11 @@ async def main() -> int:
 
     # Apply log level from client config
     log_level_name = str(client_cfg.get("log_level", "INFO")).upper()
-    logging.getLogger().setLevel(log_level_name) # Change root logger
+    logging.getLogger().setLevel(log_level_name)  # Change root logger
 
     if not client_cfg.get("client_enabled", False):
         logger.info("Alice integration is DISABLED in configuration")
-        logger.info(
-            "To enable integration, set 'client_enabled': true in file %r",
-            CLIENT_CONFIG_PATH
-        )
+        logger.info("To enable integration, set 'client_enabled': true in file %r", CLIENT_CONFIG_PATH)
         return 0  # 0 mean - exit without service restart
     logger.info("Alice integration is enabled - starting client...")
 
@@ -678,7 +677,7 @@ async def main() -> int:
 
     ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
     logger.info("Connecting Socket.IO client...")
-    
+
     # Try to connect with infinite attempts
     await connect_controller(server_address)
     logger.info("Client initialization continue when connect to server")

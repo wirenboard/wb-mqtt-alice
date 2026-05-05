@@ -6,6 +6,7 @@ from typing import Optional
 
 BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
 
+
 def fetch_url(
     url=None,
     method="POST",
@@ -17,7 +18,7 @@ def fetch_url(
     headers=None,
     timeout=10,
     retry_opts: Optional[Iterable[str]] = None,
-    ):
+):
     """
     Performs an authenticated HTTP request via curl with a hardware key
 
@@ -44,10 +45,10 @@ def fetch_url(
     cert_path_obj = Path(cert_path)
     if not cert_path_obj.exists():
         return {
-                "status_code": None,
-                "data": None,
-                "error": f"Certificate file not found: {cert_path}",
-            }
+            "status_code": None,
+            "data": None,
+            "error": f"Certificate file not found: {cert_path}",
+        }
 
     # Prepare data and headers
     if data is None:
@@ -69,16 +70,23 @@ def fetch_url(
     # Create a curl command
     cmd = [
         "curl",
-        "-X", method.upper(),
+        "-X",
+        method.upper(),
         *retry_opts,
-        "--cert", str(cert_path_obj),
-        "--engine", engine,
-        "--key-type", key_type,
-        "--key", key_id,
+        "--cert",
+        str(cert_path_obj),
+        "--engine",
+        engine,
+        "--key-type",
+        key_type,
+        "--key",
+        key_id,
         "--tlsv1.3",
-        "--connect-timeout", str(timeout),
+        "--connect-timeout",
+        str(timeout),
         "--silent",
-        "--write-out", "\n%{http_code}",  # Add a status code to the output
+        "--write-out",
+        "\n%{http_code}",  # Add a status code to the output
     ]
 
     # Add headers
@@ -103,7 +111,7 @@ def fetch_url(
             "data": None,
             "error": f"Curl error: {e.stderr.strip() or e.stdout.strip()}",
         }
-        
+
     # Split response and status code
     output = result.stdout.strip()
     if "\n" in output:
