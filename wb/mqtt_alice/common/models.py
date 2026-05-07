@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel
 from uuid import UUID
 
@@ -61,8 +61,15 @@ class RoomID(BaseModel):
 class Config(BaseModel):
     rooms: Dict[str, Room]
     devices: Dict[str, Device]
-    link_url: Optional[str] = None
-    unlink_url: Optional[str] = None
+
+
+class ControllerLinkStatus(BaseModel):
+    linked: bool
+    status_url: Optional[str] = None
+
+
+class ControllerLinkUrl(BaseModel):
+    link_url: str
 
 class ClientConfig(BaseModel):
     client_enabled: bool = False

@@ -1,3 +1,12 @@
+wb-mqtt-alice (0.10.0) stable; urgency=medium
+
+  * Switch the controller backend to the new server v1 controller link API
+  * Split local Home UI endpoints into explicit link status and link creation actions
+  * Decouple integration enablement from controller link status handling
+  * Require the new Home UI version for the updated Alice integration flow
+
+ -- Denis Smagin <denis.smagin@wirenboard.com>  Wed, 29 Apr 2026 12:00:00 +0200
+
 wb-mqtt-alice (0.9.4) stable; urgency=medium
 
   * Remove cert and nginx logs after purge
