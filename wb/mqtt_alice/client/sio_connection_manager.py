@@ -132,16 +132,12 @@ class SioConnectionManager:
         if event in self.SYSTEM_EVENTS:
             # System event - store for calling after manager's work
             self._user_handlers[event] = handler
-            logger.debug(
-                "Registered user handler for system event %r (will be wrapped)", event
-            )
+            logger.debug("Registered user handler for system event %r (will be wrapped)", event)
         else:
             # Business event
             # - if not exist, register later directly with Socket.IO
             # - if client already exists, bind immediately
-            if event not in self._user_handlers or isinstance(
-                self._user_handlers[event], Callable
-            ):
+            if event not in self._user_handlers or isinstance(self._user_handlers[event], Callable):
                 self._user_handlers[event] = []
             self._user_handlers[event].append(handler)
             logger.debug(
@@ -184,9 +180,7 @@ class SioConnectionManager:
         # Notify server that controller is online
         # NOTE: this is not processed on server side and needed only for debug
         try:
-            await self._sio_client.emit(
-                "message", {"controller_sn": self.controller_sn, "status": "online"}
-            )
+            await self._sio_client.emit("message", {"controller_sn": self.controller_sn, "status": "online"})
         except Exception as e:
             logger.warning("Failed to send 'online' status after connect: %r", e)
 
@@ -243,9 +237,7 @@ class SioConnectionManager:
         if getattr(self._sio_client, "connected", False):
             try:
                 logger.debug("Disconnecting from Socket.IO server after error")
-                await asyncio.wait_for(
-                    self._sio_client.disconnect(), timeout=self.DISCONNECT_TIMEOUT
-                )
+                await asyncio.wait_for(self._sio_client.disconnect(), timeout=self.DISCONNECT_TIMEOUT)
                 logger.info("Socket.IO disconnected successfully")
             except asyncio.TimeoutError:
                 logger.warning("Timeout while disconnecting from Socket.IO server")
@@ -308,9 +300,7 @@ class SioConnectionManager:
         if getattr(client_tmp, "connected", False):
             try:
                 logger.info("Disconnecting from Socket.IO server...")
-                await asyncio.wait_for(
-                    client_tmp.disconnect(), timeout=self.DISCONNECT_TIMEOUT
-                )
+                await asyncio.wait_for(client_tmp.disconnect(), timeout=self.DISCONNECT_TIMEOUT)
                 logger.info("Socket.IO disconnected successfully")
             except asyncio.TimeoutError:
                 logger.warning("Timeout while disconnecting from Socket.IO server")
@@ -331,9 +321,7 @@ class SioConnectionManager:
             True if connected successfully
             False if all attempts failed
         """
-        return await self._connection_loop(
-            connect_reason="initial_connect", max_attempts=connection_attempts
-        )
+        return await self._connection_loop(connect_reason="initial_connect", max_attempts=connection_attempts)
 
     async def _connect_once(self) -> bool:
         """
@@ -359,17 +347,14 @@ class SioConnectionManager:
 
         # If client already exists and connection is active - do nothing
         if self._sio_client is not None and self.is_connected():
-            logger.info(
-                "Socket.IO client already connected, skipping new connect() attempt"
-            )
+            logger.info("Socket.IO client already connected, skipping new connect() attempt")
             return True
 
         # If client exists but built-in auto-reconnect is currently working,
         # do not interfere with internal reconnection loop
         if self._sio_client is not None and self._is_builtin_reconnect_active():
             logger.info(
-                "Socket.IO built-in reconnection is in progress, "
-                "skipping manual connect() attempt"
+                "Socket.IO built-in reconnection is in progress, " "skipping manual connect() attempt"
             )
             return False
 
@@ -387,9 +372,7 @@ class SioConnectionManager:
             if not self.is_connected():
                 try:
                     await self._sio_client.disconnect()
-                    logger.debug(
-                        "Ensured client is disconnected before reconnect attempt"
-                    )
+                    logger.debug("Ensured client is disconnected before reconnect attempt")
                 except Exception as e:
                     logger.debug("disconnect() during cleanup raised: %r", e)
 
@@ -433,10 +416,7 @@ class SioConnectionManager:
             # - "YANDEX_SKILL_NOT_LINKED"
             return False
         # Check if namespace registered
-        if (
-            hasattr(self._sio_client, "namespaces")
-            and namespace not in self._sio_client.namespaces
-        ):
+        if hasattr(self._sio_client, "namespaces") and namespace not in self._sio_client.namespaces:
             logger.error("Default namespace failed to connect")
             return False
 
@@ -447,9 +427,7 @@ class SioConnectionManager:
         # Start monitor task only if not already running
         if self._monitor_task is None or self._monitor_task.done():
             try:
-                self._monitor_task = asyncio.create_task(
-                    self._monitor_connection(), name="socketio-monitor"
-                )
+                self._monitor_task = asyncio.create_task(self._monitor_connection(), name="socketio-monitor")
                 logger.debug("Started connection monitor task")
             except Exception:
                 logger.exception("Failed to start monitoring tasks")
@@ -461,9 +439,7 @@ class SioConnectionManager:
         event = {
             "timestamp": time.time(),
             "reason": reason,
-            "uptime_seconds": (
-                time.monotonic() - self.connected_at if self.connected_at else None
-            ),
+            "uptime_seconds": (time.monotonic() - self.connected_at if self.connected_at else None),
         }
         self.disconnect_history.append(event)
 
@@ -473,9 +449,7 @@ class SioConnectionManager:
 
         logger.debug("Recorded disconnect: %r", event)
 
-    async def _trigger_custom_reconnection(
-        self, connect_reason: str, max_attempts: int = 0
-    ) -> None:
+    async def _trigger_custom_reconnection(self, connect_reason: str, max_attempts: int = 0) -> None:
         """Trigger custom reconnection logic"""
         if not self._custom_reconnect_enabled:
             return
@@ -496,9 +470,7 @@ class SioConnectionManager:
         self._is_reconnecting = True
 
         # Start new reconnection loop
-        self._reconnection_task = asyncio.create_task(
-            self._connection_loop(connect_reason, max_attempts)
-        )
+        self._reconnection_task = asyncio.create_task(self._connection_loop(connect_reason, max_attempts))
         logger.info(
             "Started reconnection task (connect_reason: %r, max_attempts=%s)",
             connect_reason,
@@ -530,9 +502,7 @@ class SioConnectionManager:
         self._record_disconnect("permanent_disconnect")
         await self._trigger_custom_reconnection("permanent_disconnect")
 
-    async def _connection_loop(
-        self, connect_reason: str, max_attempts: int = 0
-    ) -> bool:
+    async def _connection_loop(self, connect_reason: str, max_attempts: int = 0) -> bool:
         """
         Connection loop with configurable attempts
 
@@ -554,9 +524,7 @@ class SioConnectionManager:
         )
 
         if self._sio_client is not None and self.is_connected():
-            logger.info(
-                "Connection loop requested, but Socket.IO client is already connected"
-            )
+            logger.info("Connection loop requested, but Socket.IO client is already connected")
             self._is_reconnecting = False
             return True
 
@@ -601,9 +569,7 @@ class SioConnectionManager:
             except Exception as e:
                 logger.exception("Error during connection attempt #%d: %r", attempt, e)
         if max_attempts != 0 and attempt >= max_attempts:
-            logger.error(
-                "Connection loop exited after %d attempts (max reached)", attempt
-            )
+            logger.error("Connection loop exited after %d attempts (max reached)", attempt)
         else:
             logger.error("Connection loop exited (shutdown requested)")
         self._is_reconnecting = False
@@ -658,10 +624,7 @@ class SioConnectionManager:
 
         # BUG: Additional check for version SocketIO 5.0.3
         #      (may delete this check when upgrade version)
-        if (
-            hasattr(self._sio_client.eio, "write_loop_task")
-            and self._sio_client.eio.write_loop_task is None
-        ):
+        if hasattr(self._sio_client.eio, "write_loop_task") and self._sio_client.eio.write_loop_task is None:
             logger.warning("Write loop task is None, connection may be unstable")
             return False
 
@@ -682,9 +645,7 @@ class SioConnectionManager:
             "connected": self._sio_client.connected,
             "eio_state": getattr(self._sio_client.eio, "state", "unknown"),
             "namespaces": list(getattr(self._sio_client, "namespaces", {}).keys()),
-            "uptime_seconds": (
-                time.monotonic() - self.connected_at if self.connected_at else None
-            ),
+            "uptime_seconds": (time.monotonic() - self.connected_at if self.connected_at else None),
             "sid": getattr(self._sio_client, "sid", None),
         }
 
@@ -748,11 +709,7 @@ class SioConnectionManager:
         lines = ["Recent disconnect events:"]
         for i, event in enumerate(self.disconnect_history[-10:], 1):
             ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(event["timestamp"]))
-            uptime_str = (
-                f"{event['uptime_seconds']:.1f}s"
-                if event["uptime_seconds"] is not None
-                else "N/A"
-            )
+            uptime_str = f"{event['uptime_seconds']:.1f}s" if event["uptime_seconds"] is not None else "N/A"
             lines.append(f"  {i}. {ts} - {event['reason']} (uptime: {uptime_str})")
 
         return "\n".join(lines)

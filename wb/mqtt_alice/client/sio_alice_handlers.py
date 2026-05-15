@@ -106,16 +106,12 @@ class SioAliceHandlers:
         logger.debug("Business: Connected to Socket.IO server")
 
         # Start Alice state sender (if provided) and subscribe to MQTT topics
-        if self._time_rate_sender is not None and not getattr(
-            self._time_rate_sender, "running", False
-        ):
+        if self._time_rate_sender is not None and not getattr(self._time_rate_sender, "running", False):
             try:
                 await self._time_rate_sender.start()
                 logger.info("Alice state sender started after connect")
             except Exception as e:
-                logger.exception(
-                    "Failed to start Alice state sender after connect: %r", e
-                )
+                logger.exception("Failed to start Alice state sender after connect: %r", e)
 
         # Subscribe to all topics from registry (if MQTT client is available)
         self._subscribe_registry_topics()
@@ -138,16 +134,12 @@ class SioAliceHandlers:
         #       will detect it and trigger custom reconnection logic
 
         # Stop Alice state sender to avoid sending updates while offline
-        if self._time_rate_sender is not None and getattr(
-            self._time_rate_sender, "running", False
-        ):
+        if self._time_rate_sender is not None and getattr(self._time_rate_sender, "running", False):
             try:
                 await self._time_rate_sender.stop()
                 logger.info("Alice state sender stopped due to disconnect")
             except Exception as e:
-                logger.exception(
-                    "Failed to stop Alice state sender on disconnect: %r", e
-                )
+                logger.exception("Failed to stop Alice state sender on disconnect: %r", e)
         self._unsubscribe_registry_topics()
 
     async def on_connect_error(self, data: Any) -> None:
@@ -170,16 +162,12 @@ class SioAliceHandlers:
         logger.error("Message from server: %r", reason_raw)
 
         # Stop Alice state sender to avoid sending updates while offline
-        if self._time_rate_sender is not None and getattr(
-            self._time_rate_sender, "running", False
-        ):
+        if self._time_rate_sender is not None and getattr(self._time_rate_sender, "running", False):
             try:
                 await self._time_rate_sender.stop()
                 logger.info("Alice state sender stopped due to disconnect")
             except Exception as e:
-                logger.exception(
-                    "Failed to stop Alice state sender on disconnect: %r", e
-                )
+                logger.exception("Failed to stop Alice state sender on disconnect: %r", e)
         self._unsubscribe_registry_topics()
 
         # NOTE: Built-in Socket.IO reconnect will NOT try handle connect_error
@@ -249,9 +237,7 @@ class SioAliceHandlers:
         for dev in data.get("devices", []):
             device_id = dev.get("id")
             logger.debug("Try getting state for device: %r", device_id)
-            devices_response.append(
-                await self.registry.get_device_current_state(device_id)
-            )
+            devices_response.append(await self.registry.get_device_current_state(device_id))
 
         query_response = {
             "request_id": request_id,
@@ -299,9 +285,7 @@ class SioAliceHandlers:
         logger.debug(json.dumps(action_response, ensure_ascii=False, indent=2))
         return action_response
 
-    async def _handle_single_device_action(
-        self, device: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def _handle_single_device_action(self, device: Dict[str, Any]) -> Dict[str, Any]:
         """
         Internal helper for on_alice_devices_action
         Process all capabilities for a single device
@@ -326,9 +310,7 @@ class SioAliceHandlers:
                 await self.registry.forward_yandex_to_mqtt(
                     device_id, cap_type, instance, instance_value, value
                 )
-                logger.debug(
-                    "Action applied to %r: %r (%r) = %r", device_id, instance, instance_value, value
-                )
+                logger.debug("Action applied to %r: %r (%r) = %r", device_id, instance, instance_value, value)
                 status = "DONE"
             except Exception as e:
                 logger.exception("Failed to apply action for device %r", device_id)

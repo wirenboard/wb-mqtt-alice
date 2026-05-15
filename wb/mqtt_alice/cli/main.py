@@ -5,14 +5,20 @@ import logging
 import sys
 from enum import IntEnum
 from http import HTTPStatus
-from wb.mqtt_alice.common.fetch_url import fetch_url
-from wb.mqtt_alice.common.wb_mqtt_load_config import get_board_revision, get_key_id, load_server_config
+
 from wb.mqtt_alice.common.constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
+from wb.mqtt_alice.common.fetch_url import fetch_url
+from wb.mqtt_alice.common.wb_mqtt_load_config import (
+    get_board_revision,
+    get_key_id,
+    load_server_config,
+)
+
 
 # Exit codes for get_link_status / CLI
 class ExitCode(IntEnum):
     # Common linux codes (0-9)
-    GEN_SUCCESS = 0 # Generic success for any command
+    GEN_SUCCESS = 0  # Generic success for any command
     GEN_ERROR = 1  # Unexpected errors (no internet, server not reachable, etc)
     INIT_ERROR = 2  # Initialization errors (Not correct argument and etc)
 
@@ -34,12 +40,14 @@ class ExitCode(IntEnum):
 
     # Next sub command add with code 40...
 
+
 GET_LINK_STATUS_PREF = "Get link status result:"
 UNLINK_ACTION_RESULT_PREF = "Unlink action result:"
 CURRENT_LINK_STATUS_PREF = "Current link status:"
 
 logger = logging.getLogger(WB_MQTT_ALICE_CLI_LOGGER_NAME)
 logger.setLevel(logging.INFO)
+
 
 def unlink_controller():
     """Unlink controller from yandex account."""
@@ -87,7 +95,11 @@ def unlink_controller():
 
         status_code = int(response.get("status_code") or 0)
         data = response.get("data") or {}
-        if status_code == HTTPStatus.NOT_FOUND and isinstance(data, dict) and data.get("detail") == "Controller not found":
+        if (
+            status_code == HTTPStatus.NOT_FOUND
+            and isinstance(data, dict)
+            and data.get("detail") == "Controller not found"
+        ):
             logger.info("%s successful", UNLINK_ACTION_RESULT_PREF)
             print("%s successful" % UNLINK_ACTION_RESULT_PREF)
             return ExitCode.ALREADY_UNLINKED
@@ -174,36 +186,24 @@ def get_link_status():
 
 def main():
     parser = argparse.ArgumentParser(
-    prog='wb-mqtt-alice',
-    description='Manage Yandex Alice integration for Wiren Board controllers',
-    usage='wb-mqtt-alice [-h] <command>',  #  need for to hide "..." in end of  string
-    add_help=False,
-    epilog="""
+        prog="wb-mqtt-alice",
+        description="Manage Yandex Alice integration for Wiren Board controllers",
+        usage="wb-mqtt-alice [-h] <command>",  #  need for to hide "..." in end of  string
+        add_help=False,
+        epilog="""
 Example:
   wb-mqtt-alice unlink-controller
-"""
+""",
     )
 
-    parser.add_argument(
-        '-h', '--help',
-        action='help',
-        help='Show this help message and exit'
-    )
+    parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
 
     subparsers = parser.add_subparsers(
-        dest='command',
-        title='Available commands',
-        metavar='<command>          ' # 10 Spaces needed for it
+        dest="command", title="Available commands", metavar="<command>          "  # 10 Spaces needed for it
     )
 
-    subparsers.add_parser(
-        'unlink-controller',
-        help='Unlink from Yandex account'
-    )
-    subparsers.add_parser(
-        'get-link-status',
-        help='Check link status'
-    )
+    subparsers.add_parser("unlink-controller", help="Unlink from Yandex account")
+    subparsers.add_parser("get-link-status", help="Check link status")
     args = parser.parse_args()
     if args.command == "unlink-controller":
         return int(unlink_controller())

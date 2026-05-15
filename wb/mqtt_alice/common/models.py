@@ -1,37 +1,35 @@
 from typing import Dict, List, Optional
-from pydantic import BaseModel
 from uuid import UUID
+
+from pydantic import BaseModel
+
 
 class StatusInfo(BaseModel):
     reportable: bool = False
+
 
 class Room(BaseModel):
     name: str
     devices: List[str] = []
 
     def post_response(self, room_id: UUID) -> Dict[UUID, Dict]:
-        return {
-            room_id: {
-                "name": self.name,
-                "devices": []
-            }
-        }
+        return {room_id: {"name": self.name, "devices": []}}
 
     def put_response(self) -> Dict:
-        return {
-            "name": self.name,
-            "devices": self.devices
-        }
+        return {"name": self.name, "devices": self.devices}
+
 
 class Capability(BaseModel):
     type: str
     mqtt: str
     parameters: Optional[dict] = None
 
+
 class Property(BaseModel):
     type: str
     mqtt: str
     parameters: Optional[dict] = None
+
 
 class Device(BaseModel):
     name: str
@@ -51,12 +49,14 @@ class Device(BaseModel):
                 "room_id": self.room_id,
                 "type": self.type,
                 "capabilities": self.capabilities,
-                "properties": self.properties
+                "properties": self.properties,
             }
         }
 
+
 class RoomID(BaseModel):
     room_id: str
+
 
 class Config(BaseModel):
     rooms: Dict[str, Room]
@@ -70,6 +70,7 @@ class ControllerLinkStatus(BaseModel):
 
 class ControllerLinkUrl(BaseModel):
     link_url: str
+
 
 class ClientConfig(BaseModel):
     client_enabled: bool = False

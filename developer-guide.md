@@ -28,6 +28,28 @@ dpkg-buildpackage -us -uc
 
 Получаем актуальный deb пакет.
 
+## Линтинг и форматирование
+
+Для локальной проверки установите зависимости для разработки:
+
+```terminal
+$ python3 -m pip install -r requirements-dev.txt
+```
+
+Проверить форматирование и порядок импортов:
+
+```terminal
+$ black --check .
+$ isort --check .
+```
+
+Исправить автоматически:
+
+```terminal
+$ black .
+$ isort .
+```
+
 ## Ручная установка из исходного кода
 
 1. Скопировать конфигурационный файл по пути `/usr/lib/wb-mqtt-alice/wb-mqtt-alice-client.conf`

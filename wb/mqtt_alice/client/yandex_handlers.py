@@ -10,15 +10,17 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from wb.mqtt_alice.common.constants import (
-  CAP_ON_OFF, CAP_COLOR_SETTING, CAP_RANGE, CAP_TOGGLE, CAP_MODE, CAP_VIDEO_STREAM,
-  PROP_FLOAT, PROP_EVENT
+    CAP_COLOR_SETTING,
+    CAP_MODE,
+    CAP_ON_OFF,
+    CAP_RANGE,
+    CAP_TOGGLE,
+    CAP_VIDEO_STREAM,
+    PROP_EVENT,
+    PROP_FLOAT,
 )
 
-from .converters import (
-    convert_to_bool,
-    convert_to_float,
-    convert_rgb_wb_to_int,
-)
+from .converters import convert_rgb_wb_to_int, convert_to_bool, convert_to_float
 
 logger = logging.getLogger(__name__)
 
@@ -33,21 +35,15 @@ def set_emit_callback(callback: Callable[[str, Dict[str, Any]], None]) -> None:
 
 
 def _on_off(device_id: str, instance: Optional[str], value: Any) -> Dict[str, Any]:
-    return build_device_state_block(
-        device_id, CAP_ON_OFF, instance, convert_to_bool(value)
-    )
+    return build_device_state_block(device_id, CAP_ON_OFF, instance, convert_to_bool(value))
 
 
 def _float_prop(device_id: str, instance: Optional[str], value: Any) -> Dict[str, Any]:
-    return build_device_state_block(
-        device_id, PROP_FLOAT, instance, convert_to_float(value)
-    )
+    return build_device_state_block(device_id, PROP_FLOAT, instance, convert_to_float(value))
 
 
 def _range_cap(device_id: str, instance: Optional[str], value: Any) -> Dict[str, Any]:
-    return build_device_state_block(
-        device_id, CAP_RANGE, instance, convert_to_float(value)
-    )
+    return build_device_state_block(device_id, CAP_RANGE, instance, convert_to_float(value))
 
 
 def _color_setting(device_id: str, instance: Optional[str], value: Any) -> Optional[Dict[str, Any]]:
@@ -64,9 +60,7 @@ def _color_setting(device_id: str, instance: Optional[str], value: Any) -> Optio
             if rgb_int is None:
                 logger.warning("Failed to parse RGB value: %r", value)
                 return None
-        return build_device_state_block(
-            device_id, CAP_COLOR_SETTING, "rgb", rgb_int
-        )
+        return build_device_state_block(device_id, CAP_COLOR_SETTING, "rgb", rgb_int)
     elif instance == "temperature_k":
         return build_device_state_block(
             device_id,
@@ -157,10 +151,9 @@ def build_device_state_block(
     return {
         "id": device_id,
         "status": "online",
-        **_build_state_block(
-            block_type,instance, value, is_property=is_prop
-        ),
+        **_build_state_block(block_type, instance, value, is_property=is_prop),
     }
+
 
 def emit_batched_states(devices: list) -> None:
     """
