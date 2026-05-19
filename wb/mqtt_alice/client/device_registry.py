@@ -579,7 +579,7 @@ class DeviceRegistry:
         # Use empty dict if None provided
         params = params or {}
 
-        if cap_type.endswith("on_off"):
+        if cap_type.endswith("on_off") or cap_type.endswith("toggle"):
             return convert_to_bool(raw)
 
         elif cap_type.endswith("float") or cap_type.endswith("range"):
@@ -714,7 +714,7 @@ class DeviceRegistry:
         """
         params = params or {}
 
-        if cap_type.endswith("on_off"):
+        if cap_type.endswith("on_off") or cap_type.endswith("toggle"):
             return "1" if value else "0"
 
         elif cap_type.endswith("color_setting"):
