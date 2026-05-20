@@ -46,6 +46,10 @@ def _range_cap(device_id: str, instance: Optional[str], value: Any) -> Dict[str,
     return build_device_state_block(device_id, CAP_RANGE, instance, convert_to_float(value))
 
 
+def _toggle_cap(device_id: str, instance: Optional[str], value: Any) -> Dict[str, Any]:
+    return build_device_state_block(device_id, CAP_TOGGLE, instance, convert_to_bool(value))
+
+
 def _color_setting(device_id: str, instance: Optional[str], value: Any) -> Optional[Dict[str, Any]]:
     """
     Normalize instances to Yandex format:
@@ -94,7 +98,7 @@ _HANDLERS: Dict[str, Callable[[str, Optional[str], Any], None]] = {
     CAP_VIDEO_STREAM: _not_implemented("cap.video_stream"),
     CAP_MODE: _not_implemented("cap.mode"),
     CAP_RANGE: _range_cap,
-    CAP_TOGGLE: _not_implemented("cap.toggle"),
+    CAP_TOGGLE: _toggle_cap,
     # Properties
     PROP_FLOAT: _float_prop,
     PROP_EVENT: _event_prop,
@@ -143,7 +147,7 @@ def build_device_state_block(
     is_prop = block_type.startswith("devices.properties")
 
     # Normalize known value types
-    if block_type.endswith("on_off"):
+    if block_type.endswith("on_off") or block_type.endswith("toggle"):
         value = convert_to_bool(value)
     elif block_type.endswith("float"):
         value = convert_to_float(value)
