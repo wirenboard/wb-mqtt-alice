@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set
 
 import paho.mqtt.subscribe as subscribe
 
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CONFIG_EVENTS_RATE_PATH
+from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CONFIG_EVENTS_RATE_PATH
 
 from .converters import (
     EventType,
@@ -393,6 +393,20 @@ class DeviceRegistry:
 
         return color_params
 
+    def _build_mode_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Strip internal mqtt_value from each mode — Yandex API only needs `value`.
+
+        WB config stores the mode mapping in format:
+            "modes": [{"value": "auto", "mqtt_value": "0"}, ...]
+
+        Yandex Smart Home discovery expects:
+            "modes": [{"value": "auto"}, ...]
+        """
+        cleaned = dict(params)
+        cleaned["modes"] = [{"value": m["value"]} for m in params.get("modes") or []]
+        return cleaned
+
     def build_yandex_devices_list(self) -> List[Dict[str, Any]]:
         """
         Build devices list in Yandex Smart Home discovery format
@@ -460,7 +474,10 @@ class DeviceRegistry:
                 "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
             }
             if "parameters" in cap and cap["parameters"]:
-                cap_dict["parameters"] = cap["parameters"].copy()
+                if cap["type"] == CAP_MODE:
+                    cap_dict["parameters"] = self._build_mode_params(cap["parameters"])
+                else:
+                    cap_dict["parameters"] = cap["parameters"].copy()
             caps.append(cap_dict)
 
         # Merge and append color_setting if present
@@ -584,6 +601,14 @@ class DeviceRegistry:
 
         elif cap_type.endswith("float") or cap_type.endswith("range"):
             return float(raw)
+
+        elif cap_type.endswith("mode"):
+            # Look up Yandex mode value by mqtt_value in parameters.modes
+            for mode in params.get("modes") or []:
+                if mode.get("mqtt_value") == raw:
+                    return mode.get("value")
+            logger.warning("No mode mapping for mqtt_value=%r in %r", raw, cap_type)
+            return raw
 
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
@@ -716,6 +741,14 @@ class DeviceRegistry:
 
         if cap_type.endswith("on_off") or cap_type.endswith("toggle"):
             return "1" if value else "0"
+
+        elif cap_type.endswith("mode"):
+            # Look up mqtt_value by Yandex mode value in parameters.modes
+            for mode in params.get("modes") or []:
+                if mode.get("value") == value:
+                    return mode.get("mqtt_value", "")
+            logger.warning("No mqtt_value for mode=%r in %r", value, cap_type)
+            return str(value)
 
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":

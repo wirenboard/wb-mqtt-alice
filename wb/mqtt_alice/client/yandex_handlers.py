@@ -50,6 +50,11 @@ def _toggle_cap(device_id: str, instance: Optional[str], value: Any) -> Dict[str
     return build_device_state_block(device_id, CAP_TOGGLE, instance, convert_to_bool(value))
 
 
+def _mode_cap(device_id: str, instance: Optional[str], value: Any) -> Dict[str, Any]:
+    # Value is already the Yandex mode value (resolved from MQTT via _convert_cap_to_yandex)
+    return build_device_state_block(device_id, CAP_MODE, instance, str(value))
+
+
 def _color_setting(device_id: str, instance: Optional[str], value: Any) -> Optional[Dict[str, Any]]:
     """
     Normalize instances to Yandex format:
@@ -96,7 +101,7 @@ _HANDLERS: Dict[str, Callable[[str, Optional[str], Any], None]] = {
     CAP_ON_OFF: _on_off,
     CAP_COLOR_SETTING: _color_setting,
     CAP_VIDEO_STREAM: _not_implemented("cap.video_stream"),
-    CAP_MODE: _not_implemented("cap.mode"),
+    CAP_MODE: _mode_cap,
     CAP_RANGE: _range_cap,
     CAP_TOGGLE: _toggle_cap,
     # Properties
