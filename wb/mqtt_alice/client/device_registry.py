@@ -395,10 +395,10 @@ class DeviceRegistry:
 
     def _build_mode_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Strip internal mqtt_value from each mode — Yandex API only needs `value`.
+        Strip internal mqtt_value_match from each mode — Yandex API only needs `value`.
 
         WB config stores the mode mapping in format:
-            "modes": [{"value": "auto", "mqtt_value": "0"}, ...]
+            "modes": [{"value": "auto", "mqtt_value_match": "0"}, ...]
 
         Yandex Smart Home discovery expects:
             "modes": [{"value": "auto"}, ...]
@@ -603,11 +603,11 @@ class DeviceRegistry:
             return float(raw)
 
         elif cap_type.endswith("mode"):
-            # Look up Yandex mode value by mqtt_value in parameters.modes
+            # Look up Yandex mode value by mqtt_value_match in parameters.modes
             for mode in params.get("modes") or []:
-                if mode.get("mqtt_value") == raw:
+                if mode.get("mqtt_value_match") == raw:
                     return mode.get("value")
-            logger.warning("No mode mapping for mqtt_value=%r in %r", raw, cap_type)
+            logger.warning("No mode mapping for mqtt_value_match=%r in %r", raw, cap_type)
             return raw
 
         elif cap_type.endswith("color_setting"):
@@ -743,11 +743,11 @@ class DeviceRegistry:
             return "1" if value else "0"
 
         elif cap_type.endswith("mode"):
-            # Look up mqtt_value by Yandex mode value in parameters.modes
+            # Look up mqtt_value_match by Yandex mode value in parameters.modes
             for mode in params.get("modes") or []:
                 if mode.get("value") == value:
-                    return mode.get("mqtt_value", "")
-            logger.warning("No mqtt_value for mode=%r in %r", value, cap_type)
+                    return mode.get("mqtt_value_match", "")
+            logger.warning("No mqtt_value_match for mode=%r in %r", value, cap_type)
             return str(value)
 
         elif cap_type.endswith("color_setting"):

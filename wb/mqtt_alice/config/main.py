@@ -637,12 +637,12 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
         if capability.type == CAP_MODE:
             params = capability.parameters or {}
             for mode in params.get("modes") or []:
-                mqtt_value = mode.get("mqtt_value", "") if isinstance(mode, dict) else ""
+                mqtt_value_match = mode.get("mqtt_value_match", "") if isinstance(mode, dict) else ""
                 # Must be non-empty and match the same format the UI enforces
-                if not mqtt_value or not re.match(r"^[a-z0-9_]+$", mqtt_value):
+                if not mqtt_value_match or not re.match(r"^[a-z0-9_]+$", mqtt_value_match):
                     raise HTTPException(
                         status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
-                        detail=get_translation("invalid_mode_mqtt_value", language),
+                        detail=get_translation("invalid_mode_mqtt_value_match", language),
                     )
 
 
