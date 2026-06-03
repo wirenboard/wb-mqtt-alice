@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CLIENT_CONFIG_PATH
+from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CLIENT_CONFIG_PATH
 from wb.mqtt_alice.common.fetch_url import fetch_url
 from wb.mqtt_alice.common.models import (
     Capability,
@@ -633,6 +633,17 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                     status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                     detail=get_translation("invalid_color_setting", language),
                 )
+
+        if capability.type == CAP_MODE:
+            params = capability.parameters or {}
+            for mode in params.get("modes") or []:
+                mqtt_value_match = mode.get("mqtt_value_match", "") if isinstance(mode, dict) else ""
+                # Must be non-empty and match the same format the UI enforces
+                if not mqtt_value_match or not re.match(r"^[a-z0-9_]+$", mqtt_value_match):
+                    raise HTTPException(
+                        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                        detail=get_translation("invalid_mode_mqtt_value_match", language),
+                    )
 
 
 def validate_properties(properties: list[Property], language: str) -> None:
