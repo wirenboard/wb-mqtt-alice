@@ -606,7 +606,7 @@ class DeviceRegistry:
             # Look up Yandex mode value by mqtt_value_match in parameters.modes
             for mode in params.get("modes") or []:
                 if mode.get("mqtt_value_match") == raw:
-                    return mode.get("value")
+                    return mode.get("value", "")
             logger.warning("No mode mapping for mqtt_value_match=%r in %r", raw, cap_type)
             return raw
 
