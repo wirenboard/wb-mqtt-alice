@@ -603,12 +603,15 @@ class DeviceRegistry:
             return float(raw)
 
         elif cap_type.endswith("mode"):
-            # Look up Yandex mode value by mqtt_value_match in parameters.modes
+            # Look up Yandex mode value by mqtt_value_match in parameters.modes.
+            # On malformed config caller catches ValueError and skips the state update.
             for mode in params.get("modes") or []:
                 if mode.get("mqtt_value_match") == raw:
-                    return mode.get("value", "")
-            logger.warning("No mode mapping for mqtt_value_match=%r in %r", raw, cap_type)
-            return raw
+                    val = mode.get("value")
+                    if val is None:
+                        raise ValueError(f"Mode entry malformed (missing 'value'): {mode!r}")
+                    return val
+            raise ValueError(f"No mode mapping for mqtt_value_match={raw!r}")
 
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
@@ -743,12 +746,15 @@ class DeviceRegistry:
             return "1" if value else "0"
 
         elif cap_type.endswith("mode"):
-            # Look up mqtt_value_match by Yandex mode value in parameters.modes
+            # Look up mqtt_value_match by Yandex mode value in parameters.modes.
+            # On malformed config caller catches ValueError and skips the publish.
             for mode in params.get("modes") or []:
                 if mode.get("value") == value:
-                    return mode.get("mqtt_value_match", "")
-            logger.warning("No mqtt_value_match for mode=%r in %r", value, cap_type)
-            return str(value)
+                    mqtt_value_match = mode.get("mqtt_value_match")
+                    if mqtt_value_match is None:
+                        raise ValueError(f"Mode entry malformed (missing 'mqtt_value_match'): {mode!r}")
+                    return mqtt_value_match
+            raise ValueError(f"No mqtt_value_match for mode={value!r}")
 
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
