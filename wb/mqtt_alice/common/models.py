@@ -23,12 +23,14 @@ class Capability(BaseModel):
     type: str
     mqtt: str
     parameters: Optional[dict] = None
+    retrievable: Optional[bool] = None
 
 
 class Property(BaseModel):
     type: str
     mqtt: str
     parameters: Optional[dict] = None
+    retrievable: Optional[bool] = None
 
 
 class Device(BaseModel):

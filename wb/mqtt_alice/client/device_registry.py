@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set
 
 import paho.mqtt.subscribe as subscribe
 
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CONFIG_EVENTS_RATE_PATH
+from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CAP_ON_OFF, CONFIG_EVENTS_RATE_PATH
 
 from .converters import (
     EventType,
@@ -470,23 +470,32 @@ class DeviceRegistry:
 
             cap_dict = {
                 "type": cap["type"],
-                "retrievable": True,
+                "retrievable": cap.get("retrievable", True),
                 "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
             }
-            if "parameters" in cap and cap["parameters"]:
-                if cap["type"] == CAP_MODE:
-                    cap_dict["parameters"] = self._build_mode_params(cap["parameters"])
-                else:
-                    cap_dict["parameters"] = cap["parameters"].copy()
+            if cap["type"] == CAP_MODE:
+                cap_dict["parameters"] = self._build_mode_params(cap.get("parameters") or {})
+            elif cap["type"] == CAP_ON_OFF:
+                # Always send 'split' explicitly so Yandex sees the configured value
+                # (default False — matches Yandex API default).
+                params = (cap.get("parameters") or {}).copy()
+                params.setdefault("split", False)
+                cap_dict["parameters"] = params
+            elif cap.get("parameters"):
+                cap_dict["parameters"] = cap["parameters"].copy()
             caps.append(cap_dict)
 
-        # Merge and append color_setting if present
-        color_params = self._merge_color_setting_params(dev.get("capabilities", []))
+        # Merge and append color_setting if present.
+        # Multiple color_setting capabilities (rgb / temperature_k / color_scene) merge
+        # into a single Yandex capability; retrievable is AND of all parts because
+        # Yandex sees them as one block.
+        color_caps = [c for c in dev.get("capabilities", []) if c.get("type") == CAP_COLOR_SETTING]
+        color_params = self._merge_color_setting_params(color_caps)
         if color_params:
             caps.append(
                 {
                     "type": CAP_COLOR_SETTING,
-                    "retrievable": True,
+                    "retrievable": all(c.get("retrievable", True) for c in color_caps),
                     "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
                     "parameters": color_params,
                 }
@@ -502,12 +511,26 @@ class DeviceRegistry:
         for prop in dev.get("properties", []):
             is_event = is_property_event(prop["type"])
 
+            # 'retrievable' indicates whether Yandex is allowed to request (get) the current
+            # state for this property. Event properties are forced to false here because
+            # event sources may span multiple MQTT topics and we do not yet keep a local
+            # state cache — we cannot answer Yandex with the last known value.
+            # TODO: unlock retrievable for events once a local state store is implemented.
+            # Non-event properties take the value from config (default true).
+            if is_event:
+                if prop.get("retrievable") is True:
+                    logger.warning(
+                        "Property %r on device %r: retrievable=true is not supported for event"
+                        " properties yet (no local state cache); coercing to false.",
+                        prop.get("type"),
+                        dev_id,
+                    )
+                retrievable = False
+            else:
+                retrievable = prop.get("retrievable", True)
             prop_obj = {
                 "type": prop["type"],
-                # 'retrievable' indicates whether Yandex is allowed to request (get) the current
-                # state for this property. Event properties are not retrievable because
-                # events do not have a stored persistent state and therefore cannot be queried.
-                "retrievable": True if not is_event else False,
+                "retrievable": retrievable,
                 "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
             }
             # Always send "instance", but "unit" only if present in config
@@ -844,6 +867,10 @@ class DeviceRegistry:
         """
         Read capability state from MQTT and convert to Yandex format
         """
+        # Capability marked non-retrievable — skip MQTT read, Alice should not query its state.
+        if cap.get("retrievable", True) is False:
+            return None
+
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
         instance, instance_value = self._extract_instance_with_value(cap)
@@ -936,8 +963,15 @@ class DeviceRegistry:
         instance, instance_value = self._extract_instance_with_value(prop)
         key = (device_id, prop_type, instance, instance_value)
         if is_property_event(prop_type):
-            # TODO (victor.fedorov): need to know `retrievable` flag here to decide whether to read event property
-            logger.debug("Event properties are not retrievable: %r", key)
+            # Event properties cannot be queried: we do not keep a local state cache,
+            # and events may span multiple MQTT topics, so the last known value
+            # cannot be reconstructed on demand.
+            # TODO: lift this once a local state store is implemented (see _collect_properties).
+            logger.debug("Event property not retrievable (no local state cache): %r", key)
+            return None
+        # Non-event property marked non-retrievable in config — skip MQTT read.
+        if prop.get("retrievable", True) is False:
+            logger.debug("Property marked non-retrievable, skipping read: %r", key)
             return None
         topic = self.cap_index.get(key)
         if not topic:
