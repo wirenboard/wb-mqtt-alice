@@ -471,7 +471,7 @@ class DeviceRegistry:
             cap_dict = {
                 "type": cap["type"],
                 "retrievable": cap.get("retrievable", True),
-                "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
+                "reportable": cap.get("reportable", True),
             }
             if cap["type"] == CAP_MODE:
                 cap_dict["parameters"] = self._build_mode_params(cap.get("parameters") or {})
@@ -493,7 +493,7 @@ class DeviceRegistry:
                 {
                     "type": CAP_COLOR_SETTING,
                     "retrievable": all(c.get("retrievable", True) for c in color_caps),
-                    "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
+                    "reportable": all(c.get("reportable", True) for c in color_caps),
                     "parameters": color_params,
                 }
             )
@@ -524,10 +524,26 @@ class DeviceRegistry:
                 retrievable = False
             else:
                 retrievable = prop.get("retrievable", True)
+
+            # 'reportable' tells whether we push state updates to Yandex
+            # Event properties are forced to true: an event only exists as a push,
+            # so disabling reporting would make the property useless
+            if is_event:
+                if prop.get("reportable") is False:
+                    logger.warning(
+                        "Property %r on device %r: reportable=false is not supported for"
+                        " event properties (events only exist as push updates); coercing to true",
+                        prop.get("type"),
+                        dev_id,
+                    )
+                reportable = True
+            else:
+                reportable = prop.get("reportable", True)
+
             prop_obj = {
                 "type": prop["type"],
                 "retrievable": retrievable,
-                "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
+                "reportable": reportable,
             }
             # Always send "instance", but "unit" only if present in config
             params = prop.get("parameters", {}) or {}
@@ -710,6 +726,12 @@ class DeviceRegistry:
 
         cap_type = blk["type"]
         instance = blk.get("parameters", {}).get("instance")
+
+        # Honor reportable — skip push when explicitly false
+        # Event properties bypass: they are forced reportable in _collect_properties
+        if not is_property_event(cap_type) and blk.get("reportable", True) is False:
+            logger.debug("Skipping push for non-reportable %r on topic %r", cap_type, topic)
+            return None
         try:
             if is_property_event(cap_type):
                 param_list = []

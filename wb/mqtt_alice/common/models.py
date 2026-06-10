@@ -24,6 +24,7 @@ class Capability(BaseModel):
     mqtt: str
     parameters: Optional[dict] = None
     retrievable: Optional[bool] = None
+    reportable: Optional[bool] = None
 
 
 class Property(BaseModel):
@@ -31,6 +32,7 @@ class Property(BaseModel):
     mqtt: str
     parameters: Optional[dict] = None
     retrievable: Optional[bool] = None
+    reportable: Optional[bool] = None
 
 
 class Device(BaseModel):
