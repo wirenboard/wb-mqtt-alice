@@ -15,7 +15,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set
 
 import paho.mqtt.subscribe as subscribe
 
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CONFIG_EVENTS_RATE_PATH
+from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CAP_ON_OFF, CONFIG_EVENTS_RATE_PATH
 
 from .converters import (
     EventType,
@@ -470,24 +470,30 @@ class DeviceRegistry:
 
             cap_dict = {
                 "type": cap["type"],
-                "retrievable": True,
-                "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
+                "retrievable": cap.get("retrievable", True),
+                "reportable": cap.get("reportable", True),
             }
-            if "parameters" in cap and cap["parameters"]:
-                if cap["type"] == CAP_MODE:
-                    cap_dict["parameters"] = self._build_mode_params(cap["parameters"])
-                else:
-                    cap_dict["parameters"] = cap["parameters"].copy()
+            if cap["type"] == CAP_MODE:
+                cap_dict["parameters"] = self._build_mode_params(cap.get("parameters") or {})
+            elif cap["type"] == CAP_ON_OFF:
+                # Always send 'split' explicitly; default False matches Yandex API
+                params = (cap.get("parameters") or {}).copy()
+                params.setdefault("split", False)
+                cap_dict["parameters"] = params
+            elif cap.get("parameters"):
+                cap_dict["parameters"] = cap["parameters"].copy()
             caps.append(cap_dict)
 
-        # Merge and append color_setting if present
-        color_params = self._merge_color_setting_params(dev.get("capabilities", []))
+        # Merge color_setting (rgb / temperature_k / color_scene) into a single
+        # Yandex capability — retrievable is AND of all parts since Yandex sees one block
+        color_caps = [c for c in dev.get("capabilities", []) if c.get("type") == CAP_COLOR_SETTING]
+        color_params = self._merge_color_setting_params(color_caps)
         if color_params:
             caps.append(
                 {
                     "type": CAP_COLOR_SETTING,
-                    "retrievable": True,
-                    "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
+                    "retrievable": all(c.get("retrievable", True) for c in color_caps),
+                    "reportable": all(c.get("reportable", True) for c in color_caps),
                     "parameters": color_params,
                 }
             )
@@ -502,13 +508,42 @@ class DeviceRegistry:
         for prop in dev.get("properties", []):
             is_event = is_property_event(prop["type"])
 
+            # 'retrievable' tells whether Yandex may query the property state
+            # Event properties are forced to false: events may span multiple MQTT
+            # topics and we have no local state cache, so the last known value
+            # cannot be returned
+            # TODO: unlock retrievable for events once a local state store exists
+            if is_event:
+                if prop.get("retrievable") is True:
+                    logger.warning(
+                        "Property %r on device %r: retrievable=true is not supported for"
+                        " event properties yet (no local state cache); coercing to false",
+                        prop.get("type"),
+                        dev_id,
+                    )
+                retrievable = False
+            else:
+                retrievable = prop.get("retrievable", True)
+
+            # 'reportable' tells whether we push state updates to Yandex
+            # Event properties are forced to true: an event only exists as a push,
+            # so disabling reporting would make the property useless
+            if is_event:
+                if prop.get("reportable") is False:
+                    logger.warning(
+                        "Property %r on device %r: reportable=false is not supported for"
+                        " event properties (events only exist as push updates); coercing to true",
+                        prop.get("type"),
+                        dev_id,
+                    )
+                reportable = True
+            else:
+                reportable = prop.get("reportable", True)
+
             prop_obj = {
                 "type": prop["type"],
-                # 'retrievable' indicates whether Yandex is allowed to request (get) the current
-                # state for this property. Event properties are not retrievable because
-                # events do not have a stored persistent state and therefore cannot be queried.
-                "retrievable": True if not is_event else False,
-                "reportable": True,  # "reportable" if not set - False, but need True for yandex scenarios usage
+                "retrievable": retrievable,
+                "reportable": reportable,
             }
             # Always send "instance", but "unit" only if present in config
             params = prop.get("parameters", {}) or {}
@@ -691,6 +726,12 @@ class DeviceRegistry:
 
         cap_type = blk["type"]
         instance = blk.get("parameters", {}).get("instance")
+
+        # Honor reportable — skip push when explicitly false
+        # Event properties bypass: they are forced reportable in _collect_properties
+        if not is_property_event(cap_type) and blk.get("reportable", True) is False:
+            logger.debug("Skipping push for non-reportable %r on topic %r", cap_type, topic)
+            return None
         try:
             if is_property_event(cap_type):
                 param_list = []
@@ -844,6 +885,10 @@ class DeviceRegistry:
         """
         Read capability state from MQTT and convert to Yandex format
         """
+        # Capability marked non-retrievable — skip MQTT read
+        if cap.get("retrievable", True) is False:
+            return None
+
         cap_type = cap["type"]
         instance = cap.get("parameters", {}).get("instance")
         instance, instance_value = self._extract_instance_with_value(cap)
@@ -936,8 +981,14 @@ class DeviceRegistry:
         instance, instance_value = self._extract_instance_with_value(prop)
         key = (device_id, prop_type, instance, instance_value)
         if is_property_event(prop_type):
-            # TODO (victor.fedorov): need to know `retrievable` flag here to decide whether to read event property
-            logger.debug("Event properties are not retrievable: %r", key)
+            # Event properties cannot be queried: no local state cache and
+            # events may span multiple MQTT topics
+            # TODO: lift once a local state store exists (see _collect_properties)
+            logger.debug("Event property not retrievable (no local state cache): %r", key)
+            return None
+        # Non-event property marked non-retrievable in config — skip MQTT read
+        if prop.get("retrievable", True) is False:
+            logger.debug("Property marked non-retrievable, skipping read: %r", key)
             return None
         topic = self.cap_index.get(key)
         if not topic:
@@ -976,6 +1027,13 @@ class DeviceRegistry:
             return None
 
     async def get_device_current_state(self, device_id: str) -> Dict[str, Any]:
+        """
+        Build the device state response for Yandex `/user/devices/{id}/query`
+
+        Filter capabilities/properties Yandex may query, then read MQTT state
+        for those items. Write-only and event-only devices return an empty
+        response (not DEVICE_UNREACHABLE) — they are stateless by design
+        """
         logger.debug("Reading current state for device: %r", device_id)
 
         device = self.devices.get(device_id)
@@ -983,62 +1041,60 @@ class DeviceRegistry:
             logger.warning("get_device_current_state: unknown device_id %r", device_id)
             return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
 
-        capabilities_output: List[Dict[str, Any]] = []
-        properties_output: List[Dict[str, Any]] = []
-
+        # Capability is queryable when retrievable is not explicitly false
+        queryable_capabilities: List[Dict[str, Any]] = []
         for cap in device.get("capabilities", []):
+            if cap.get("retrievable", True) is False:
+                continue
+            queryable_capabilities.append(cap)
+
+        # Event properties have no persistent state (see _collect_properties)
+        queryable_properties: List[Dict[str, Any]] = []
+        for prop in device.get("properties", []):
+            if is_property_event(prop.get("type")):
+                continue
+            if prop.get("retrievable", True) is False:
+                continue
+            queryable_properties.append(prop)
+
+        # Nothing to query — stateless by design, not unreachable
+        if not queryable_capabilities and not queryable_properties:
+            logger.debug(
+                "Device %r has no retrievable state (write-only or event-only)",
+                device_id,
+            )
+            return {"id": device_id}
+
+        capabilities_output: List[Dict[str, Any]] = []
+        for cap in queryable_capabilities:
             logger.debug("Reading capability state: %r", cap)
             cap_state = await self._read_capability_state(device_id, cap)
             logger.debug("Capability result: %r", cap_state)
             if cap_state:
                 capabilities_output.append(cap_state)
 
-        has_only_event_properties = False
-
-        for prop in device.get("properties", []):
+        properties_output: List[Dict[str, Any]] = []
+        for prop in queryable_properties:
             logger.debug("Reading property state: %r", prop)
             prop_state = await self._read_property_state(device_id, prop)
             if prop_state:
                 properties_output.append(prop_state)
-            # TODO (v.fedorov):
-            #           The problem with event properties is that they are not retrievable.
-            #           So if a device has only event properties, we cannot return any state for it.
-            #           This means that if a device has only event properties, we should not mark it as DEVICE_UNREACHABLE,
-            #           but rather return an empty state. However, this is not ideal either, because
-            #           Yandex Smart Home expects at least some state to be returned for retrievable properties
-            #           Currently we only support non-retrievable events. The problem is that we have no storage
-            #           location for state these events, so we cannot implement retrievable events at this time.
-            #           To implement this, we would need to either: (1) support only a single topic instead of two/three,
-            #           or (2) add intermediate storage for Yandex-formatted states directly in our client.
-            if is_property_event(prop.get("type")):
-                has_only_event_properties = True
 
-        # If nothing was read - handle based on device type
+        # Expected state but read nothing — device truly unreachable
         if not capabilities_output and not properties_output:
-            if has_only_event_properties:
-                # Event properties are non-retrievable; when a device exposes only
-                # such properties we cannot provide any state. In this situation
-                # do not mark the device as DEVICE_UNREACHABLE — return an empty
-                # state instead so Yandex receives a valid (but empty) response.
-                logger.debug("Device %r has only event properties - no state to return", device_id)
-                empty_device_state_answer = {"id": device_id}
-                return empty_device_state_answer
             logger.warning(
                 "%r: no live or retained data — marking DEVICE_UNREACHABLE",
                 device_id,
             )
-            err_device_state_answer = {
+            return {
                 "id": device_id,
                 "error_code": "DEVICE_UNREACHABLE",
                 "error_message": "MQTT topics unavailable",
             }
-            return err_device_state_answer
-        # If at least something was read - return it
-        # Build device output response
+
         device_state_answer: Dict[str, Any] = {"id": device_id}
         if capabilities_output:
             device_state_answer["capabilities"] = capabilities_output
         if properties_output:
             device_state_answer["properties"] = properties_output
-
         return device_state_answer

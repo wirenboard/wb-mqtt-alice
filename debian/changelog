@@ -1,3 +1,11 @@
+wb-mqtt-alice (0.13.0) stable; urgency=medium
+
+  * Add support for split parameter on on_off capability
+  * Add support for retrievable flag for capabilities and properties
+  * Add support for reportable flag for capabilities and properties
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Mon, 15 Jun 2026 12:00:00 +0300
+
 wb-mqtt-alice (0.12.1) stable; urgency=medium
 
   * Change min version for homeui
