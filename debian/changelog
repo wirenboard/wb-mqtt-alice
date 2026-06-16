@@ -1,5 +1,6 @@
 wb-mqtt-alice (0.13.0) stable; urgency=medium
 
+  * Add support for split parameter on on_off capability
   * Add support for retrievable flag for capabilities and properties
   * Add support for reportable flag for capabilities and properties
 
