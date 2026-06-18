@@ -358,6 +358,10 @@ server {
         proxy_ssl_protocols TLSv1.3;
         proxy_ssl_verify on;
 
+        # Max length of the alice.wirenboard.com cert chain that nginx will trust
+        # If nginx error log shows "certificate chain too long" - bump this value by 1
+        proxy_ssl_verify_depth 2;
+
         # Off: use hardware key on every TLS handshake
         #      - slower, ~0.7s per handshake
         #      - some old or non-standard servers may work only with "off"
