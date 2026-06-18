@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.13.1) stable; urgency=medium
+
+  * Fix nginx 502 caused by upstream "certificate chain too long" - set
+    proxy_ssl_verify_depth to accept the current alice.wirenboard.com cert chain
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Fri, 19 Jun 2026 15:00:00 +0300
+
 wb-mqtt-alice (0.13.0) stable; urgency=medium
 
   * Add support for split parameter on on_off capability
