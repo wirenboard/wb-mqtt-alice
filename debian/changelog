@@ -1,3 +1,11 @@
+wb-mqtt-alice (0.10.0+wb100) stable; urgency=medium
+
+  * (Backport from 0.13.1)
+    Fix nginx 502 caused by upstream "certificate chain too long" - set
+    proxy_ssl_verify_depth to accept the current alice.wirenboard.com cert chain
+
+ -- Vitalii Gaponov <vitalii.gaponov@wirenboard.com>  Fri, 19 Jun 2026 15:00:00 +0300
+
 wb-mqtt-alice (0.10.0) stable; urgency=medium
 
   * Switch the controller backend to the new server v1 controller link API
