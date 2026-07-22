@@ -7,7 +7,8 @@ Handles type conversions between WirenBoard and Yandex Smart Home formats
 """
 
 import logging
-from typing import Any, Optional
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, Optional, Tuple
 
 from wb.mqtt_alice.common.constants import (
     EventType,
@@ -17,6 +18,10 @@ from wb.mqtt_alice.common.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Default step of a range capability when parameters.range.precision is absent,
+# per Yandex Smart Home specification
+RANGE_DEFAULT_PRECISION = 1.0
 
 
 def convert_to_bool(raw_state: Any) -> bool:
@@ -63,6 +68,157 @@ def convert_to_float(raw: Any) -> float:
     except (ValueError, TypeError):
         logger.debug("Cannot convert %r to float, set 0.0", raw)
         return 0.0
+
+
+def _to_optional_float(raw: Any) -> Optional[float]:
+    """
+    Convert value to float, or None if it is missing or malformed
+    Unlike convert_to_float() a bad value does not silently become 0.0 -
+    for range bounds "no limit" and "limit of zero" are different things
+    """
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        logger.warning("Cannot convert %r to float, treated as unset", raw)
+        return None
+
+
+def parse_range_params(
+    range_params: Optional[Dict[str, Any]]
+) -> Tuple[Optional[float], Optional[float], float]:
+    """
+    Extract bounds and step from Yandex range capability parameters
+
+    Args:
+        range_params: Contents of parameters.range from the device config
+            Example: {"min": -2, "max": 30, "precision": 1}
+            Any of the keys may be absent
+
+    Returns:
+        Tuple (min, max, precision) where min/max are None when not declared
+        and precision falls back to RANGE_DEFAULT_PRECISION
+
+    Example:
+        >>> parse_range_params({"min": 16, "max": 30, "precision": 0.5})
+        (16.0, 30.0, 0.5)
+        >>> parse_range_params(None)
+        (None, None, 1.0)
+    """
+    params = range_params or {}
+
+    precision = _to_optional_float(params.get("precision"))
+    if precision is None or precision <= 0:
+        precision = RANGE_DEFAULT_PRECISION
+
+    return _to_optional_float(params.get("min")), _to_optional_float(params.get("max")), precision
+
+
+def precision_decimals(precision: float) -> int:
+    """
+    Number of decimal places implied by a range precision
+
+    Example:
+        >>> precision_decimals(1)
+        0
+        >>> precision_decimals(0.5)
+        1
+        >>> precision_decimals(0.01)
+        2
+    """
+    try:
+        exponent = Decimal(str(precision)).normalize().as_tuple().exponent
+    except InvalidOperation:
+        return 0
+    if isinstance(exponent, int) and exponent < 0:
+        return -exponent
+    return 0
+
+
+def clamp_range_value(value: float, range_params: Optional[Dict[str, Any]]) -> float:
+    """
+    Keep a range value inside the bounds declared in parameters.range
+
+    Yandex is not obliged to respect min/max when a relative command lands near
+    an edge ("make it warmer" at the top of the scale), and an out-of-range
+    value written to a WB control is either rejected or clipped by the device
+    itself - clamping here keeps what we publish predictable
+
+    Args:
+        value: Value in Yandex units
+        range_params: Contents of parameters.range, may be None
+
+    Returns:
+        Value clamped to [min, max]; bounds that are not declared are ignored
+
+    Example:
+        >>> clamp_range_value(35, {"min": 16, "max": 30})
+        30.0
+        >>> clamp_range_value(20, {"min": 16, "max": 30})
+        20.0
+    """
+    min_value, max_value, _ = parse_range_params(range_params)
+
+    if min_value is not None and value < min_value:
+        logger.debug("Range value %r below min %r, clamped", value, min_value)
+        return min_value
+    if max_value is not None and value > max_value:
+        logger.debug("Range value %r above max %r, clamped", value, max_value)
+        return max_value
+    return float(value)
+
+
+def resolve_relative_range_value(
+    current: float, delta: float, range_params: Optional[Dict[str, Any]]
+) -> float:
+    """
+    Calculate the target value of a relative range command
+
+    Yandex marks incremental commands with "relative": true and sends a delta
+    instead of a target value, so "make it warmer" arrives as
+    {"value": 1, "relative": true} and means current + 1
+
+    Rounding by precision only strips float noise (18.1 + 0.2 = 18.299999...),
+    the precision grid itself is not enforced: the delta already comes aligned
+    to it, and snapping would move a value the user set explicitly
+
+    Args:
+        current: Current value read from the device
+        delta: Signed increment from Yandex
+        range_params: Contents of parameters.range, may be None
+
+    Returns:
+        Target value, clamped to the declared range
+
+    Example:
+        >>> resolve_relative_range_value(18, 1, {"min": 16, "max": 30, "precision": 1})
+        19.0
+        >>> resolve_relative_range_value(30, 1, {"min": 16, "max": 30, "precision": 1})
+        30.0
+    """
+    _, _, precision = parse_range_params(range_params)
+    target = clamp_range_value(float(current) + float(delta), range_params)
+    return round(target, precision_decimals(precision))
+
+
+def format_range_payload(value: float) -> str:
+    """
+    Format a range value as a WirenBoard MQTT payload
+
+    Whole numbers are published without the ".0" tail: WB controls of integer
+    types (dimmers, valve position) may reject "19.0" while accepting "19"
+
+    Example:
+        >>> format_range_payload(19.0)
+        '19'
+        >>> format_range_payload(18.5)
+        '18.5'
+    """
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return str(number)
 
 
 def _rgb_to_int(red: int, green: int, blue: int) -> int:

@@ -12,6 +12,10 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from wb.mqtt_alice.common.constants import ERR_INTERNAL_ERROR
+
+from .device_registry import ActionError
+
 logger = logging.getLogger(__name__)
 
 
@@ -305,23 +309,44 @@ class SioAliceHandlers:
         for cap in device.get("capabilities", []):
             cap_type: str = cap.get("type")
             instance, instance_value = self.registry._extract_instance_with_value(cap)
-            value: Any = cap.get("state", {}).get("value")
+            state: Dict[str, Any] = cap.get("state", {}) or {}
+            value: Any = state.get("value")
+            # Incremental commands ("make it warmer", "a bit quieter") come with
+            # relative=true, and then 'value' is a delta, not a target value
+            relative: bool = bool(state.get("relative", False))
+            error_code: Optional[str] = None
             try:
                 await self.registry.forward_yandex_to_mqtt(
-                    device_id, cap_type, instance, instance_value, value
+                    device_id, cap_type, instance, instance_value, value, relative=relative
                 )
-                logger.debug("Action applied to %r: %r (%r) = %r", device_id, instance, instance_value, value)
+                logger.debug(
+                    "Action applied to %r: %r (%r) = %r (relative=%r)",
+                    device_id,
+                    instance,
+                    instance_value,
+                    value,
+                    relative,
+                )
                 status = "DONE"
-            except Exception as e:
+            except ActionError as e:
+                logger.warning("Action rejected for device %r: %r", device_id, e)
+                status = "ERROR"
+                error_code = e.error_code
+            except Exception:
                 logger.exception("Failed to apply action for device %r", device_id)
                 status = "ERROR"
+                error_code = ERR_INTERNAL_ERROR
+
+            action_result: Dict[str, Any] = {"status": status}
+            if error_code is not None:
+                action_result["error_code"] = error_code
 
             cap_results.append(
                 {
                     "type": cap_type,
                     "state": {
                         "instance": instance,
-                        "action_result": {"status": status},
+                        "action_result": action_result,
                     },
                 }
             )
