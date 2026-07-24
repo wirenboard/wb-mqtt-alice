@@ -2,32 +2,29 @@
 # -*- coding: utf-8 -*-
 
 """
-Tests for relative range commands ("сделай теплее")
+Tests for relative range commands - "сделай теплее" and "сделай холоднее".
 
-Yandex sends an increment with "relative": true, and before the fix it was
-published as the new value - so the test drives the whole action handler,
-not just the arithmetic. Two things are stubbed: the MQTT publish and the
-read of the current value, so no broker is needed
+Yandex sends such a command as an increment with "relative": true, and before
+the fix that increment was published as the new value (so "сделай теплее" set
+the thermostat to 1). The tests drive the whole action handler, not just the
+arithmetic, and stub only the MQTT boundary - the publish and the read of the
+current value - so no broker is needed.
 """
 
 import json
-import tempfile
-import unittest
-from pathlib import Path
-from unittest import mock
+
+import pytest
 
 from wb.mqtt_alice.client import device_registry
 from wb.mqtt_alice.client.device_registry import DeviceRegistry
 from wb.mqtt_alice.client.sio_alice_handlers import SioAliceHandlers
 
-EVENT_RATES_PATH = Path(__file__).resolve().parents[1] / "configs" / "wb-mqtt-alice-event-rates.json"
-
 CAP_RANGE = "devices.capabilities.range"
 DEVICE_ID = "ac-test1"
-TOPIC = "/devices/AC-test1/controls/temperature"
+TEMPERATURE_TOPIC = "/devices/AC-test1/controls/temperature"
 
 # Air conditioner with a temperature scale of 16..30 and a step of 1,
-# as the webui configurator writes it
+# in the shape the webui configurator writes it
 DEVICES_CONFIG = {
     "rooms": {},
     "devices": {
@@ -38,7 +35,7 @@ DEVICES_CONFIG = {
             "capabilities": [
                 {
                     "type": CAP_RANGE,
-                    "mqtt": TOPIC,
+                    "mqtt": TEMPERATURE_TOPIC,
                     "parameters": {
                         "instance": "temperature",
                         "range": {"min": 16, "max": 30, "precision": 1},
@@ -51,72 +48,98 @@ DEVICES_CONFIG = {
 }
 
 
-class RelativeRangeTest(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        config_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(config_dir.cleanup)
-        config_path = Path(config_dir.name) / "devices.conf"
-        config_path.write_text(json.dumps(DEVICES_CONFIG, ensure_ascii=False), encoding="utf-8")
+class AliceThermostat:
+    """
+    Drives one action through the real handler and registry, with the MQTT
+    publish and the current-value read replaced by in-memory stubs.
+    """
 
+    def __init__(self):
+        self.handlers = None  # set by the fixture once the registry is built
         self.published = []  # (topic, payload) of everything the client publishes
-        self.current_value = "18"  # what the temperature control reports now
+        self.current_temperature = "18"  # what the temperature control reports now
+        self.last_result = None  # action_result of the last command sent
 
-        async def fake_publish(topic, payload):
-            self.published.append((topic, payload))
+    def given_current_temperature(self, celsius):
+        # What the device reports now - a relative step is added to this
+        self.current_temperature = str(celsius)
 
-        async def fake_read(topic, **kwargs):
-            return self.current_value
+    async def adjust_temperature(self, delta):
+        # Relative command, the way Yandex sends "сделай теплее/холоднее"
+        await self._send_action({"instance": "temperature", "value": delta, "relative": True})
 
-        patcher = mock.patch.object(device_registry, "read_retained_value", fake_read)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+    async def set_temperature(self, target):
+        # Absolute command, the way Yandex sends "установи N градусов"
+        await self._send_action({"instance": "temperature", "value": target})
 
-        registry = DeviceRegistry(
-            str(config_path),
-            send_to_yandex=lambda *args, **kwargs: None,
-            publish_to_mqtt=fake_publish,
-            cfg_events_path=str(EVENT_RATES_PATH),
-        )
-        self.handlers = SioAliceHandlers(registry=registry, controller_sn="TEST-SN")
-
-    async def send_action(self, value, relative=None):
-        """Send one capability action the way Yandex sends it"""
-        state = {"instance": "temperature", "value": value}
-        if relative is not None:
-            state["relative"] = relative
+    async def _send_action(self, state):
         device = {"id": DEVICE_ID, "capabilities": [{"type": CAP_RANGE, "state": state}]}
-        return await self.handlers._handle_single_device_action(device)
+        response = await self.handlers._handle_single_device_action(device)
+        self.last_result = response["capabilities"][0]["state"]["action_result"]
 
-    async def test_warmer_adds_the_increment_to_the_current_value(self):
-        """Command "сделай теплее" at 18 must set 19, not the increment itself"""
-        self.current_value = "18"
+    def assert_temperature_set_to(self, celsius):
+        assert self.published == [(f"{TEMPERATURE_TOPIC}/on", str(celsius))]
+        assert self.last_result == {"status": "DONE"}
 
-        await self.send_action(1, relative=True)
-
-        self.assertEqual(self.published, [(f"{TOPIC}/on", "19")])
-
-    async def test_cooler_subtracts_the_increment_from_the_current_value(self):
-        """Command "сделай холоднее" at 18 must set 17"""
-        self.current_value = "18"
-
-        await self.send_action(-1, relative=True)
-
-        self.assertEqual(self.published, [(f"{TOPIC}/on", "17")])
-
-    async def test_warmer_stops_at_the_top_of_the_scale(self):
-        """A step up at the declared maximum stays at the maximum"""
-        self.current_value = "30"
-
-        await self.send_action(1, relative=True)
-
-        self.assertEqual(self.published, [(f"{TOPIC}/on", "30")])
-
-    async def test_value_without_the_relative_flag_is_published_as_is(self):
-        """Command "установи 20" worked before the fix and must keep working"""
-        await self.send_action(20)
-
-        self.assertEqual(self.published, [(f"{TOPIC}/on", "20")])
+    def assert_rejected_as_out_of_range(self):
+        # Nothing is published, and Yandex is told the value was invalid
+        assert self.published == []
+        assert self.last_result == {"status": "ERROR", "error_code": "INVALID_VALUE"}
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.fixture
+def thermostat(tmp_path, monkeypatch):
+    devices_conf = tmp_path / "devices.conf"
+    devices_conf.write_text(json.dumps(DEVICES_CONFIG, ensure_ascii=False), encoding="utf-8")
+
+    # Event rates are not exercised here, but the registry reads the file on
+    # load - keep the test self-contained instead of pointing it at configs/
+    event_rates_conf = tmp_path / "event-rates.json"
+    event_rates_conf.write_text("{}", encoding="utf-8")
+
+    harness = AliceThermostat()
+
+    async def fake_publish(topic, payload):
+        harness.published.append((topic, payload))
+
+    async def fake_read(topic, **kwargs):
+        return harness.current_temperature
+
+    monkeypatch.setattr(device_registry, "read_retained_value", fake_read)
+
+    registry = DeviceRegistry(
+        str(devices_conf),
+        send_to_yandex=lambda *args, **kwargs: None,
+        publish_to_mqtt=fake_publish,
+        cfg_events_path=str(event_rates_conf),
+    )
+    harness.handlers = SioAliceHandlers(registry=registry, controller_sn="TEST-SN")
+    return harness
+
+
+async def test_warmer_adds_one_degree_to_the_current_temperature(thermostat):
+    thermostat.given_current_temperature(18)
+    await thermostat.adjust_temperature(+1)
+    thermostat.assert_temperature_set_to(19)
+
+
+async def test_cooler_subtracts_one_degree_from_the_current_temperature(thermostat):
+    thermostat.given_current_temperature(18)
+    await thermostat.adjust_temperature(-1)
+    thermostat.assert_temperature_set_to(17)
+
+
+async def test_absolute_command_sets_the_value_directly(thermostat):
+    await thermostat.set_temperature(20)
+    thermostat.assert_temperature_set_to(20)
+
+
+async def test_absolute_value_above_the_maximum_is_rejected(thermostat):
+    await thermostat.set_temperature(35)  # scale tops out at 30
+    thermostat.assert_rejected_as_out_of_range()
+
+
+async def test_relative_step_past_the_maximum_is_rejected(thermostat):
+    thermostat.given_current_temperature(25)
+    await thermostat.adjust_temperature(+10)  # 25 + 10 = 35, past the max of 30
+    thermostat.assert_rejected_as_out_of_range()
