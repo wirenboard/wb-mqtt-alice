@@ -29,7 +29,6 @@ from wb.mqtt_alice.common.constants import (
 
 from .converters import (
     EventType,
-    clamp_range_value,
     convert_mqtt_event_value,
     convert_rgb_int_to_wb,
     convert_rgb_wb_to_int,
@@ -37,7 +36,9 @@ from .converters import (
     convert_temp_percent_to_kelvin,
     convert_to_bool,
     format_range_payload,
+    parse_range_params,
     resolve_relative_range_value,
+    value_within_range,
 )
 from .mqtt_topic import MQTTTopic
 from .wb_alice_device_event_rate import AliceDeviceEventRate
@@ -905,14 +906,30 @@ class DeviceRegistry:
 
         elif cap_type.endswith("range"):
             # Relative commands are already resolved to an absolute value by
-            # forward_yandex_to_mqtt(), so only clamping is left here. Precision
-            # is not applied on purpose: Yandex aligns absolute values to it
-            # already, and re-snapping would move a value the user set explicitly
+            # forward_yandex_to_mqtt(), so this is the single point where the
+            # final value is known - both absolute and relative pass through here
             try:
                 range_value = float(value)
             except (ValueError, TypeError):
                 raise ValueError(f"Unexpected range value from Yandex: {value!r}")
-            return format_range_payload(clamp_range_value(range_value, params.get("range")))
+
+            # A value outside the declared scale is not clamped and not
+            # published: an absolute 35 with max 30, or "+10" from 25, is
+            # reported back to Yandex as an error so the user is not misled
+            if not value_within_range(range_value, params.get("range")):
+                min_value, max_value, _ = parse_range_params(params.get("range"))
+                logger.warning(
+                    "Range value %r is outside the allowed range [%s, %s], command not executed",
+                    range_value,
+                    min_value,
+                    max_value,
+                )
+                raise ActionError(
+                    ERR_INVALID_VALUE,
+                    f"Value {range_value} is out of range [{min_value}, {max_value}]",
+                )
+
+            return format_range_payload(range_value)
 
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
@@ -994,7 +1011,8 @@ class DeviceRegistry:
             delta: Signed increment from Yandex
 
         Returns:
-            Absolute value to publish, clamped to the declared range
+            Absolute target value (current + delta); whether it fits the
+            declared range is checked later, when the value is converted
 
         Raises:
             ActionError: capability cannot be changed relatively, current value

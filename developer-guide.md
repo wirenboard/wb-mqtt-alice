@@ -30,14 +30,21 @@ dpkg-buildpackage -us -uc
 
 ## Тесты
 
-Тесты лежат в каталоге `tests/` и написаны на стандартном `unittest` —
-дополнительных пакетов не требуется. Запуск из корня репозитория:
+Тесты лежат в каталоге `tests/` и написаны на `pytest`. Установка зависимостей
+для разработки ставит и его:
 
 ```terminal
-$ python3 -m unittest discover -s tests -t . -v
+$ python3 -m pip install -r requirements-dev.txt
+```
+
+Запуск из корня репозитория:
+
+```terminal
+$ pytest
 ```
 
 Брокер для запуска не нужен: обращения к MQTT заменяются заглушками.
+Подробности — в [tests/README.md](tests/README.md).
 
 ## Линтинг и форматирование
 

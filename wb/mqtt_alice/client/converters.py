@@ -136,37 +136,34 @@ def precision_decimals(precision: float) -> int:
     return 0
 
 
-def clamp_range_value(value: float, range_params: Optional[Dict[str, Any]]) -> float:
+def value_within_range(value: float, range_params: Optional[Dict[str, Any]]) -> bool:
     """
-    Keep a range value inside the bounds declared in parameters.range
+    Check that a range value fits the bounds declared in parameters.range
 
-    Yandex is not obliged to respect min/max when a relative command lands near
-    an edge ("make it warmer" at the top of the scale), and an out-of-range
-    value written to a WB control is either rejected or clipped by the device
-    itself - clamping here keeps what we publish predictable
+    Bounds that are not declared do not constrain the value, so a range with
+    no min/max always passes. A value outside the range is not published: it is
+    reported back to Yandex as an error instead of being silently clamped
 
     Args:
         value: Value in Yandex units
         range_params: Contents of parameters.range, may be None
 
     Returns:
-        Value clamped to [min, max]; bounds that are not declared are ignored
+        True if the value is within [min, max], False otherwise
 
     Example:
-        >>> clamp_range_value(35, {"min": 16, "max": 30})
-        30.0
-        >>> clamp_range_value(20, {"min": 16, "max": 30})
-        20.0
+        >>> value_within_range(20, {"min": 16, "max": 30})
+        True
+        >>> value_within_range(35, {"min": 16, "max": 30})
+        False
     """
     min_value, max_value, _ = parse_range_params(range_params)
 
     if min_value is not None and value < min_value:
-        logger.debug("Range value %r below min %r, clamped", value, min_value)
-        return min_value
+        return False
     if max_value is not None and value > max_value:
-        logger.debug("Range value %r above max %r, clamped", value, max_value)
-        return max_value
-    return float(value)
+        return False
+    return True
 
 
 def resolve_relative_range_value(
@@ -177,7 +174,8 @@ def resolve_relative_range_value(
 
     Yandex marks incremental commands with "relative": true and sends a delta
     instead of a target value, so "make it warmer" arrives as
-    {"value": 1, "relative": true} and means current + 1
+    {"value": 1, "relative": true} and means current + 1. The result is not
+    constrained here: whether it fits the declared range is checked separately
 
     Rounding by precision only strips float noise (18.1 + 0.2 = 18.299999...),
     the precision grid itself is not enforced: the delta already comes aligned
@@ -189,16 +187,16 @@ def resolve_relative_range_value(
         range_params: Contents of parameters.range, may be None
 
     Returns:
-        Target value, clamped to the declared range
+        Target value (current + delta), rounded to the range precision
 
     Example:
         >>> resolve_relative_range_value(18, 1, {"min": 16, "max": 30, "precision": 1})
         19.0
-        >>> resolve_relative_range_value(30, 1, {"min": 16, "max": 30, "precision": 1})
-        30.0
+        >>> resolve_relative_range_value(25, 10, {"min": 16, "max": 30, "precision": 1})
+        35.0
     """
     _, _, precision = parse_range_params(range_params)
-    target = clamp_range_value(float(current) + float(delta), range_params)
+    target = float(current) + float(delta)
     return round(target, precision_decimals(precision))
 
 
