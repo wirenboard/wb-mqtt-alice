@@ -12,10 +12,20 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
+from uuid import uuid4
 
+import paho.mqtt.client as mqtt_client
 import paho.mqtt.subscribe as subscribe
 
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CAP_ON_OFF, CONFIG_EVENTS_RATE_PATH
+from wb.mqtt_alice.common.constants import (
+    CAP_COLOR_SETTING,
+    CAP_MODE,
+    CAP_ON_OFF,
+    CONFIG_EVENTS_RATE_PATH,
+    ERR_DEVICE_UNREACHABLE,
+    ERR_INVALID_ACTION,
+    ERR_INVALID_VALUE,
+)
 
 from .converters import (
     EventType,
@@ -25,11 +35,32 @@ from .converters import (
     convert_temp_kelvin_to_percent,
     convert_temp_percent_to_kelvin,
     convert_to_bool,
+    format_range_payload,
+    parse_range_params,
+    resolve_relative_range_value,
+    value_within_range,
 )
 from .mqtt_topic import MQTTTopic
 from .wb_alice_device_event_rate import AliceDeviceEventRate
 
 logger = logging.getLogger(__name__)
+
+# How long to wait for the current value of a relative command.
+# Kept short: Yandex is waiting for the response, and the value is retained.
+RELATIVE_READ_TIMEOUT_S = 1.0
+
+
+class ActionError(Exception):
+    """
+    Action from Yandex that failed in a way the user must be told about
+
+    Carries a Yandex error_code so the action response can say what went wrong
+    instead of reporting DONE and leaving the user wondering why nothing moved
+    """
+
+    def __init__(self, error_code: str, message: str = "") -> None:
+        super().__init__(message or error_code)
+        self.error_code = error_code
 
 
 def is_property_event(prop: str = "") -> bool:
@@ -230,6 +261,81 @@ async def read_topic_once(
     except asyncio.TimeoutError:
         logger.warning("Read topic timeout waiting %r", topic)
         return None
+
+
+async def read_retained_value(
+    topic: str,
+    *,
+    host: str = "localhost",
+    timeout: float = RELATIVE_READ_TIMEOUT_S,
+) -> Optional[str]:
+    """
+    Read the current retained payload of a topic, or None if it does not arrive
+
+    Deliberately does not reuse read_topic_once(): that one blocks inside
+    subscribe.simple(), so an expired asyncio.wait_for() abandons the coroutine
+    while the thread behind asyncio.to_thread() keeps waiting for a message that
+    may never come. Here the client is ours, so the timeout path can tear the
+    connection down and let the network thread exit
+
+    TODO: this whole helper goes away once DeviceRegistry keeps a state cache -
+          see the note in _resolve_relative_value()
+
+    Args:
+        topic: Full MQTT topic of the control (without the /on suffix)
+        [host]: Broker address, local broker by default
+        [timeout]: How long to wait for the retained message
+
+    Returns:
+        Decoded and stripped payload, or None on timeout, connection failure
+        or undecodable payload
+    """
+    loop = asyncio.get_running_loop()
+    result: "asyncio.Future[Optional[str]]" = loop.create_future()
+    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}")
+
+    def _resolve(value: Optional[str]) -> None:
+        if not result.done():
+            result.set_result(value)
+
+    def _on_connect(cli: mqtt_client.Client, _userdata: Any, _flags: Dict[str, Any], rc: int) -> None:
+        if rc != 0:
+            logger.warning("Read of %r failed, broker refused connection with code %r", topic, rc)
+            loop.call_soon_threadsafe(_resolve, None)
+            return None
+        cli.subscribe(topic, qos=0)
+
+    def _on_message(_cli: mqtt_client.Client, _userdata: Any, message: mqtt_client.MQTTMessage) -> None:
+        try:
+            payload = message.payload.decode().strip()
+        except UnicodeDecodeError:
+            logger.warning("Cannot decode payload of %r", topic)
+            payload = None
+        loop.call_soon_threadsafe(_resolve, payload)
+
+    client.on_connect = _on_connect
+    client.on_message = _on_message
+
+    try:
+        await asyncio.to_thread(client.connect, host)
+        client.loop_start()
+        payload = await asyncio.wait_for(result, timeout)
+        logger.debug("Current value of %r: %r", topic, payload)
+        return payload
+    except asyncio.TimeoutError:
+        logger.warning("Timeout reading current value of %r", topic)
+        return None
+    except Exception as e:
+        logger.warning("Failed to read current value of %r: %r", topic, e)
+        return None
+    finally:
+        # Both calls are needed: disconnect() wakes the network thread up,
+        # loop_stop() joins it - otherwise every command leaks one thread
+        try:
+            client.disconnect()
+            client.loop_stop()
+        except Exception:
+            logger.debug("Cleanup after reading %r failed", topic, exc_info=True)
 
 
 class DeviceRegistry:
@@ -797,6 +903,29 @@ class DeviceRegistry:
                     return mqtt_value_match
             raise ValueError(f"No mqtt_value_match for mode={value!r}")
 
+        elif cap_type.endswith("range"):
+            # A bad value here is a real error - report it, do not skip
+            try:
+                range_value = float(value)
+            except (ValueError, TypeError):
+                raise ActionError(ERR_INVALID_VALUE, f"Range value is not a number: {value!r}")
+
+            # A value outside the scale is not applied, the user is told instead
+            if not value_within_range(range_value, params.get("range")):
+                min_value, max_value, _ = parse_range_params(params.get("range"))
+                logger.warning(
+                    "Range value %r is outside the allowed range [%s, %s], command not executed",
+                    range_value,
+                    min_value,
+                    max_value,
+                )
+                raise ActionError(
+                    ERR_INVALID_VALUE,
+                    f"Value {range_value} is out of range [{min_value}, {max_value}]",
+                )
+
+            return format_range_payload(range_value)
+
         elif cap_type.endswith("color_setting"):
             if instance == "rgb":
                 # Yandex sends int, convert to WB format "R;G;B"
@@ -833,6 +962,80 @@ class DeviceRegistry:
             # Unknown capability types - passthrough as string
             return str(value)
 
+    async def _resolve_relative_value(
+        self,
+        topic: str,
+        cap_type: str,
+        cap_params: Optional[Dict[str, Any]],
+        delta: Any,
+    ) -> float:
+        """
+        Turn a relative command from Yandex into an absolute value
+
+        Yandex marks incremental commands with "relative": true and sends a
+        delta, so "make it warmer" arrives as {"value": 1, "relative": true}
+        and means current + 1. Without this the delta itself was published as
+        the new value, which is how "make it warmer" ended up setting 1
+
+        Only the range capability can be relative in the Yandex API, so any
+        other capability is rejected rather than silently treated as absolute
+
+        TODO: reading the current value from the broker on every command is a
+              workaround, and it has two known costs:
+              1. an MQTT round trip (up to RELATIVE_READ_TIMEOUT_S) is added to
+                 every step, plus a short-lived connection and thread
+              2. a burst of commands races with the device: after publishing
+                 "warmer" the control may not have republished its state yet,
+                 so the next step is computed from a stale value and the steps
+                 collapse into one
+              The reason it is done this way is that DeviceRegistry has no idea
+              what the current value is: mqtt_on_message() drops retained
+              messages by design (see main.py) and nothing keeps the live ones,
+              so there is simply nothing to read from memory
+              Proper fix (planned for 0.14.0) is a state cache in the registry:
+              seeded with retained values when _subscribe_registry_topics()
+              runs, updated from the MQTT subscription that is already active,
+              and updated optimistically right after we publish so a burst of
+              steps adds up correctly. The same cache also removes the blocking
+              per-capability read in alice_devices_query
+
+        Args:
+            topic: Full MQTT topic of the control (without the /on suffix)
+            cap_type: Yandex capability type string
+            cap_params: Capability parameters from the config, may hold "range"
+            delta: Signed increment from Yandex
+
+        Returns:
+            Absolute target value (current + delta); whether it fits the
+            declared range is checked later, when the value is converted
+
+        Raises:
+            ActionError: capability cannot be changed relatively, current value
+                is unavailable, or either value is not a number
+        """
+        if not cap_type.endswith("range"):
+            logger.warning("Relative change is not supported for %r", cap_type)
+            raise ActionError(ERR_INVALID_ACTION, f"Relative change unsupported for {cap_type}")
+
+        try:
+            delta_value = float(delta)
+        except (ValueError, TypeError):
+            raise ActionError(ERR_INVALID_VALUE, f"Relative value is not a number: {delta!r}")
+
+        raw = await read_retained_value(topic, timeout=RELATIVE_READ_TIMEOUT_S)
+        if raw is None:
+            raise ActionError(ERR_DEVICE_UNREACHABLE, f"No current value in topic {topic!r}")
+
+        try:
+            current = float(raw)
+        except ValueError:
+            raise ActionError(ERR_INVALID_VALUE, f"Current value is not a number: {raw!r} in {topic!r}")
+
+        range_params = (cap_params or {}).get("range")
+        target = resolve_relative_range_value(current, delta_value, range_params)
+        logger.debug("Relative change of %r: %r + %r → %r", topic, current, delta_value, target)
+        return target
+
     async def forward_yandex_to_mqtt(
         self,
         device_id: str,
@@ -840,11 +1043,29 @@ class DeviceRegistry:
         instance: Optional[str],
         instance_value: Optional[str],
         value: Any,
+        relative: bool = False,
     ) -> None:
+        """
+        Apply a capability action from Yandex to the mapped MQTT control
+
+        Args:
+            device_id: Device identifier from the config
+            cap_type: Yandex capability type string
+            instance: Capability instance (e.g. "temperature")
+            instance_value: Event value for event properties, None for others
+            value: Value from Yandex - a target value, or an increment when
+                *relative* is set
+            [relative]: Value is an increment to the current one, not a target
+
+        Raises:
+            ActionError: relative command could not be resolved
+        """
         key = (device_id, cap_type, instance, instance_value)
 
+        # The device may belong to another controller linked to the account.
+        # Then it is not ours to handle - skip it without reporting an error.
         if key not in self.cap_index:
-            logger.warning("No mapping for %r", key)
+            logger.warning("No mapping for %r, may be handled by another linked controller", key)
             return None
 
         base = self.cap_index[key]  # already full topic
@@ -863,6 +1084,11 @@ class DeviceRegistry:
                 if cap_instance == instance:
                     cap_params = params
                     break
+
+        # Relative command carries a delta - resolve it against the current
+        # value before the usual conversion, which expects an absolute one
+        if relative:
+            value = await self._resolve_relative_value(base, cap_type, cap_params, value)
 
         # Convert value to MQTT format
         try:
@@ -1038,7 +1264,9 @@ class DeviceRegistry:
 
         device = self.devices.get(device_id)
         if not device:
-            logger.warning("get_device_current_state: unknown device_id %r", device_id)
+            # The device may belong to another controller linked to the account,
+            # so this one does not know it - report it as not found here.
+            logger.warning("Unknown device_id %r, may be on another linked controller", device_id)
             return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
 
         # Capability is queryable when retrievable is not explicitly false

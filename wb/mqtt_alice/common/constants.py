@@ -43,6 +43,12 @@ CAP_VIDEO_STREAM = "devices.capabilities.video_stream"
 # Capability property type constants
 PROP_FLOAT = "devices.properties.float"
 PROP_EVENT = "devices.properties.event"
+# Yandex action_result error codes
+# https://yandex.ru/dev/dialogs/smart-home/doc/ru/concepts/response-codes
+ERR_DEVICE_UNREACHABLE = "DEVICE_UNREACHABLE"  # Current device state is not available
+ERR_INVALID_ACTION = "INVALID_ACTION"  # Operation is not supported by the capability
+ERR_INVALID_VALUE = "INVALID_VALUE"  # Value cannot be applied to the capability
+ERR_INTERNAL_ERROR = "INTERNAL_ERROR"  # Anything that does not fit the codes above
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 DEVICE_PATH = "/etc/wb-mqtt-alice-devices.conf"

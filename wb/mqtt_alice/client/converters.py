@@ -7,7 +7,8 @@ Handles type conversions between WirenBoard and Yandex Smart Home formats
 """
 
 import logging
-from typing import Any, Optional
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, Optional, Tuple
 
 from wb.mqtt_alice.common.constants import (
     EventType,
@@ -17,6 +18,10 @@ from wb.mqtt_alice.common.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Default step of a range capability when parameters.range.precision is absent,
+# per Yandex Smart Home specification
+RANGE_DEFAULT_PRECISION = 1.0
 
 
 def convert_to_bool(raw_state: Any) -> bool:
@@ -65,6 +70,155 @@ def convert_to_float(raw: Any) -> float:
         return 0.0
 
 
+def _to_optional_float(raw: Any) -> Optional[float]:
+    """
+    Convert value to float, or None if it is missing or malformed
+    Unlike convert_to_float() a bad value does not silently become 0.0 -
+    for range bounds "no limit" and "limit of zero" are different things
+    """
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        logger.warning("Cannot convert %r to float, treated as unset", raw)
+        return None
+
+
+def parse_range_params(
+    range_params: Optional[Dict[str, Any]]
+) -> Tuple[Optional[float], Optional[float], float]:
+    """
+    Extract bounds and step from Yandex range capability parameters
+
+    Args:
+        range_params: Contents of parameters.range from the device config
+            Example: {"min": -2, "max": 30, "precision": 1}
+            Any of the keys may be absent
+
+    Returns:
+        Tuple (min, max, precision) where min/max are None when not declared
+        and precision falls back to RANGE_DEFAULT_PRECISION
+
+    Example:
+        >>> parse_range_params({"min": 16, "max": 30, "precision": 0.5})
+        (16.0, 30.0, 0.5)
+        >>> parse_range_params(None)
+        (None, None, 1.0)
+    """
+    params = range_params or {}
+
+    precision = _to_optional_float(params.get("precision"))
+    if precision is None or precision <= 0:
+        precision = RANGE_DEFAULT_PRECISION
+
+    return _to_optional_float(params.get("min")), _to_optional_float(params.get("max")), precision
+
+
+def precision_decimals(precision: float) -> int:
+    """
+    Number of decimal places implied by a range precision
+
+    Example:
+        >>> precision_decimals(1)
+        0
+        >>> precision_decimals(0.5)
+        1
+        >>> precision_decimals(0.01)
+        2
+    """
+    try:
+        exponent = Decimal(str(precision)).normalize().as_tuple().exponent
+    except InvalidOperation:
+        return 0
+    if isinstance(exponent, int) and exponent < 0:
+        return -exponent
+    return 0
+
+
+def value_within_range(value: float, range_params: Optional[Dict[str, Any]]) -> bool:
+    """
+    Check that a range value fits the bounds declared in parameters.range
+
+    Bounds that are not declared do not constrain the value, so a range with
+    no min/max always passes. A value outside the range is not published: it is
+    reported back to Yandex as an error instead of being silently clamped
+
+    Args:
+        value: Value in Yandex units
+        range_params: Contents of parameters.range, may be None
+
+    Returns:
+        True if the value is within [min, max], False otherwise
+
+    Example:
+        >>> value_within_range(20, {"min": 16, "max": 30})
+        True
+        >>> value_within_range(35, {"min": 16, "max": 30})
+        False
+    """
+    min_value, max_value, _ = parse_range_params(range_params)
+
+    if min_value is not None and value < min_value:
+        return False
+    if max_value is not None and value > max_value:
+        return False
+    return True
+
+
+def resolve_relative_range_value(
+    current: float, delta: float, range_params: Optional[Dict[str, Any]]
+) -> float:
+    """
+    Calculate the target value of a relative range command
+
+    Yandex marks incremental commands with "relative": true and sends a delta
+    instead of a target value, so "make it warmer" arrives as
+    {"value": 1, "relative": true} and means current + 1. The result is not
+    constrained here: whether it fits the declared range is checked separately
+
+    Rounding by precision only strips float noise (18.1 + 0.2 = 18.299999...),
+    the precision grid itself is not enforced: the delta already comes aligned
+    to it, and snapping would move a value the user set explicitly
+
+    Args:
+        current: Current value read from the device
+        delta: Signed increment from Yandex
+        range_params: Contents of parameters.range, may be None
+
+    Returns:
+        Target value (current + delta), rounded to the range precision
+
+    Example:
+        >>> resolve_relative_range_value(18, 1, {"min": 16, "max": 30, "precision": 1})
+        19.0
+        >>> resolve_relative_range_value(25, 10, {"min": 16, "max": 30, "precision": 1})
+        35.0
+    """
+    _, _, precision = parse_range_params(range_params)
+    target = float(current) + float(delta)
+    return round(target, precision_decimals(precision))
+
+
+def format_range_payload(value: float) -> str:
+    """
+    Format a range value as a WirenBoard MQTT payload
+
+    Whole numbers are published without the ".0" tail: WB controls of integer
+    types (dimmers, valve position) may reject "19.0" while accepting "19"
+
+    Example:
+        >>> format_range_payload(19.0)
+        '19'
+        >>> format_range_payload(18.5)
+        '18.5'
+    """
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return str(number)
+
+
 def _rgb_to_int(red: int, green: int, blue: int) -> int:
     """
     Convert RGB components to a single integer value
@@ -81,8 +235,8 @@ def _rgb_to_int(red: int, green: int, blue: int) -> int:
         int: RGB value as 24-bit integer (0-16777215)
 
     Example:
-        >>> _rgb_to_int(255, 128, 0)
-        16744448  # 0xFF8000
+        >>> _rgb_to_int(255, 128, 0)  # 0xFF8000
+        16744448
     """
     red = max(0, min(255, int(red)))
     green = max(0, min(255, int(green)))
@@ -105,10 +259,10 @@ def convert_rgb_int_to_wb(val: int) -> str:
         str: RGB components in WirenBoard format "R;G;B"
 
     Example:
-        >>> convert_rgb_int_to_wb(16744448)
-        "255;128;0"  # 0xFF8000 convertes to "255;128;0"
+        >>> convert_rgb_int_to_wb(16744448)  # 0xFF8000
+        '255;128;0'
         >>> convert_rgb_int_to_wb(0)
-        "0;0;0"
+        '0;0;0'
     """
     rgb_value = int(val) & 0xFFFFFF
     red = (rgb_value >> 16) & 0xFF
@@ -129,12 +283,12 @@ def convert_rgb_wb_to_int(raw: str = "") -> Optional[int]:
         int: converted RGB value as integer 0..16777215, or None if failed
 
     Example:
-        >>> convert_rgb_wb_to_int("255;128;0")
-        16744448  # 0xFF8000
-        >>> convert_rgb_wb_to_int("invalid")
-        None
-        >>> convert_rgb_wb_to_int("")
-        None
+        >>> convert_rgb_wb_to_int("255;128;0")  # 0xFF8000
+        16744448
+        >>> convert_rgb_wb_to_int("invalid") is None
+        True
+        >>> convert_rgb_wb_to_int("") is None
+        True
     """
     payload_str = raw.strip()
     try:
@@ -174,8 +328,8 @@ def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> in
     Examples:
         >>> convert_temp_percent_to_kelvin(0, 2700, 6500)
         2700
-        >>> convert_temp_percent_to_kelvin(47.4, 2700, 6500)
-        4500  # 4501K rounded to 4500K
+        >>> convert_temp_percent_to_kelvin(47.4, 2700, 6500)  # 4501K rounds to 4500K
+        4500
         >>> convert_temp_percent_to_kelvin(100, 2700, 6500)
         6500
     """
@@ -245,25 +399,25 @@ def convert_mqtt_event_value(
     Examples:
         Multi-topic events (default):
         >>> convert_mqtt_event_value("open", "opened", "1")
-        "opened"
-        >>> convert_mqtt_event_value("open", "closed", "0")
-        None
+        'opened'
+        >>> convert_mqtt_event_value("open", "closed", "0") is None
+        True
 
         Button events:
         >>> convert_mqtt_event_value("button", "click", "1")
-        "click"
-        >>> convert_mqtt_event_value("button", "click", "0")
-        None
+        'click'
+        >>> convert_mqtt_event_value("button", "click", "0") is None
+        True
 
         Single-topic events:
         >>> convert_mqtt_event_value("open", "opened", "1", event_single_topic=True)
-        "opened"
+        'opened'
         >>> convert_mqtt_event_value("open", "opened", "0", event_single_topic=True)
-        "closed"
+        'closed'
         >>> convert_mqtt_event_value("water_leak", "dry", "1", event_single_topic=True)
-        "dry"
+        'dry'
         >>> convert_mqtt_event_value("water_leak", "dry", "0", event_single_topic=True)
-        "leak"
+        'leak'
     """
     if event_type == EventType.BUTTON:
         # Event Button -  trigger one of topic"
