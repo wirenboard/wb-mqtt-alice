@@ -235,8 +235,8 @@ def _rgb_to_int(red: int, green: int, blue: int) -> int:
         int: RGB value as 24-bit integer (0-16777215)
 
     Example:
-        >>> _rgb_to_int(255, 128, 0)
-        16744448  # 0xFF8000
+        >>> _rgb_to_int(255, 128, 0)  # 0xFF8000
+        16744448
     """
     red = max(0, min(255, int(red)))
     green = max(0, min(255, int(green)))
@@ -259,10 +259,10 @@ def convert_rgb_int_to_wb(val: int) -> str:
         str: RGB components in WirenBoard format "R;G;B"
 
     Example:
-        >>> convert_rgb_int_to_wb(16744448)
-        "255;128;0"  # 0xFF8000 convertes to "255;128;0"
+        >>> convert_rgb_int_to_wb(16744448)  # 0xFF8000
+        '255;128;0'
         >>> convert_rgb_int_to_wb(0)
-        "0;0;0"
+        '0;0;0'
     """
     rgb_value = int(val) & 0xFFFFFF
     red = (rgb_value >> 16) & 0xFF
@@ -283,12 +283,12 @@ def convert_rgb_wb_to_int(raw: str = "") -> Optional[int]:
         int: converted RGB value as integer 0..16777215, or None if failed
 
     Example:
-        >>> convert_rgb_wb_to_int("255;128;0")
-        16744448  # 0xFF8000
-        >>> convert_rgb_wb_to_int("invalid")
-        None
-        >>> convert_rgb_wb_to_int("")
-        None
+        >>> convert_rgb_wb_to_int("255;128;0")  # 0xFF8000
+        16744448
+        >>> convert_rgb_wb_to_int("invalid") is None
+        True
+        >>> convert_rgb_wb_to_int("") is None
+        True
     """
     payload_str = raw.strip()
     try:
@@ -328,8 +328,8 @@ def convert_temp_percent_to_kelvin(percent: float, min_k: int, max_k: int) -> in
     Examples:
         >>> convert_temp_percent_to_kelvin(0, 2700, 6500)
         2700
-        >>> convert_temp_percent_to_kelvin(47.4, 2700, 6500)
-        4500  # 4501K rounded to 4500K
+        >>> convert_temp_percent_to_kelvin(47.4, 2700, 6500)  # 4501K rounds to 4500K
+        4500
         >>> convert_temp_percent_to_kelvin(100, 2700, 6500)
         6500
     """
@@ -399,25 +399,25 @@ def convert_mqtt_event_value(
     Examples:
         Multi-topic events (default):
         >>> convert_mqtt_event_value("open", "opened", "1")
-        "opened"
-        >>> convert_mqtt_event_value("open", "closed", "0")
-        None
+        'opened'
+        >>> convert_mqtt_event_value("open", "closed", "0") is None
+        True
 
         Button events:
         >>> convert_mqtt_event_value("button", "click", "1")
-        "click"
-        >>> convert_mqtt_event_value("button", "click", "0")
-        None
+        'click'
+        >>> convert_mqtt_event_value("button", "click", "0") is None
+        True
 
         Single-topic events:
         >>> convert_mqtt_event_value("open", "opened", "1", event_single_topic=True)
-        "opened"
+        'opened'
         >>> convert_mqtt_event_value("open", "opened", "0", event_single_topic=True)
-        "closed"
+        'closed'
         >>> convert_mqtt_event_value("water_leak", "dry", "1", event_single_topic=True)
-        "dry"
+        'dry'
         >>> convert_mqtt_event_value("water_leak", "dry", "0", event_single_topic=True)
-        "leak"
+        'leak'
     """
     if event_type == EventType.BUTTON:
         # Event Button -  trigger one of topic"
