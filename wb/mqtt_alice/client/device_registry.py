@@ -45,9 +45,8 @@ from .wb_alice_device_event_rate import AliceDeviceEventRate
 
 logger = logging.getLogger(__name__)
 
-# How long to wait for the current value when resolving a relative command
-# Kept short on purpose: Yandex waits for the action response, and the value is
-# retained, so a healthy broker answers immediately
+# How long to wait for the current value of a relative command.
+# Kept short: Yandex is waiting for the response, and the value is retained.
 RELATIVE_READ_TIMEOUT_S = 1.0
 
 
@@ -905,17 +904,13 @@ class DeviceRegistry:
             raise ValueError(f"No mqtt_value_match for mode={value!r}")
 
         elif cap_type.endswith("range"):
-            # Relative commands are already resolved to an absolute value by
-            # forward_yandex_to_mqtt(), so this is the single point where the
-            # final value is known - both absolute and relative pass through here
+            # A bad value here is a real error - report it, do not skip
             try:
                 range_value = float(value)
             except (ValueError, TypeError):
-                raise ValueError(f"Unexpected range value from Yandex: {value!r}")
+                raise ActionError(ERR_INVALID_VALUE, f"Range value is not a number: {value!r}")
 
-            # A value outside the declared scale is not clamped and not
-            # published: an absolute 35 with max 30, or "+10" from 25, is
-            # reported back to Yandex as an error so the user is not misled
+            # A value outside the scale is not applied, the user is told instead
             if not value_within_range(range_value, params.get("range")):
                 min_value, max_value, _ = parse_range_params(params.get("range"))
                 logger.warning(
@@ -1067,12 +1062,10 @@ class DeviceRegistry:
         """
         key = (device_id, cap_type, instance, instance_value)
 
-        # TODO: unmapped keys, unknown devices and conversion failures below
-        #       return silently, so Yandex is told DONE for a command that was
-        #       never published - they should raise ActionError too, but that
-        #       touches every capability and is left for the 0.14.0 rework
+        # The device may belong to another controller linked to the account.
+        # Then it is not ours to handle - skip it without reporting an error.
         if key not in self.cap_index:
-            logger.warning("No mapping for %r", key)
+            logger.warning("No mapping for %r, may be handled by another linked controller", key)
             return None
 
         base = self.cap_index[key]  # already full topic
@@ -1271,7 +1264,9 @@ class DeviceRegistry:
 
         device = self.devices.get(device_id)
         if not device:
-            logger.warning("get_device_current_state: unknown device_id %r", device_id)
+            # The device may belong to another controller linked to the account,
+            # so this one does not know it - report it as not found here.
+            logger.warning("Unknown device_id %r, may be on another linked controller", device_id)
             return {"id": device_id, "error_code": "DEVICE_NOT_FOUND"}
 
         # Capability is queryable when retrievable is not explicitly false

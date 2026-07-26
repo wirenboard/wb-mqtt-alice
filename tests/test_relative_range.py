@@ -184,6 +184,11 @@ async def test_relative_step_with_a_non_numeric_current_value_is_rejected(thermo
     thermostat.assert_command_rejected("INVALID_VALUE")
 
 
+async def test_absolute_non_numeric_value_is_rejected(thermostat):
+    await thermostat.set_temperature("N/A")  # Yandex should never send this, but we must not act on it
+    thermostat.assert_command_rejected("INVALID_VALUE")
+
+
 async def test_relative_command_on_a_non_range_capability_is_rejected(thermostat):
     await thermostat.send_relative_power_command()
     thermostat.assert_command_rejected("INVALID_ACTION")
