@@ -1,1 +1,2 @@
 wb_move /etc/wb-mqtt-alice-devices.conf
+wb_move /etc/wb-mqtt-alice-client.conf

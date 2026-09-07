@@ -51,7 +51,7 @@ class SioAliceHandlers:
         self._mqtt_client = mqtt_client
         self._time_rate_sender = time_rate_sender
 
-    def _subscribe_registry_topics(self) -> None:
+    def subscribe_registry_topics(self) -> None:
         """
         Subscribe MQTT client to all topics from registry
         Called only after full initialization (Socket.IO connected, etc.)
@@ -118,7 +118,7 @@ class SioAliceHandlers:
                 logger.exception("Failed to start Alice state sender after connect: %r", e)
 
         # Subscribe to all topics from registry (if MQTT client is available)
-        self._subscribe_registry_topics()
+        self.subscribe_registry_topics()
 
     async def on_disconnect(self) -> None:
         """

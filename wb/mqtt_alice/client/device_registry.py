@@ -392,11 +392,7 @@ class DeviceRegistry:
             )
         except FileNotFoundError:
             logger.error("Config file not found: %r", path)
-            self.devices = {}
-            self.topic2info = {}
-            self.cap_index = {}
-            self.rooms = {}
-            return None
+            raise
         except json.JSONDecodeError as e:
             logger.error("Invalid JSON in config: %r", e)
             raise  # Critical error - cannot continue
@@ -993,7 +989,7 @@ class DeviceRegistry:
               messages by design (see main.py) and nothing keeps the live ones,
               so there is simply nothing to read from memory
               Proper fix (planned for 0.14.0) is a state cache in the registry:
-              seeded with retained values when _subscribe_registry_topics()
+              seeded with retained values when subscribe_registry_topics()
               runs, updated from the MQTT subscription that is already active,
               and updated optimistically right after we publish so a burst of
               steps adds up correctly. The same cache also removes the blocking

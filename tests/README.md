@@ -21,7 +21,22 @@ $ pytest tests/test_relative_range.py
 
 | Файл | Проверяет |
 |------|-----------|
+| `test_client_lifecycle.py` | Коды выхода клиента, остановку при подключении к облаку и восстановление MQTT-подписок |
+| `test_config_files.py` | Сохранность битых/отсутствующих конфигов и атомарную запись настроек устройств |
 | `test_relative_range.py` | Команды range из Яндекса: относительные («сделай теплее»), абсолютные и отказы |
+
+Новые проверки жизненного цикла и конфигов:
+
+| Тест | Что проверяет |
+|------|---------------|
+| `test_disabled_integration_exits_with_code_7` | Выключенный клиент возвращает 7 |
+| `test_invalid_configuration_exits_with_code_6` | Битый конфиг клиента возвращает 6 |
+| `test_mqtt_reconnect_restores_subscriptions` | MQTT-подписки восстанавливаются после reconnect |
+| `test_mqtt_authentication_failure_exits_with_code_2` | Отказ MQTT-аутентификации возвращает 2 |
+| `test_signal_interrupts_initial_cloud_connection` | Сигнал прерывает начальное подключение к облаку |
+| `test_invalid_configuration_is_not_overwritten` | Битые пользовательские файлы не перезаписываются |
+| `test_missing_client_configuration_is_not_recreated` | Отсутствующий конфиг клиента не создаётся из кода |
+| `test_saving_devices_configuration_is_atomic_and_preserves_mode` | Настройки устройств пишутся атомарно |
 
 ## Как устроены тесты
 

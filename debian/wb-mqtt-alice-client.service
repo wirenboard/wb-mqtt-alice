@@ -13,6 +13,8 @@ ExecStartPre=/usr/lib/wb-mqtt-alice/scripts/configure-nginx-proxy.sh
 ExecStart=/usr/bin/python3 -m wb.mqtt_alice.client.main
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=2 6
+SuccessExitStatus=7
 TimeoutStopSec=10
 
 # This service starts automatically upon system startup

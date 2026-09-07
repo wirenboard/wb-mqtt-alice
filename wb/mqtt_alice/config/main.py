@@ -2,8 +2,10 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import subprocess
+import sys
 import tempfile
 import uuid
 from datetime import datetime
@@ -14,8 +16,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
-
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CLIENT_CONFIG_PATH
+from wb.mqtt_alice.common.constants import (
+    CAP_COLOR_SETTING,
+    CAP_MODE,
+    CLIENT_CONFIG_PATH,
+)
 from wb.mqtt_alice.common.fetch_url import fetch_url
 from wb.mqtt_alice.common.models import (
     Capability,
@@ -50,20 +55,16 @@ SHORT_SN_PATH = Path("/var/lib/wirenboard/short_sn.conf")
 BOARD_REVISION_PATH = Path("/proc/device-tree/wirenboard/board-revision")
 BOARD_MODEL_PATH = Path("/proc/device-tree/model")
 DEVICES_CONFIG_PATH = Path("/etc/wb-mqtt-alice-devices.conf")
-SETTING_PATH = Path("/usr/lib/wb-mqtt-alice/configs/wb-mqtt-alice-webui.conf")
+SETTING_PATH = Path("/usr/share/wb-mqtt-alice/wb-mqtt-alice-webui.conf")
 CLIENT_SERVICE_NAME = "wb-mqtt-alice-client"
 DEFAULT_LANGUAGE = "en"
-DEFAULT_CONFIG = {
-    "rooms": {"without_rooms": {"name": "Без комнаты", "devices": []}},
-    "devices": {},
-}
 
 # Global variables (will be initialized in init_globals())
 controller_sn = None
 controller_version = None
 key_id = None
-config = None
 server_address = None
+setting = None
 translations = None
 
 
@@ -71,12 +72,11 @@ def init_globals():
     """Initialize global variables"""
 
     try:
-        global controller_sn, controller_version, key_id, config, server_address, setting, translations
+        global controller_sn, controller_version, key_id, server_address, setting, translations
 
         controller_sn = get_controller_sn()
         controller_version = get_board_revision()
         key_id = get_key_id(controller_version)
-        config = load_config()
 
         server_cfg = load_server_config()
         server_address = server_cfg.get("server_address")
@@ -111,13 +111,10 @@ def load_config() -> Config:
 
     logger.debug("Reading configuration file...")
     try:
-        config = Config(**json.loads(DEVICES_CONFIG_PATH.read_text(encoding="utf-8")))
-        return config
+        return Config(**json.loads(DEVICES_CONFIG_PATH.read_text(encoding="utf-8")))
     except Exception as e:
-        config = Config(**DEFAULT_CONFIG)
-        save_devices_config(config)
         logger.error("Error reading configuration file: %r", e)
-        return config
+        raise
 
 
 def load_client_config() -> ClientConfig:
@@ -125,44 +122,24 @@ def load_client_config() -> ClientConfig:
     logger.debug("Reading client configuration file...")
 
     config_path = Path(CLIENT_CONFIG_PATH)
-    # File doesn't exist — create default
-    if not config_path.exists():
-        logger.info("Client config not found, creating default...")
-        default_client_config = ClientConfig(client_enabled=False)
-        save_client_config(default_client_config)
-        return default_client_config
-
-    # File exists — try to load
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
-        loaded_client_config = ClientConfig(**data)
-        return loaded_client_config
-    except (json.JSONDecodeError, ValidationError) as e:
-        # Invalid JSON or schema — recreate with default
-        logger.warning("Client config is invalid (%s: %r), recreating with defaults...", type(e).__name__, e)
-        default_client_config = ClientConfig(client_enabled=False)
-        save_client_config(default_client_config)
-        return default_client_config
+        return ClientConfig(**data)
     except Exception as e:
-        # Unexpected error (permissions, etc) — reraise
         logger.error("Failed to load client config: %r", e)
         raise
 
 
-def save_client_config(client_config: ClientConfig) -> None:
-    """Save client configuration to file (atomic write)"""
-    logger.info("Saving client configuration file...")
-
-    config_path = Path(CLIENT_CONFIG_PATH)
+def save_config(config_path: Path, config_data: dict) -> None:
+    """
+    Atomically save a JSON configuration while preserving its mode.
+    """
     tmp_path = None
     try:
-        # Ensure parent directory exists
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        mode = config_path.stat().st_mode & 0o777 if config_path.exists() else 0o644
+        content = json.dumps(config_data, ensure_ascii=False, indent=2)
 
-        # Serialize and validate
-        content = json.dumps(client_config.dict(), ensure_ascii=False, indent=2)
-
-        # Atomic write: write to temp file, then rename
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -172,30 +149,31 @@ def save_client_config(client_config: ClientConfig) -> None:
             suffix=".json",
         ) as tmp_file:
             tmp_file.write(content)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
             tmp_path = Path(tmp_file.name)
 
-        # Atomic rename (overwrites target on POSIX)
+        tmp_path.chmod(mode)
         tmp_path.replace(config_path)
-        logger.debug("Client config saved successfully")
-
     except Exception as e:
-        logger.error("Error saving client configuration file: %r", e)
-        # Clean up temp file if exists
+        logger.error("Error saving configuration file %r: %r", config_path, e)
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
         raise
 
 
+def save_client_config(client_config: ClientConfig) -> None:
+    """
+    Save client configuration to file.
+    """
+    logger.info("Saving client configuration file...")
+    save_config(Path(CLIENT_CONFIG_PATH), client_config.dict())
+
+
 def save_devices_config(config: Config) -> None:
     """Save yandex devices configuration to file"""
     logger.debug("Saving yandex devices configuration file...")
-    try:
-        DEVICES_CONFIG_PATH.write_text(
-            json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except Exception as e:
-        logger.error("Error saving yandex devices configuration file: %r", e)
-        raise
+    save_config(DEVICES_CONFIG_PATH, config.dict())
 
 
 def finalize_config_change(config: Config, *, force_client_reload: bool = False) -> None:
@@ -672,12 +650,7 @@ async def language_middleware(request: Request, call_next):
 async def get_all_rooms_and_devices():
     """Get all the rooms and devices"""
 
-    config = load_config()
-
-    # Don't force client reload because this doesn't change devices
-    finalize_config_change(config, force_client_reload=False)
-
-    return config
+    return load_config()
 
 
 @app.get(
@@ -1012,12 +985,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def startup_event():
     """Application startup tasks"""
     init_globals()
-    config = load_config()
-
-    finalize_config_change(config, force_client_reload=False)
-
-    await restore_client_status_if_needed(config)
+    try:
+        config = load_config()
+        await restore_client_status_if_needed(config)
+    except (OSError, json.JSONDecodeError, ValidationError, TypeError, ValueError) as e:
+        logger.error("User configuration is unavailable; configurator remains active: %s", e)
 
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8011, log_config=None)
+    sys.exit(7)

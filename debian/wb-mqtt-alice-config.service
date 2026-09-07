@@ -12,6 +12,8 @@ Type=simple
 ExecStart=/usr/bin/python3 -m wb.mqtt_alice.config.main
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=2 6
+SuccessExitStatus=7
 TimeoutStopSec=10
 
 # This service starts automatically upon system startup
