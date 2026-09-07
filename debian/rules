@@ -12,6 +12,11 @@ override_dh_auto_install:
 	dh_auto_install
 	dh_install --fail-missing
 
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	python3 -m pytest
+endif
+
 override_dh_installsystemd:
 	dh_installsystemd --name=wb-mqtt-alice-client
 	dh_installsystemd --name=wb-mqtt-alice-config
