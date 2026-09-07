@@ -4,13 +4,16 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
+from typing import Generator
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -44,6 +47,21 @@ app = FastAPI(
     title="Alice Integration API",
     version="1.0.0",
 )
+
+
+class AliceUvicornServer(uvicorn.Server):
+    """
+    Keep graceful signals from being re-raised after Uvicorn shuts down.
+
+    Uvicorn 0.32 re-raises a captured signal so shell processes retain the
+    signal status. The service contract instead requires a normal exit with
+    status 7, which is returned by the module entry point below.
+    """
+
+    @contextmanager
+    def capture_signals(self) -> Generator[None, None, None]:
+        yield
+
 
 # Setting up the logger
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
@@ -992,6 +1010,16 @@ async def startup_event():
         logger.error("User configuration is unavailable; configurator remains active: %s", e)
 
 
+def run() -> int:
+    """
+    Run the configurator and report a graceful stop with code 7.
+    """
+    server = AliceUvicornServer(uvicorn.Config(app, host="127.0.0.1", port=8011, log_config=None))
+    signal.signal(signal.SIGINT, server.handle_exit)
+    signal.signal(signal.SIGTERM, server.handle_exit)
+    server.run()
+    return 7
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8011, log_config=None)
-    sys.exit(7)
+    sys.exit(run())
