@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.13.5) stable; urgency=medium
+
+  * Run the pytest suite and doctests during the deb build
+  * Fix the docstring examples in device_registry.py
+
+ -- Valerii Trofimov <valeriy.trofimov@wirenboard.com>  Tue, 08 Sep 2026 18:46:40 +0300
+
 wb-mqtt-alice (0.13.4) stable; urgency=medium
 
   * Fix curl dependency (OpenSSL ENGINE support is broken in curl >= 8.14.0 and < 8.15.0)
