@@ -111,9 +111,11 @@ def is_event_single_topic(items: Iterable[Dict[Any, Any]]) -> bool:
         In the first case the function returns True, in the second case - False.
 
     Example:
-        >>> is_event_single_topic([{"instance": "open"}, {"instance": "open"}])
+        >>> is_event_single_topic([{"instance": "open", "value": "value.opened"},
+        ...                        {"instance": "motion", "value": "value.detected"}])
         True
-        >>> is_event_single_topic([{"instance": "open"}, {"instance": "motion"}])
+        >>> is_event_single_topic([{"instance": "open", "value": "value.opened"},
+        ...                        {"instance": "open", "value": "value.closed"}])
         False
     """
     # Group by instance
@@ -1163,12 +1165,12 @@ class DeviceRegistry:
                 value (e.g. "opened"); for non-event properties, None.
 
         Example:
-            >>> _extract_instance_with_value({"type": "devices.properties.event",
-                            "parameters": {"instance": "open", "value": "value.opened"}})
-            ("open", "opened")
-            >>> _extract_instance_with_value({"type": "devices.properties.float",
-                            "parameters": {"instance": "temperature"}})
-            ("temperature", "")
+            >>> DeviceRegistry._extract_instance_with_value(None, {"type": "devices.properties.event",
+            ...     "parameters": {"instance": "open", "value": "value.opened"}})
+            ('open', 'opened')
+            >>> DeviceRegistry._extract_instance_with_value(None, {"type": "devices.properties.float",
+            ...     "parameters": {"instance": "temperature"}})
+            ('temperature', None)
         """
         prop_type = prop["type"]
         instance = prop.get("parameters", {}).get("instance")
