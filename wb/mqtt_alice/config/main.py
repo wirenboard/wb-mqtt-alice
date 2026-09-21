@@ -726,7 +726,7 @@ async def get_all_rooms_and_devices():
 )
 async def get_link_status(request: Request):
     """Return pure controller link status without side effects."""
-    return fetch_server_link_status(get_language(request))
+    return await asyncio.to_thread(fetch_server_link_status, get_language(request))
 
 
 @app.post(
@@ -736,7 +736,7 @@ async def get_link_status(request: Request):
 )
 async def create_link(request: Request):
     """Create a controller registration link for Home UI."""
-    return create_controller_link(get_language(request))
+    return await asyncio.to_thread(create_controller_link, get_language(request))
 
 
 @app.get("/integrations/alice/available", status_code=HTTPStatus.OK)
@@ -962,7 +962,8 @@ async def unlink_controller(request: Request):
     key_id = get_key_id(controller_version)
 
     try:
-        response = fetch_url(
+        response = await asyncio.to_thread(
+            fetch_url,
             url=f"https://{server_address}/api/v1/controller/link",
             method="DELETE",
             data={},
