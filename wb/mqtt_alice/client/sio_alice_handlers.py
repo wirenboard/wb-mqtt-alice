@@ -238,10 +238,17 @@ class SioAliceHandlers:
         request_id = data.get("request_id", "unknown")
         devices_response: List[Dict[str, Any]] = []
 
+        if self.registry is None:
+            logger.error("Registry not available for device query")
+            return {"request_id": request_id, "payload": {"devices": []}}
+
         for dev in data.get("devices", []):
             device_id = dev.get("id")
             logger.debug("Try getting state for device: %r", device_id)
-            devices_response.append(await self.registry.get_device_current_state(device_id))
+            try:
+                devices_response.append(await self.registry.get_device_current_state(device_id))
+            except Exception:
+                logger.exception("Failed to read state of device %r", device_id)
 
         query_response = {
             "request_id": request_id,
@@ -275,8 +282,16 @@ class SioAliceHandlers:
         devices_in: List[Dict[str, Any]] = data.get("payload", {}).get("devices", [])
         devices_info: List[Dict[str, Any]] = []
 
+        if self.registry is None:
+            logger.error("Registry not available for device action")
+            return {"request_id": request_id, "payload": {"devices": []}}
+
         for device in devices_in:
-            result = await self._handle_single_device_action(device)
+            try:
+                result = await self._handle_single_device_action(device)
+            except Exception:
+                logger.exception("Failed to handle action block for device %r", device.get("id"))
+                continue
             if result:
                 devices_info.append(result)
 
