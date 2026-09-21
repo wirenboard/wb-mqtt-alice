@@ -657,6 +657,13 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                 detail=get_translation("empty_mqtt", language),
             )
 
+        # "parameters": null is valid JSON, but the client indexes every capability by instance
+        if not _has_instance(capability.parameters):
+            raise HTTPException(
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                detail=get_translation("invalid_instance", language),
+            )
+
         # Validate only specific "instance" whithh user can setup from frontend
         # Other structure frontend MUST send correctly
         if capability.type == CAP_COLOR_SETTING:
@@ -685,6 +692,14 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                     )
 
 
+def _has_instance(parameters: Optional[dict]) -> bool:
+    """Check that parameters carry a non-empty 'instance'"""
+    if not isinstance(parameters, dict):
+        return False
+    instance = parameters.get("instance")
+    return isinstance(instance, str) and bool(instance.strip())
+
+
 def validate_properties(properties: list[Property], language: str) -> None:
     """Validate and prepare device properties"""
     for property in properties:
@@ -693,6 +708,21 @@ def validate_properties(properties: list[Property], language: str) -> None:
                 status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 detail=get_translation("empty_mqtt", language),
             )
+
+        if not _has_instance(property.parameters):
+            raise HTTPException(
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                detail=get_translation("invalid_instance", language),
+            )
+
+        # Event properties are published per value, so the value must be there
+        if property.type == PROP_EVENT:
+            event_value = (property.parameters or {}).get("value")
+            if not isinstance(event_value, str) or not event_value.strip():
+                raise HTTPException(
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    detail=get_translation("invalid_event_value", language),
+                )
 
 
 @app.middleware("http")
@@ -934,8 +964,22 @@ async def enable_integration(request: Request):
     language = get_language(request)
     client_config = load_client_config()
 
-    request_data = await request.json()
-    requested_status = request_data.get("enabled", False)
+    try:
+        request_data = await request.json()
+    except Exception as e:
+        logger.warning("Malformed body for enable_integration: %r", e)
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=get_translation("invalid_request_body", language),
+        ) from e
+
+    requested_status = request_data.get("enabled") if isinstance(request_data, dict) else None
+    # pydantic v1 does not validate on assignment, so the type is checked here
+    if not isinstance(requested_status, bool):
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=get_translation("invalid_request_body", language),
+        )
 
     client_config.client_enabled = requested_status
     save_client_config(client_config)
