@@ -3,19 +3,26 @@ import hashlib
 import json
 import logging
 import re
+import stat
 import subprocess
 import tempfile
 import uuid
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CLIENT_CONFIG_PATH
+from wb.mqtt_alice.common.constants import (
+    CAP_COLOR_SETTING,
+    CAP_MODE,
+    CLIENT_CONFIG_PATH,
+    PROP_EVENT,
+)
 from wb.mqtt_alice.common.fetch_url import fetch_url
 from wb.mqtt_alice.common.models import (
     Capability,
@@ -110,14 +117,20 @@ def load_config() -> Config:
     """Load configurations from file"""
 
     logger.debug("Reading configuration file...")
-    try:
-        config = Config(**json.loads(DEVICES_CONFIG_PATH.read_text(encoding="utf-8")))
-        return config
-    except Exception as e:
+
+    # File doesn't exist — create default
+    if not DEVICES_CONFIG_PATH.exists():
+        logger.info("Devices config not found, creating default...")
         config = Config(**DEFAULT_CONFIG)
         save_devices_config(config)
-        logger.error("Error reading configuration file: %r", e)
         return config
+
+    try:
+        return Config(**json.loads(DEVICES_CONFIG_PATH.read_text(encoding="utf-8")))
+    except Exception as e:
+        # Never write the default back here: a read error would wipe the device map
+        logger.error("Error reading configuration file: %r", e)
+        raise
 
 
 def load_client_config() -> ClientConfig:
@@ -187,14 +200,40 @@ def save_client_config(client_config: ClientConfig) -> None:
 
 
 def save_devices_config(config: Config) -> None:
-    """Save yandex devices configuration to file"""
+    """Save yandex devices configuration to file (atomic write)"""
     logger.debug("Saving yandex devices configuration file...")
+
+    tmp_path = None
     try:
-        DEVICES_CONFIG_PATH.write_text(
-            json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        DEVICES_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+        content = json.dumps(config.dict(), ensure_ascii=False, indent=2)
+
+        # Atomic write: write to temp file, then rename
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=DEVICES_CONFIG_PATH.parent,
+            delete=False,
+            prefix=".tmp_devices_",
+            suffix=".json",
+        ) as tmp_file:
+            tmp_file.write(content)
+            tmp_path = Path(tmp_file.name)
+
+        # Keep the packaged conffile mode: NamedTemporaryFile would leave it 0600
+        if DEVICES_CONFIG_PATH.exists():
+            tmp_path.chmod(stat.S_IMODE(DEVICES_CONFIG_PATH.stat().st_mode))
+
+        # Atomic rename (overwrites target on POSIX)
+        tmp_path.replace(DEVICES_CONFIG_PATH)
+        logger.debug("Devices config saved successfully")
+
     except Exception as e:
         logger.error("Error saving yandex devices configuration file: %r", e)
+        # Clean up temp file if exists
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
         raise
 
 
