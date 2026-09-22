@@ -219,11 +219,12 @@ def save_devices_config(config: Config) -> None:
             prefix=".tmp_devices_",
             suffix=".json",
         ) as tmp_file:
+            # Remember the path before writing: a failed write must still be cleaned up
+            tmp_path = Path(tmp_file.name)
             tmp_file.write(content)
             # Without fsync the rename can reach the disk before the data does
             tmp_file.flush()
             os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
 
         # Keep the packaged conffile mode: NamedTemporaryFile would leave it 0600
         if DEVICES_CONFIG_PATH.exists():
