@@ -4,6 +4,8 @@ wb-mqtt-alice (0.13.6) stable; urgency=medium
   * Write the devices config atomically, keep it on read errors
   * Reject capabilities and properties without instance or event value
   * Skip malformed devices instead of dropping the whole registry
+  * Read MQTT state on a cancellable client, no more stranded threads
+  * Answer device queries within a deadline Yandex still waits for
 
  -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 22 Sep 2026 14:25:41 +0300
 
