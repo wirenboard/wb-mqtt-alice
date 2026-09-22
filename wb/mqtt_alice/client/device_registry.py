@@ -224,6 +224,15 @@ def extract_event_value(value: Any) -> str:
     return value
 
 
+def _close_read_client(client: mqtt_client.Client, topic: str) -> None:
+    """Disconnect the read client and join its network thread"""
+    try:
+        client.disconnect()
+        client.loop_stop()
+    except Exception:
+        logger.debug("Cleanup after reading %r failed", topic, exc_info=True)
+
+
 async def read_topic_once(
     topic: str,
     *,
@@ -282,13 +291,9 @@ async def read_topic_once(
         logger.warning("Failed to read topic %r: %r", topic, e)
         return None
     finally:
-        # Both calls are needed: disconnect() wakes the network thread up,
-        # loop_stop() joins it - otherwise every read leaks one thread
-        try:
-            client.disconnect()
-            client.loop_stop()
-        except Exception:
-            logger.debug("Cleanup after reading %r failed", topic, exc_info=True)
+        # loop_stop() joins the network thread, and that thread sits in a reconnect
+        # wait while the broker is down - joining it here would stall the event loop
+        loop.run_in_executor(None, _close_read_client, client, topic)
 
     if res is None:
         logger.debug("Current topic %r state: None", topic)
@@ -366,13 +371,7 @@ async def read_retained_value(
         logger.warning("Failed to read current value of %r: %r", topic, e)
         return None
     finally:
-        # Both calls are needed: disconnect() wakes the network thread up,
-        # loop_stop() joins it - otherwise every command leaks one thread
-        try:
-            client.disconnect()
-            client.loop_stop()
-        except Exception:
-            logger.debug("Cleanup after reading %r failed", topic, exc_info=True)
+        loop.run_in_executor(None, _close_read_client, client, topic)
 
 
 class DeviceRegistry:
