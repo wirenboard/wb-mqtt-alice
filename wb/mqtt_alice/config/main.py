@@ -163,60 +163,18 @@ def load_client_config() -> ClientConfig:
         raise
 
 
-def save_client_config(client_config: ClientConfig) -> None:
-    """Save client configuration to file (atomic write)"""
-    logger.info("Saving client configuration file...")
-
-    config_path = Path(CLIENT_CONFIG_PATH)
+def _atomic_write(path: Path, content: str, *, prefix: str) -> None:
+    """Write text to path atomically, keeping the mode of an existing file"""
     tmp_path = None
     try:
-        # Ensure parent directory exists
-        config_path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Serialize and validate
-        content = json.dumps(client_config.dict(), ensure_ascii=False, indent=2)
-
-        # Atomic write: write to temp file, then rename
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=config_path.parent,
+            dir=path.parent,
             delete=False,
-            prefix=".tmp_config_",
-            suffix=".json",
-        ) as tmp_file:
-            tmp_file.write(content)
-            tmp_path = Path(tmp_file.name)
-
-        # Atomic rename (overwrites target on POSIX)
-        tmp_path.replace(config_path)
-        logger.debug("Client config saved successfully")
-
-    except Exception as e:
-        logger.error("Error saving client configuration file: %r", e)
-        # Clean up temp file if exists
-        if tmp_path and tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-        raise
-
-
-def save_devices_config(config: Config) -> None:
-    """Save yandex devices configuration to file (atomic write)"""
-    logger.debug("Saving yandex devices configuration file...")
-
-    tmp_path = None
-    try:
-        DEVICES_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-        content = json.dumps(config.dict(), ensure_ascii=False, indent=2)
-
-        # Atomic write: write to temp file, then rename
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=DEVICES_CONFIG_PATH.parent,
-            delete=False,
-            prefix=".tmp_devices_",
+            prefix=prefix,
             suffix=".json",
         ) as tmp_file:
             # Remember the path before writing: a failed write must still be cleaned up
@@ -226,27 +184,49 @@ def save_devices_config(config: Config) -> None:
             tmp_file.flush()
             os.fsync(tmp_file.fileno())
 
-        # Keep the packaged conffile mode: NamedTemporaryFile would leave it 0600
-        if DEVICES_CONFIG_PATH.exists():
-            tmp_path.chmod(stat.S_IMODE(DEVICES_CONFIG_PATH.stat().st_mode))
+        # Keep the mode of the packaged file: NamedTemporaryFile would leave it 0600
+        if path.exists():
+            tmp_path.chmod(stat.S_IMODE(path.stat().st_mode))
 
         # Atomic rename (overwrites target on POSIX)
-        tmp_path.replace(DEVICES_CONFIG_PATH)
+        tmp_path.replace(path)
 
         # The rename itself has to be flushed as well
-        dir_fd = os.open(DEVICES_CONFIG_PATH.parent, os.O_RDONLY)
+        dir_fd = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(dir_fd)
         finally:
             os.close(dir_fd)
 
-        logger.debug("Devices config saved successfully")
-
-    except Exception as e:
-        logger.error("Error saving yandex devices configuration file: %r", e)
-        # Clean up temp file if exists
+    except Exception:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def save_client_config(client_config: ClientConfig) -> None:
+    """Save client configuration to file (atomic write)"""
+    logger.info("Saving client configuration file...")
+
+    try:
+        content = json.dumps(client_config.dict(), ensure_ascii=False, indent=2)
+        _atomic_write(Path(CLIENT_CONFIG_PATH), content, prefix=".tmp_config_")
+        logger.debug("Client config saved successfully")
+    except Exception as e:
+        logger.error("Error saving client configuration file: %r", e)
+        raise
+
+
+def save_devices_config(config: Config) -> None:
+    """Save yandex devices configuration to file (atomic write)"""
+    logger.debug("Saving yandex devices configuration file...")
+
+    try:
+        content = json.dumps(config.dict(), ensure_ascii=False, indent=2)
+        _atomic_write(DEVICES_CONFIG_PATH, content, prefix=".tmp_devices_")
+        logger.debug("Devices config saved successfully")
+    except Exception as e:
+        logger.error("Error saving yandex devices configuration file: %r", e)
         raise
 
 
