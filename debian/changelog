@@ -1,3 +1,12 @@
+wb-mqtt-alice (0.13.6) stable; urgency=medium
+
+  * Add timeouts to curl requests and run them off the event loop
+  * Write the devices config atomically, keep it on read errors
+  * Reject capabilities and properties without instance or event value
+  * Skip malformed devices instead of dropping the whole registry
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 22 Sep 2026 14:25:41 +0300
+
 wb-mqtt-alice (0.13.5) stable; urgency=medium
 
   * Run the pytest suite and doctests during the deb build
