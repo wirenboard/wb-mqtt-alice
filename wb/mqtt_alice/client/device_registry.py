@@ -15,7 +15,6 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set
 from uuid import uuid4
 
 import paho.mqtt.client as mqtt_client
-import paho.mqtt.subscribe as subscribe
 
 from wb.mqtt_alice.common.constants import (
     CAP_COLOR_SETTING,
@@ -232,7 +231,7 @@ async def read_topic_once(
     unit_or_event_value: Optional[str] = None,
 ) -> Optional[Any]:
     """
-    Reads a single retained MQTT message in a separate thread
+    Reads a single MQTT message on its own client
     Returns paho.mqtt.client.MQTTMessage or None on timeout
     """
     logger.debug(
@@ -243,28 +242,64 @@ async def read_topic_once(
         timeout,
     )
 
+    loop = asyncio.get_running_loop()
+    result: "asyncio.Future[Optional[mqtt_client.MQTTMessage]]" = loop.create_future()
+    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}")
+
+    def _resolve(message: Optional[mqtt_client.MQTTMessage]) -> None:
+        if not result.done():
+            result.set_result(message)
+
+    def _on_connect(cli: mqtt_client.Client, _userdata: Any, _flags: Dict[str, Any], rc: int) -> None:
+        if rc != 0:
+            logger.warning("Read of %r failed, broker refused connection with code %r", topic, rc)
+            loop.call_soon_threadsafe(_resolve, None)
+            return None
+        cli.subscribe(topic, qos=0)
+
+    def _on_message(_cli: mqtt_client.Client, _userdata: Any, message: mqtt_client.MQTTMessage) -> None:
+        # retain=False means "wait for a live publication"
+        if not retain and message.retain:
+            return
+        loop.call_soon_threadsafe(_resolve, message)
+
+    client.on_connect = _on_connect
+    client.on_message = _on_message
+
     try:
-        res = await asyncio.wait_for(
-            asyncio.to_thread(subscribe.simple, topic, hostname=host, retained=retain, msg_count=1),
-            timeout=timeout,
-        )
-        if res:
-            payload = res.payload.decode().strip()
-            if is_property_event(prop_type):
-                res.payload = convert_mqtt_event_value(
-                    event_type=instance,
-                    event_type_value=unit_or_event_value,
-                    value=res.payload.decode().strip(),
-                ).encode()
-
-            logger.debug("Current topic %r state payload: %r", topic, payload)
-        else:
-            logger.debug("Current topic %r state: None", topic)
-
-        return res
+        # connect_async() never blocks, so no worker thread can be stranded here
+        client.connect_async(host)
+        client.loop_start()
+        res = await asyncio.wait_for(result, timeout)
     except asyncio.TimeoutError:
         logger.warning("Read topic timeout waiting %r", topic)
         return None
+    except Exception as e:
+        logger.warning("Failed to read topic %r: %r", topic, e)
+        return None
+    finally:
+        # Both calls are needed: disconnect() wakes the network thread up,
+        # loop_stop() joins it - otherwise every read leaks one thread
+        try:
+            client.disconnect()
+            client.loop_stop()
+        except Exception:
+            logger.debug("Cleanup after reading %r failed", topic, exc_info=True)
+
+    if res is None:
+        logger.debug("Current topic %r state: None", topic)
+        return None
+
+    payload = res.payload.decode().strip()
+    if is_property_event(prop_type):
+        res.payload = convert_mqtt_event_value(
+            event_type=instance,
+            event_type_value=unit_or_event_value,
+            value=payload,
+        ).encode()
+
+    logger.debug("Current topic %r state payload: %r", topic, payload)
+    return res
 
 
 async def read_retained_value(
@@ -275,12 +310,6 @@ async def read_retained_value(
 ) -> Optional[str]:
     """
     Read the current retained payload of a topic, or None if it does not arrive
-
-    Deliberately does not reuse read_topic_once(): that one blocks inside
-    subscribe.simple(), so an expired asyncio.wait_for() abandons the coroutine
-    while the thread behind asyncio.to_thread() keeps waiting for a message that
-    may never come. Here the client is ours, so the timeout path can tear the
-    connection down and let the network thread exit
 
     TODO: this whole helper goes away once DeviceRegistry keeps a state cache -
           see the note in _resolve_relative_value()
