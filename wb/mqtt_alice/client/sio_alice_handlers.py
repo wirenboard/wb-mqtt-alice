@@ -261,6 +261,8 @@ class SioAliceHandlers:
                 )
             except Exception:
                 logger.exception("Failed to read state of device %r", device_id)
+                # Yandex expects an entry per requested device, silence reads as a broken answer
+                devices_response.append({"id": device_id, "error_code": ERR_INTERNAL_ERROR})
 
         query_response = {
             "request_id": request_id,
@@ -303,6 +305,12 @@ class SioAliceHandlers:
                 result = await self._handle_single_device_action(device)
             except Exception:
                 logger.exception("Failed to handle action block for device %r", device.get("id"))
+                devices_info.append(
+                    {
+                        "id": device.get("id", ""),
+                        "action_result": {"status": "ERROR", "error_code": ERR_INTERNAL_ERROR},
+                    }
+                )
                 continue
             if result:
                 devices_info.append(result)
