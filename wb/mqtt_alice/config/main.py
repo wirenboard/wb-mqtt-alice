@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import stat
 import subprocess
@@ -219,6 +220,9 @@ def save_devices_config(config: Config) -> None:
             suffix=".json",
         ) as tmp_file:
             tmp_file.write(content)
+            # Without fsync the rename can reach the disk before the data does
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
             tmp_path = Path(tmp_file.name)
 
         # Keep the packaged conffile mode: NamedTemporaryFile would leave it 0600
@@ -227,6 +231,14 @@ def save_devices_config(config: Config) -> None:
 
         # Atomic rename (overwrites target on POSIX)
         tmp_path.replace(DEVICES_CONFIG_PATH)
+
+        # The rename itself has to be flushed as well
+        dir_fd = os.open(DEVICES_CONFIG_PATH.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+
         logger.debug("Devices config saved successfully")
 
     except Exception as e:
