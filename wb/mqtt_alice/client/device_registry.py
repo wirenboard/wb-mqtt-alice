@@ -9,6 +9,7 @@ Handles device configuration, MQTT-Yandex routing
 import asyncio
 import json
 import logging
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
@@ -47,6 +48,9 @@ logger = logging.getLogger(__name__)
 # How long to wait for the current value of a relative command.
 # Kept short: Yandex is waiting for the response, and the value is retained.
 RELATIVE_READ_TIMEOUT_S = 1.0
+
+# How long to wait for the state of a single control during a query
+STATE_READ_TIMEOUT_S = 1.0
 
 
 class ActionError(Exception):
@@ -1163,7 +1167,9 @@ class DeviceRegistry:
         await self._publish_to_mqtt(cmd_topic, payload)
         logger.debug("Published %r → %r", payload, cmd_topic)
 
-    async def _read_capability_state(self, device_id: str, cap: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _read_capability_state(
+        self, device_id: str, cap: Dict[str, Any], *, timeout: float = STATE_READ_TIMEOUT_S
+    ) -> Optional[Dict[str, Any]]:
         """
         Read capability state from MQTT and convert to Yandex format
         """
@@ -1181,7 +1187,7 @@ class DeviceRegistry:
             return None
 
         try:
-            msg = await read_topic_once(topic, timeout=1)
+            msg = await read_topic_once(topic, timeout=timeout)
             if msg is None:
                 return None  # topic not found
             raw = msg.payload.decode().strip()
@@ -1240,7 +1246,9 @@ class DeviceRegistry:
             unit_or_event_value = extract_event_value(params.get("value"))
         return instance, unit_or_event_value
 
-    async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _read_property_state(
+        self, device_id: str, prop: Dict[str, Any], *, timeout: float = STATE_READ_TIMEOUT_S
+    ) -> Optional[Dict[str, Any]]:
         """
         Asynchronously read the current state of a device property from MQTT and convert it to Yandex Smart Home format
 
@@ -1278,7 +1286,11 @@ class DeviceRegistry:
             return None
         try:
             msg = await read_topic_once(
-                topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value
+                topic,
+                timeout=timeout,
+                prop_type=prop_type,
+                instance=instance,
+                unit_or_event_value=instance_value,
             )
             # TODO (victor.fedorov): Differentiate return values for errors vs events.
             #      Event properties are currently non-retrievable and therefore treated
@@ -1308,13 +1320,19 @@ class DeviceRegistry:
             logger.warning("Failed to read property topic %r: %r", topic, e)
             return None
 
-    async def get_device_current_state(self, device_id: str) -> Dict[str, Any]:
+    async def get_device_current_state(
+        self, device_id: str, *, deadline: Optional[float] = None
+    ) -> Dict[str, Any]:
         """
         Build the device state response for Yandex `/user/devices/{id}/query`
 
         Filter capabilities/properties Yandex may query, then read MQTT state
         for those items. Write-only and event-only devices return an empty
         response (not DEVICE_UNREACHABLE) — they are stateless by design
+
+        Args:
+            device_id: Device to report
+            [deadline]: time.monotonic() value the reads must not run past
         """
         logger.debug("Reading current state for device: %r", device_id)
 
@@ -1349,18 +1367,35 @@ class DeviceRegistry:
             )
             return {"id": device_id}
 
+        def read_timeout() -> Optional[float]:
+            """Budget for the next read, None once the deadline has passed"""
+            if deadline is None:
+                return STATE_READ_TIMEOUT_S
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            return min(STATE_READ_TIMEOUT_S, left)
+
         capabilities_output: List[Dict[str, Any]] = []
         for cap in queryable_capabilities:
+            timeout = read_timeout()
+            if timeout is None:
+                logger.warning("Query deadline reached, %r reported without the remaining state", device_id)
+                break
             logger.debug("Reading capability state: %r", cap)
-            cap_state = await self._read_capability_state(device_id, cap)
+            cap_state = await self._read_capability_state(device_id, cap, timeout=timeout)
             logger.debug("Capability result: %r", cap_state)
             if cap_state:
                 capabilities_output.append(cap_state)
 
         properties_output: List[Dict[str, Any]] = []
         for prop in queryable_properties:
+            timeout = read_timeout()
+            if timeout is None:
+                logger.warning("Query deadline reached, %r reported without the remaining state", device_id)
+                break
             logger.debug("Reading property state: %r", prop)
-            prop_state = await self._read_property_state(device_id, prop)
+            prop_state = await self._read_property_state(device_id, prop, timeout=timeout)
             if prop_state:
                 properties_output.append(prop_state)
 

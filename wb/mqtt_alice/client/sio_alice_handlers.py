@@ -10,9 +10,10 @@ and connection lifecycle events.
 
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
-from wb.mqtt_alice.common.constants import ERR_INTERNAL_ERROR
+from wb.mqtt_alice.common.constants import ERR_DEVICE_UNREACHABLE, ERR_INTERNAL_ERROR, QUERY_DEADLINE_S
 
 from .device_registry import ActionError
 
@@ -242,11 +243,22 @@ class SioAliceHandlers:
             logger.error("Registry not available for device query")
             return {"request_id": request_id, "payload": {"devices": []}}
 
+        # Yandex drops the request if the answer is late, so the whole loop is
+        # capped instead of each read on its own
+        deadline = time.monotonic() + QUERY_DEADLINE_S
+
         for dev in data.get("devices", []):
             device_id = dev.get("id")
+            if time.monotonic() >= deadline:
+                logger.warning("Query deadline reached, reporting %r as unreachable", device_id)
+                devices_response.append({"id": device_id, "error_code": ERR_DEVICE_UNREACHABLE})
+                continue
+
             logger.debug("Try getting state for device: %r", device_id)
             try:
-                devices_response.append(await self.registry.get_device_current_state(device_id))
+                devices_response.append(
+                    await self.registry.get_device_current_state(device_id, deadline=deadline)
+                )
             except Exception:
                 logger.exception("Failed to read state of device %r", device_id)
 
