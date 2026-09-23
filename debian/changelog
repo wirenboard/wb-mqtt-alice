@@ -1,3 +1,15 @@
+wb-mqtt-alice (0.14.0) stable; urgency=medium
+
+  * Client: exit with 6 when a config is missing or broken, with 7 when the integration is disabled
+  * Client: exit with 2 when the MQTT broker rejects the login
+  * Client: wait for an unavailable MQTT broker instead of exiting
+  * Client: restore the MQTT subscriptions after a reconnect
+  * Client: stop on SIGTERM/SIGINT while the server connection is still being retried
+  * Client unit: do not restart after exit 2 or 6, treat exit 7 as success
+  * Package data (server, webui and event-rate files) moved to /usr/share/wb-mqtt-alice
+
+ -- Ekaterina Volkova <ekaterina.volkova@wirenboard.com>  Thu, 17 Sep 2026 16:41:13 +0000
+
 wb-mqtt-alice (0.13.5) stable; urgency=medium
 
   * Run the pytest suite and doctests during the deb build
