@@ -51,10 +51,15 @@ class SioAliceHandlers:
         self._mqtt_client = mqtt_client
         self._time_rate_sender = time_rate_sender
 
-    def _subscribe_registry_topics(self) -> None:
+    def subscribe_registry_topics(self) -> None:
         """
         Subscribe MQTT client to all topics from registry
-        Called only after full initialization (Socket.IO connected, etc.)
+
+        Two callers: `SioAliceHandlers.on_connect` once the Socket.IO connection is established (on
+        the event loop) and `main.mqtt_on_connect` on every MQTT (re)connect, on paho's network
+        thread, guarded by `time_rate_sender.running` so that a reconnect restores the subscriptions
+        only while the state sender is running. The body must therefore stay safe to run off the
+        event loop.
 
         NOTE: This need only for notify yandex API,
             but not needed for commands from Yandex
@@ -118,7 +123,7 @@ class SioAliceHandlers:
                 logger.exception("Failed to start Alice state sender after connect: %r", e)
 
         # Subscribe to all topics from registry (if MQTT client is available)
-        self._subscribe_registry_topics()
+        self.subscribe_registry_topics()
 
     async def on_disconnect(self) -> None:
         """

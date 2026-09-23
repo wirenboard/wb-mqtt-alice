@@ -57,6 +57,15 @@ READ_TOPIC_TIMEOUT = 1.0
 RECONNECT_DELAY_INITIAL = 2
 RECONNECT_DELAY_MAX = 60
 
+# Exit codes from the WB service guideline; 2 and 6 are RestartPreventExitStatus in the unit,
+# 7 is a SuccessExitStatus
+EXIT_SUCCESS = 0
+EXIT_INVALIDARGUMENT = 2
+EXIT_NOTCONFIGURED = 6
+EXIT_NOTRUNNING = 7
+# CONNACK codes for a rejected login: bad user name or password, not authorized
+MQTT_AUTH_ERRORS = (4, 5)
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s", force=True)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
@@ -76,7 +85,7 @@ except PackageNotFoundError:
     logger.warning("python-engineio is not installed.")
 
 
-class AppContext:
+class AppContext:  # pylint: disable=too-many-instance-attributes  # the process-wide state, one place
     def __init__(self):
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         """
@@ -93,6 +102,8 @@ class AppContext:
         """
 
         self.stop_event: Optional[asyncio.Event] = None
+        self.mqtt_connected: Optional[asyncio.Event] = None
+        self.exit_code: int = EXIT_SUCCESS
         self.sio_manager: Optional[SioConnectionManager] = None
         self.sio_handlers: Optional[SioAliceHandlers] = None
         self.registry: Optional[DeviceRegistry] = None
@@ -185,11 +196,23 @@ async def publish_to_mqtt(topic: str, payload: str) -> None:
 
 
 def mqtt_on_connect(client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
+    """
+    Runs on paho's thread: hands the outcome to the main loop
+    """
     if rc != 0:
         logger.error("MQTT Connection failed with code: %r", rc)
+        if rc in MQTT_AUTH_ERRORS and ctx.main_loop is not None:
+            # a rejected login is a configuration problem paho would retry forever: exit with 2
+            ctx.exit_code = EXIT_INVALIDARGUMENT
+            ctx.main_loop.call_soon_threadsafe(ctx.stop_event.set)
         return None
 
-    logger.info("MQTT connected - no subscriptions on this moment")
+    logger.info("MQTT connected")
+    if ctx.main_loop is not None:
+        ctx.main_loop.call_soon_threadsafe(ctx.mqtt_connected.set)
+    # a reconnect drops the subscriptions; while the state sender runs they are needed again
+    if ctx.sio_handlers is not None and ctx.time_rate_sender is not None and ctx.time_rate_sender.running:
+        ctx.sio_handlers.subscribe_registry_topics()
 
 
 def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
@@ -551,6 +574,16 @@ async def wait_for_nginx_ready(timeout: int = 15) -> bool:
     return False
 
 
+async def wait_for_mqtt_connection() -> None:
+    """
+    Block until the first CONNACK or a stop request; paho retries an unavailable broker meanwhile
+    """
+    waits = [asyncio.create_task(ctx.mqtt_connected.wait()), asyncio.create_task(ctx.stop_event.wait())]
+    _, pending = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+
+
 async def graceful_shutdown() -> None:
     """
     Perform graceful shutdown of Socket.IO client with proper server notification
@@ -601,10 +634,11 @@ async def graceful_shutdown() -> None:
     logger.info("Graceful shutdown completed")
 
 
-async def main() -> int:
+async def main() -> int:  # pylint: disable=too-many-return-statements
 
     # Early register signal handlers for graceful shutdown
     ctx.stop_event = asyncio.Event()  # Keeps the loop alive until a signal arrives
+    ctx.mqtt_connected = asyncio.Event()
     ctx.main_loop = asyncio.get_running_loop()
     ctx.main_loop.add_signal_handler(signal.SIGINT, _log_and_stop, signal.SIGINT)
     ctx.main_loop.add_signal_handler(signal.SIGTERM, _log_and_stop, signal.SIGTERM)
@@ -612,7 +646,7 @@ async def main() -> int:
     server_cfg = read_config(SERVER_CONFIG_PATH)
     if not server_cfg:
         logger.error("Cannot proceed without server configuration")
-        return 0  # 0 mean - exit without service restart
+        return EXIT_NOTCONFIGURED
 
     server_address = server_cfg.get("server_address")  # Used by Nginx proxy
     if not server_address:
@@ -620,12 +654,12 @@ async def main() -> int:
             "'server_address' not specified in server config %r",
             SERVER_CONFIG_PATH,
         )
-        return 0  # 0 mean - exit without service restart
+        return EXIT_NOTCONFIGURED
 
     client_cfg = read_config(CLIENT_CONFIG_PATH)
     if not client_cfg:
         logger.error("Cannot proceed without client configuration")
-        return 0  # 0 mean - exit without service restart
+        return EXIT_NOTCONFIGURED
 
     # Apply log level from client config
     log_level_name = str(client_cfg.get("log_level", "INFO")).upper()
@@ -634,7 +668,7 @@ async def main() -> int:
     if not client_cfg.get("client_enabled", False):
         logger.info("Alice integration is DISABLED in configuration")
         logger.info("To enable integration, set 'client_enabled': true in file %r", CLIENT_CONFIG_PATH)
-        return 0  # 0 mean - exit without service restart
+        return EXIT_NOTRUNNING  # nothing to do, a success for the unit
     logger.info("Alice integration is enabled - starting client...")
 
     # NOTE: Initialize core components order is critical:
@@ -658,19 +692,20 @@ async def main() -> int:
         )
         logger.debug("Registry created with %r devices", len(ctx.registry.devices))
     except Exception as e:
-        logger.error("Failed to create registry: %r", e)
-        logger.info("Continuing without device configuration")
-        ctx.registry = None
+        # a broken devices file is a config error (6); the configurator rewrites it on its next read
+        logger.error("Failed to read the devices configuration %r: %r", DEVICE_PATH, e)
+        return EXIT_NOTCONFIGURED
 
-    # Connect to local MQTT broker (assuming Wiren Board default: localhost:1883)
+    # Connect to the local MQTT broker (Wiren Board default: localhost:1883). paho retries an
+    # unavailable broker in its thread; nothing is subscribed before the first CONNACK.
     ctx.mqtt_client = setup_mqtt_client()
-    try:
-        ctx.mqtt_client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
-        ctx.mqtt_client.loop_start()
-        logger.info("Connected to %r MQTT broker", MQTT_HOST)
-    except Exception as e:
-        logger.error("MQTT connect failed: %r", e)
-        return 0  # 0 mean - exit without service restart
+    ctx.mqtt_client.connect_async(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
+    ctx.mqtt_client.loop_start()
+    await wait_for_mqtt_connection()
+    if ctx.stop_event.is_set():
+        await graceful_shutdown()
+        return ctx.exit_code
+    logger.info("Connected to %r MQTT broker", MQTT_HOST)
 
     # Set emit callback for yandex_handlers module
     set_emit_callback(_emit_async)
@@ -678,17 +713,21 @@ async def main() -> int:
     ctx.time_rate_sender = AliceDeviceStateSender(device_registry=ctx.registry)
     logger.info("Connecting Socket.IO client...")
 
-    # Try to connect with infinite attempts
-    await connect_controller(server_address)
-    logger.info("Client initialization continue when connect to server")
+    # Connect in the background: the attempts go on forever while the controller is not linked or
+    # the server is unreachable, and a stop signal must not wait for them (SIGTERM/SIGINT -> 0)
+    connect_task = asyncio.create_task(connect_controller(server_address))
 
     # Wait for shutdown signal
     await ctx.stop_event.wait()
     logger.info("Shutdown signal received")
 
+    # a no-op once connected; otherwise it interrupts the nginx probes, the connect attempt or the
+    # pause before the next one
+    connect_task.cancel()
+    await asyncio.gather(connect_task, return_exceptions=True)
     await graceful_shutdown()
     logger.info("Shutdown complete")
-    return 0  # 0 mean - exit without service restart
+    return ctx.exit_code  # 0 on a signal, 2 when the broker rejected the login meanwhile
 
 
 if __name__ == "__main__":
@@ -696,23 +735,28 @@ if __name__ == "__main__":
 
     try:
         exit_code = asyncio.run(main(), debug=True)
-        if exit_code != 0:
-            logger.warning(
-                "Service 'main()' returned error code %d - exiting with error",
-                exit_code,
-            )
-            sys.exit(exit_code)
+        if exit_code not in (EXIT_SUCCESS, EXIT_NOTRUNNING):
+            logger.warning("Service 'main()' returned error code %d - exiting with error", exit_code)
+        sys.exit(exit_code)
     except KeyboardInterrupt:
         logger.warning("Interrupted by user (Ctrl+C)")
     except SystemExit as e:
-        # One place called when code explicitly uses "sys.exit(code)" anywhere
-        exit_code = e.code if e.code is not None else 0
-        if exit_code == 0:
+        # One place called when code explicitly uses "sys.exit(code)" anywhere. The wording follows
+        # the unit: 2 and 6 are RestartPreventExitStatus, 7 is a SuccessExitStatus, the rest restart
+        exit_code = e.code if e.code is not None else EXIT_SUCCESS
+        if exit_code == EXIT_SUCCESS:
             logger.info("Service exiting normally (code %d)", exit_code)
+        elif exit_code == EXIT_NOTRUNNING:
+            logger.info("Service exiting normally (code %d) - nothing to do", exit_code)
+        elif exit_code in (EXIT_INVALIDARGUMENT, EXIT_NOTCONFIGURED):
+            logger.error(
+                "Service exiting with error (code %d) - the service will not be restarted "
+                "(RestartPreventExitStatus), fix the configuration and restart it",
+                exit_code,
+            )
         else:
             logger.warning("Service exiting with error (code %d) - systemd will restart", exit_code)
-        # Pass SystemExit as-it
-        # This needed for service restarted if stop with error from this code
+        # Pass SystemExit as-is so systemd sees the code and applies the unit's restart policy
         raise
     except Exception as e:
         logger.exception("Unhandled exception: %r", e)
