@@ -1,3 +1,11 @@
+wb-mqtt-alice (0.13.6) stable; urgency=medium
+
+  * Keep the devices config intact on read errors and interrupted writes
+  * Stop hanging on an unreachable cloud and on silent MQTT topics
+  * Reject malformed device configuration instead of breaking on it
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 22 Sep 2026 14:25:41 +0300
+
 wb-mqtt-alice (0.13.5) stable; urgency=medium
 
   * Run the pytest suite and doctests during the deb build

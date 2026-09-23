@@ -2,20 +2,28 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
+import stat
 import subprocess
 import tempfile
 import uuid
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from wb.mqtt_alice.common.constants import CAP_COLOR_SETTING, CAP_MODE, CLIENT_CONFIG_PATH
+from wb.mqtt_alice.common.constants import (
+    CAP_COLOR_SETTING,
+    CAP_MODE,
+    CLIENT_CONFIG_PATH,
+    PROP_EVENT,
+)
 from wb.mqtt_alice.common.fetch_url import fetch_url
 from wb.mqtt_alice.common.models import (
     Capability,
@@ -110,14 +118,20 @@ def load_config() -> Config:
     """Load configurations from file"""
 
     logger.debug("Reading configuration file...")
-    try:
-        config = Config(**json.loads(DEVICES_CONFIG_PATH.read_text(encoding="utf-8")))
-        return config
-    except Exception as e:
+
+    # File doesn't exist — create default
+    if not DEVICES_CONFIG_PATH.exists():
+        logger.info("Devices config not found, creating default...")
         config = Config(**DEFAULT_CONFIG)
         save_devices_config(config)
-        logger.error("Error reading configuration file: %r", e)
         return config
+
+    try:
+        return Config(**json.loads(DEVICES_CONFIG_PATH.read_text(encoding="utf-8")))
+    except Exception as e:
+        # Never write the default back here: a read error would wipe the device map
+        logger.error("Error reading configuration file: %r", e)
+        raise
 
 
 def load_client_config() -> ClientConfig:
@@ -149,50 +163,68 @@ def load_client_config() -> ClientConfig:
         raise
 
 
-def save_client_config(client_config: ClientConfig) -> None:
-    """Save client configuration to file (atomic write)"""
-    logger.info("Saving client configuration file...")
-
-    config_path = Path(CLIENT_CONFIG_PATH)
+def _atomic_write(path: Path, content: str, *, prefix: str) -> None:
+    """Write text to path atomically, keeping the mode of an existing file"""
     tmp_path = None
     try:
-        # Ensure parent directory exists
-        config_path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Serialize and validate
-        content = json.dumps(client_config.dict(), ensure_ascii=False, indent=2)
-
-        # Atomic write: write to temp file, then rename
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            dir=config_path.parent,
+            dir=path.parent,
             delete=False,
-            prefix=".tmp_config_",
+            prefix=prefix,
             suffix=".json",
         ) as tmp_file:
-            tmp_file.write(content)
+            # Remember the path before writing: a failed write must still be cleaned up
             tmp_path = Path(tmp_file.name)
+            tmp_file.write(content)
+            # Without fsync the rename can reach the disk before the data does
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+
+        # Keep the mode of the packaged file: NamedTemporaryFile would leave it 0600
+        if path.exists():
+            tmp_path.chmod(stat.S_IMODE(path.stat().st_mode))
 
         # Atomic rename (overwrites target on POSIX)
-        tmp_path.replace(config_path)
-        logger.debug("Client config saved successfully")
+        tmp_path.replace(path)
 
-    except Exception as e:
-        logger.error("Error saving client configuration file: %r", e)
-        # Clean up temp file if exists
+        # The rename itself has to be flushed as well
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+
+    except Exception:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
         raise
 
 
-def save_devices_config(config: Config) -> None:
-    """Save yandex devices configuration to file"""
-    logger.debug("Saving yandex devices configuration file...")
+def save_client_config(client_config: ClientConfig) -> None:
+    """Save client configuration to file (atomic write)"""
+    logger.info("Saving client configuration file...")
+
     try:
-        DEVICES_CONFIG_PATH.write_text(
-            json.dumps(config.dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        content = json.dumps(client_config.dict(), ensure_ascii=False, indent=2)
+        _atomic_write(Path(CLIENT_CONFIG_PATH), content, prefix=".tmp_config_")
+        logger.debug("Client config saved successfully")
+    except Exception as e:
+        logger.error("Error saving client configuration file: %r", e)
+        raise
+
+
+def save_devices_config(config: Config) -> None:
+    """Save yandex devices configuration to file (atomic write)"""
+    logger.debug("Saving yandex devices configuration file...")
+
+    try:
+        content = json.dumps(config.dict(), ensure_ascii=False, indent=2)
+        _atomic_write(DEVICES_CONFIG_PATH, content, prefix=".tmp_devices_")
+        logger.debug("Devices config saved successfully")
     except Exception as e:
         logger.error("Error saving yandex devices configuration file: %r", e)
         raise
@@ -618,6 +650,13 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                 detail=get_translation("empty_mqtt", language),
             )
 
+        # "parameters": null is valid JSON, but the client indexes every capability by instance
+        if not _has_instance(capability.parameters):
+            raise HTTPException(
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                detail=get_translation("invalid_instance", language),
+            )
+
         # Validate only specific "instance" whithh user can setup from frontend
         # Other structure frontend MUST send correctly
         if capability.type == CAP_COLOR_SETTING:
@@ -646,6 +685,14 @@ def validate_capabilities(capabilities: list[Capability], language: str) -> None
                     )
 
 
+def _has_instance(parameters: Optional[dict]) -> bool:
+    """Check that parameters carry a non-empty 'instance'"""
+    if not isinstance(parameters, dict):
+        return False
+    instance = parameters.get("instance")
+    return isinstance(instance, str) and bool(instance.strip())
+
+
 def validate_properties(properties: list[Property], language: str) -> None:
     """Validate and prepare device properties"""
     for property in properties:
@@ -654,6 +701,21 @@ def validate_properties(properties: list[Property], language: str) -> None:
                 status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
                 detail=get_translation("empty_mqtt", language),
             )
+
+        if not _has_instance(property.parameters):
+            raise HTTPException(
+                status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                detail=get_translation("invalid_instance", language),
+            )
+
+        # Event properties are published per value, so the value must be there
+        if property.type == PROP_EVENT:
+            event_value = (property.parameters or {}).get("value")
+            if not isinstance(event_value, str) or not event_value.strip():
+                raise HTTPException(
+                    status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                    detail=get_translation("invalid_event_value", language),
+                )
 
 
 @app.middleware("http")
@@ -687,7 +749,7 @@ async def get_all_rooms_and_devices():
 )
 async def get_link_status(request: Request):
     """Return pure controller link status without side effects."""
-    return fetch_server_link_status(get_language(request))
+    return await asyncio.to_thread(fetch_server_link_status, get_language(request))
 
 
 @app.post(
@@ -697,7 +759,7 @@ async def get_link_status(request: Request):
 )
 async def create_link(request: Request):
     """Create a controller registration link for Home UI."""
-    return create_controller_link(get_language(request))
+    return await asyncio.to_thread(create_controller_link, get_language(request))
 
 
 @app.get("/integrations/alice/available", status_code=HTTPStatus.OK)
@@ -895,8 +957,22 @@ async def enable_integration(request: Request):
     language = get_language(request)
     client_config = load_client_config()
 
-    request_data = await request.json()
-    requested_status = request_data.get("enabled", False)
+    try:
+        request_data = await request.json()
+    except Exception as e:
+        logger.warning("Malformed body for enable_integration: %r", e)
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=get_translation("invalid_request_body", language),
+        ) from e
+
+    requested_status = request_data.get("enabled") if isinstance(request_data, dict) else None
+    # pydantic v1 does not validate on assignment, so the type is checked here
+    if not isinstance(requested_status, bool):
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail=get_translation("invalid_request_body", language),
+        )
 
     client_config.client_enabled = requested_status
     save_client_config(client_config)
@@ -923,7 +999,8 @@ async def unlink_controller(request: Request):
     key_id = get_key_id(controller_version)
 
     try:
-        response = fetch_url(
+        response = await asyncio.to_thread(
+            fetch_url,
             url=f"https://{server_address}/api/v1/controller/link",
             method="DELETE",
             data={},
