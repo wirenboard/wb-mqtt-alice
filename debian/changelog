@@ -4,7 +4,7 @@ wb-mqtt-alice (0.13.6) stable; urgency=medium
   * Stop hanging on an unreachable cloud and on silent MQTT topics
   * Reject malformed device configuration instead of breaking on it
 
- -- Victor Fedorov <victor.fedorov@wirenboard.com>  Tue, 22 Sep 2026 14:25:41 +0300
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Wed, 30 Sep 2026 10:14:41 +0300
 
 wb-mqtt-alice (0.13.5) stable; urgency=medium
 
