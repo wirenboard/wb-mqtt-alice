@@ -6,6 +6,10 @@ from typing import Optional
 
 BUNDLE_CRT_PATH = "/var/lib/wb-mqtt-alice/device_bundle.crt.pem"
 
+# Backstop for the whole curl run: --max-time caps one attempt, but retries
+# multiply it, and without this the caller can hang forever on a stalled upstream
+SUBPROCESS_TIMEOUT_S = 90
+
 
 def fetch_url(
     url=None,
@@ -31,7 +35,7 @@ def fetch_url(
         key_id (str): Key ID in the engine.
         data (dict): Request body as a dictionary.
         headers (dict): Additional headers.
-        timeout (int): Connection timeout in seconds.
+        timeout (int): Connect and total transfer timeout of one attempt, seconds.
 
     Returns:
         dict: {
@@ -58,8 +62,6 @@ def fetch_url(
 
     if not retry_opts:
         retry_opts = [
-            "--connect-timeout",
-            "7",
             "--retry",
             "5",
             "--retry-delay",
@@ -84,6 +86,8 @@ def fetch_url(
         "--tlsv1.3",
         "--connect-timeout",
         str(timeout),
+        "--max-time",
+        str(timeout),
         "--silent",
         "--write-out",
         "\n%{http_code}",  # Add a status code to the output
@@ -104,12 +108,19 @@ def fetch_url(
             cmd,
             capture_output=True,
             text=True,
+            timeout=SUBPROCESS_TIMEOUT_S,
         )
-    except subprocess.CalledProcessError as e:
+    except subprocess.TimeoutExpired:
         return {
             "status_code": None,
             "data": None,
-            "error": f"Curl error: {e.stderr.strip() or e.stdout.strip()}",
+            "error": f"Curl timed out after {SUBPROCESS_TIMEOUT_S}s",
+        }
+    except OSError as e:
+        return {
+            "status_code": None,
+            "data": None,
+            "error": f"Curl error: {e}",
         }
 
     # Split response and status code
