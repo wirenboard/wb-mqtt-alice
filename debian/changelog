@@ -1,3 +1,12 @@
+wb-mqtt-alice (0.13.7) stable; urgency=medium
+
+  * Disable the Alice proxy in nginx while the integration is turned off
+    on the Alice page
+  * Disable the Alice proxy when the device certificate does not match the ATECC key,
+    so nginx and the web interface keep working
+
+ -- Valerii Trofimov <valeriy.trofimov@wirenboard.com>  Wed, 07 Oct 2026 12:29:01 +0300
+
 wb-mqtt-alice (0.13.6) stable; urgency=medium
 
   * Keep the devices config intact on read errors and interrupted writes
