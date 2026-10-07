@@ -5,6 +5,7 @@ set -e  # exit immediately on first error
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
 SITE_CONFIG="/etc/nginx/sites-available/${SITE_NAME}"
+ENABLED_SITE="/etc/nginx/sites-enabled/${SITE_NAME}"
 BOARD_REVISION_PATH='/proc/device-tree/wirenboard/board-revision'
 
 ORIGINAL_CERT='/etc/ssl/certs/device_bundle.crt.pem'
@@ -13,6 +14,7 @@ TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
 CONFIG_FILE='/usr/lib/wb-mqtt-alice/configs/wb-mqtt-alice-server.conf'
+CLIENT_CONFIG_FILE='/etc/wb-mqtt-alice-client.conf'
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
@@ -66,6 +68,10 @@ print_bundle_part() {
 
 cert_is_valid() {
     (openssl x509 -in "${1}" -noout -subject || true) | grep -q "Production"
+}
+
+is_client_enabled() {
+    jq -e '.client_enabled == true' "${CLIENT_CONFIG_FILE}" >/dev/null 2>&1
 }
 
 # Prepare and validate device certificate bundle for ATECCx08 authentication.
@@ -413,20 +419,63 @@ EOF
 #   0 - Always returns success
 enable_site() {
     log_debug "Enabling site..."
-    local enabled_site="/etc/nginx/sites-enabled/${SITE_NAME}"
 
     # Check if symlink exists and points to correct target
-    if [[ -L "${enabled_site}" ]] && [[ "$(readlink "${enabled_site}")" == "${SITE_CONFIG}" ]]; then
+    if [[ -L "${ENABLED_SITE}" ]] && [[ "$(readlink "${ENABLED_SITE}")" == "${SITE_CONFIG}" ]]; then
         log_debug "Site already enabled and pointing to correct config"
         return 0
     fi
 
     # Remove old symlink if exists and create new symlink
-    rm -f "${enabled_site}"
+    rm -f "${ENABLED_SITE}"
     ln -sf "${SITE_CONFIG}" "/etc/nginx/sites-enabled/"
     
     CHANGES_MADE='true'
     log_info "Nginx site enabled"
+}
+
+# Disable nginx site by removing it from sites-enabled
+#
+# Parameters:
+#   None
+#
+# Returns:
+#   0 - Always returns success
+disable_site() {
+    if [[ ! -e "${ENABLED_SITE}" ]] && [[ ! -L "${ENABLED_SITE}" ]]; then
+        log_debug "Site already disabled"
+        return 0
+    fi
+
+    rm -f "${ENABLED_SITE}"
+    CHANGES_MADE='true'
+    log_info "Nginx site disabled"
+}
+
+# Disable the site when the device certificate does not match the ATECCx08 key.
+# Such a site breaks the whole nginx configuration, and nginx fails to start
+# on the next boot together with the web interface
+#
+# Parameters:
+#   None
+#
+# Returns:
+#   0 - Certificate matches the key or nginx fails for another reason
+#   exit 0 - Site was disabled, the client runs without the proxy
+disable_site_on_key_mismatch() {
+    local test_output
+    if test_output=$(nginx -t 2>&1); then
+        return 0
+    fi
+    if ! grep -q 'key values mismatch' <<< "${test_output}"; then
+        return 0
+    fi
+
+    disable_site
+    log_error "Certificate ${TARGET_CERT} does not match the ATECCx08 key, site ${SITE_NAME} disabled:"
+    log_error "$(grep 'key values mismatch' <<< "${test_output}")"
+    reload_nginx || true
+    exit 0
 }
 
 # Verify by test configuration and reloads/starts nginx service
@@ -454,6 +503,8 @@ reload_nginx() {
         systemctl reload nginx
         log_info "Nginx reloaded"
     else
+        # nginx may have hit its start limit while the configuration was broken
+        systemctl reset-failed nginx
         systemctl start nginx
         log_info "Nginx started"
     fi
@@ -470,6 +521,15 @@ main() {
         exit 1
     fi
 
+    if ! is_client_enabled; then
+        log_info "Alice integration is disabled, proxy is not needed"
+        disable_site
+        if [ "${CHANGES_MADE}" = 'true' ]; then
+            reload_nginx || true
+        fi
+        exit 0
+    fi
+
     prepare_device_cert_bundle
     if ! add_ssl_engine_to_nginx; then
         log_error "Failed to configure ssl_engine"
@@ -479,6 +539,7 @@ main() {
     setup_i2c_permissions
     create_site_config
     enable_site
+    disable_site_on_key_mismatch
 
     # Only reload nginx if any changes were made
     if [ "${CHANGES_MADE}" = 'true' ]; then
