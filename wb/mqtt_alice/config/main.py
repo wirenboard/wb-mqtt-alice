@@ -165,6 +165,8 @@ def load_client_config() -> ClientConfig:
 
 def _atomic_write(path: Path, content: str, *, prefix: str) -> None:
     """Write text to path atomically, keeping the mode of an existing file"""
+    # Write to the wb_move target in /mnt/data, not over the symlink in /etc
+    path = path.resolve()
     tmp_path = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
