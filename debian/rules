@@ -2,6 +2,9 @@
 
 export DH_VERBOSE=1
 export PYBUILD_NAME=wb-mqtt-alice
+# The version test reads package metadata, which pybuild creates only at install,
+# that is after the tests
+export PYBUILD_BEFORE_TEST=cd {dir} && {interpreter} setup.py --quiet egg_info --egg-base {build_dir}
 
 override_dh_builddeb:
 	dh_builddeb -- -Zgzip
