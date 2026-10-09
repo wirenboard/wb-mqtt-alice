@@ -2,7 +2,7 @@
 
 export DH_VERBOSE=1
 export PYBUILD_NAME=wb-mqtt-alice
-export DEB_VERSION=$(shell dpkg-parsechangelog -S Version)
+export DEB_VERSION=$(shell dpkg-parsechangelog -S Version | cut -d~ -f1)
 # The version test reads package metadata, which pybuild creates only at install,
 # that is after the tests
 export PYBUILD_BEFORE_TEST=cd {dir} && {interpreter} setup.py --quiet egg_info --egg-base {build_dir}
