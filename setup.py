@@ -2,15 +2,11 @@
 
 from setuptools import setup
 
-
-def get_version():
-    with open("debian/changelog", "r", encoding="utf-8") as f:
-        return f.readline().split()[1][1:-1].split("~")[0]
-
+from wb.mqtt_alice.common.version import get_version_from_changelog
 
 setup(
     name="wb-mqtt-alice",
-    version=get_version(),
+    version=get_version_from_changelog(),
     author="Vitalii Gaponov",
     author_email="vitalii.gaponov@wirenboard.com",
     maintainer="Wiren Board Team",

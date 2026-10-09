@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.13.9) stable; urgency=medium
+
+  * Add the --version option
+  * Skip test dependencies when building with the nocheck profile
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Fri, 09 Oct 2026 15:50:08 +0300
+
 wb-mqtt-alice (0.13.8) stable; urgency=medium
 
   * Fix saving the devices config
