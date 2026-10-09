@@ -139,56 +139,66 @@ def thermostat(tmp_path, monkeypatch):
     return harness
 
 
+@pytest.mark.asyncio
 async def test_warmer_adds_one_degree_to_the_current_temperature(thermostat):
     thermostat.given_current_temperature(18)
     await thermostat.adjust_temperature(+1)
     thermostat.assert_temperature_set_to(19)
 
 
+@pytest.mark.asyncio
 async def test_cooler_subtracts_one_degree_from_the_current_temperature(thermostat):
     thermostat.given_current_temperature(18)
     await thermostat.adjust_temperature(-1)
     thermostat.assert_temperature_set_to(17)
 
 
+@pytest.mark.asyncio
 async def test_absolute_command_sets_the_value_directly(thermostat):
     await thermostat.set_temperature(20)
     thermostat.assert_temperature_set_to(20)
 
 
+@pytest.mark.asyncio
 async def test_absolute_value_above_the_maximum_is_rejected(thermostat):
     await thermostat.set_temperature(35)  # scale tops out at 30
     thermostat.assert_command_rejected("INVALID_VALUE")
 
 
+@pytest.mark.asyncio
 async def test_absolute_value_below_the_minimum_is_rejected(thermostat):
     await thermostat.set_temperature(10)  # scale starts at 16
     thermostat.assert_command_rejected("INVALID_VALUE")
 
 
+@pytest.mark.asyncio
 async def test_relative_step_past_the_maximum_is_rejected(thermostat):
     thermostat.given_current_temperature(25)
     await thermostat.adjust_temperature(+10)  # 25 + 10 = 35, past the max of 30
     thermostat.assert_command_rejected("INVALID_VALUE")
 
 
+@pytest.mark.asyncio
 async def test_relative_step_without_a_current_value_is_rejected(thermostat):
     thermostat.given_no_current_temperature()
     await thermostat.adjust_temperature(+1)
     thermostat.assert_command_rejected("DEVICE_UNREACHABLE")
 
 
+@pytest.mark.asyncio
 async def test_relative_step_with_a_non_numeric_current_value_is_rejected(thermostat):
     thermostat.given_the_control_reports("N/A")
     await thermostat.adjust_temperature(+1)
     thermostat.assert_command_rejected("INVALID_VALUE")
 
 
+@pytest.mark.asyncio
 async def test_absolute_non_numeric_value_is_rejected(thermostat):
     await thermostat.set_temperature("N/A")  # Yandex should never send this, but we must not act on it
     thermostat.assert_command_rejected("INVALID_VALUE")
 
 
+@pytest.mark.asyncio
 async def test_relative_command_on_a_non_range_capability_is_rejected(thermostat):
     await thermostat.send_relative_power_command()
     thermostat.assert_command_rejected("INVALID_ACTION")
