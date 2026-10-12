@@ -192,10 +192,16 @@ class _PrintVersionAction(argparse.Action):
     Reads the version only when the flag is actually used.
     """
 
-    def __init__(self, option_strings: list, dest: str, **kwargs: Any) -> None:
+    def __init__(self, option_strings: list[str], dest: str, **kwargs: Any) -> None:
         super().__init__(option_strings, dest, nargs=0, **kwargs)
 
-    def __call__(self, parser, namespace, values, option_string=None) -> None:
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: Optional[str] = None,
+    ) -> None:
         try:
             print(get_version())
         except PackageNotFoundError:
@@ -203,7 +209,7 @@ class _PrintVersionAction(argparse.Action):
         parser.exit()
 
 
-def main(argv: Optional[list] = None):
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="wb-mqtt-alice",
         description="Manage Yandex Alice integration for Wiren Board controllers",
