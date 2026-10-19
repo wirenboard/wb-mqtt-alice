@@ -10,6 +10,7 @@ BOARD_REVISION_PATH='/proc/device-tree/wirenboard/board-revision'
 
 ORIGINAL_CERT='/etc/ssl/certs/device_bundle.crt.pem'
 TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
+CERT_LOCK="/run/${PACKET_NAME}-cert.lock"
 
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
@@ -89,6 +90,10 @@ prepare_device_cert_bundle() {
 
     mkdir -p "/var/lib/${PACKET_NAME}"
 
+    # Both services prepare the bundle, and the write is not atomic
+    exec 9>"${CERT_LOCK}"
+    flock 9
+
     # create correct certificate for agent to use
     if [ ! -f "${TARGET_CERT}" ] || ! cert_is_valid "${TARGET_CERT}"; then
         if cert_is_valid "${ORIGINAL_CERT}"; then
@@ -104,6 +109,8 @@ prepare_device_cert_bundle() {
     else
         log_debug 'Device cert already valid'
     fi
+
+    exec 9>&-
 }
 
 # Add ssl_engine directive to the beginning of nginx.conf main configuration
@@ -516,15 +523,13 @@ main() {
         exit 1
     fi
 
-    # --cert-only prepares the bundle for the config service, which needs it to reach
-    # the cloud, and leaves nginx alone: the proxy belongs to the client service
+    # --cert-only prepares the bundle for the config service and leaves nginx alone
     local cert_only='false'
     if [ "${1:-}" = '--cert-only' ]; then
         cert_only='true'
     fi
 
-    # The config service talks to the cloud while the integration is still off, and it
-    # needs this bundle, so prepare it before the early exit below
+    # The config service needs the bundle while the integration is still off
     if [ -f "${ORIGINAL_CERT}" ]; then
         prepare_device_cert_bundle
     elif [ "${cert_only}" = 'false' ] && is_client_enabled; then
