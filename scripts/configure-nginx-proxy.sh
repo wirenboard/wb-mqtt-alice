@@ -516,15 +516,26 @@ main() {
         exit 1
     fi
 
+    # --cert-only prepares the bundle for the config service, which needs it to reach
+    # the cloud, and leaves nginx alone: the proxy belongs to the client service
+    local cert_only='false'
+    if [ "${1:-}" = '--cert-only' ]; then
+        cert_only='true'
+    fi
+
     # The config service talks to the cloud while the integration is still off, and it
     # needs this bundle, so prepare it before the early exit below
     if [ -f "${ORIGINAL_CERT}" ]; then
         prepare_device_cert_bundle
-    elif is_client_enabled; then
+    elif [ "${cert_only}" = 'false' ] && is_client_enabled; then
         log_error 'Cant find device certificate!'
         exit 1
     else
         log_warn 'Cant find device certificate, cloud requests will fail'
+    fi
+
+    if [ "${cert_only}" = 'true' ]; then
+        exit 0
     fi
 
     if ! is_client_enabled; then
