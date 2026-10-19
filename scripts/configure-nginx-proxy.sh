@@ -83,14 +83,9 @@ is_client_enabled() {
 #
 # Returns:
 #   0 - Success (certificate prepared and validated)
-#   exit 1 - Critical failure (original certificate not found)
+# The caller checks that ORIGINAL_CERT exists
 prepare_device_cert_bundle() {
     log_debug "Preparing device certificate bundle..."
-
-    if [ ! -f "${ORIGINAL_CERT}" ]; then
-        log_error 'Cant find device certificate!'
-        exit 1
-    fi
 
     mkdir -p "/var/lib/${PACKET_NAME}"
 
@@ -521,8 +516,21 @@ main() {
         exit 1
     fi
 
+    # The config service talks to the cloud while the integration is still off, and it
+    # needs this bundle, so prepare it before the early exit below
+    if [ -f "${ORIGINAL_CERT}" ]; then
+        prepare_device_cert_bundle
+    elif is_client_enabled; then
+        log_error 'Cant find device certificate!'
+        exit 1
+    else
+        log_warn 'Cant find device certificate, cloud requests will fail'
+    fi
+
     if ! is_client_enabled; then
         log_info "Alice integration is disabled, proxy is not needed"
+        # The bundle above is not part of the nginx configuration
+        CHANGES_MADE='false'
         disable_site
         if [ "${CHANGES_MADE}" = 'true' ]; then
             reload_nginx || true
@@ -530,7 +538,6 @@ main() {
         exit 0
     fi
 
-    prepare_device_cert_bundle
     if ! add_ssl_engine_to_nginx; then
         log_error "Failed to configure ssl_engine"
         exit 1
