@@ -11,6 +11,7 @@ BOARD_REVISION_PATH='/proc/device-tree/wirenboard/board-revision'
 ORIGINAL_CERT='/etc/ssl/certs/device_bundle.crt.pem'
 TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
 CERT_LOCK="/run/${PACKET_NAME}-cert.lock"
+CERT_LOCK_TIMEOUT_S=10
 
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
@@ -92,7 +93,13 @@ prepare_device_cert_bundle() {
 
     # Both services prepare the bundle, and the write is not atomic
     exec 9>"${CERT_LOCK}"
-    flock 9
+    # Waiting forever here would hang the service start, and a held lock means
+    # the other service is already preparing the bundle
+    if ! flock -w "${CERT_LOCK_TIMEOUT_S}" 9; then
+        log_warn 'Another instance is preparing the certificate, skipping'
+        exec 9>&-
+        return 0
+    fi
 
     # create correct certificate for agent to use
     if [ ! -f "${TARGET_CERT}" ] || ! cert_is_valid "${TARGET_CERT}"; then
