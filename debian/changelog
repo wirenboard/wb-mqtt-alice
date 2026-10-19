@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.13.10) stable; urgency=medium
+
+  * Fix the first activation on a new controller
+  * Name the real reason when a cloud request fails
+
+ -- Victor Fedorov <victor.fedorov@wirenboard.com>  Mon, 19 Oct 2026 14:39:22 +0300
+
 wb-mqtt-alice (0.13.9) stable; urgency=medium
 
   * Add the --version option

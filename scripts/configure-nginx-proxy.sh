@@ -10,6 +10,8 @@ BOARD_REVISION_PATH='/proc/device-tree/wirenboard/board-revision'
 
 ORIGINAL_CERT='/etc/ssl/certs/device_bundle.crt.pem'
 TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
+CERT_LOCK="/run/${PACKET_NAME}-cert.lock"
+CERT_LOCK_TIMEOUT_S=10
 
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
@@ -83,16 +85,21 @@ is_client_enabled() {
 #
 # Returns:
 #   0 - Success (certificate prepared and validated)
-#   exit 1 - Critical failure (original certificate not found)
+# The caller checks that ORIGINAL_CERT exists
 prepare_device_cert_bundle() {
     log_debug "Preparing device certificate bundle..."
 
-    if [ ! -f "${ORIGINAL_CERT}" ]; then
-        log_error 'Cant find device certificate!'
-        exit 1
-    fi
-
     mkdir -p "/var/lib/${PACKET_NAME}"
+
+    # Both services prepare the bundle, and the write is not atomic
+    exec 9>"${CERT_LOCK}"
+    # Waiting forever here would hang the service start, and a held lock means
+    # the other service is already preparing the bundle
+    if ! flock -w "${CERT_LOCK_TIMEOUT_S}" 9; then
+        log_warn 'Another instance is preparing the certificate, skipping'
+        exec 9>&-
+        return 0
+    fi
 
     # create correct certificate for agent to use
     if [ ! -f "${TARGET_CERT}" ] || ! cert_is_valid "${TARGET_CERT}"; then
@@ -109,6 +116,8 @@ prepare_device_cert_bundle() {
     else
         log_debug 'Device cert already valid'
     fi
+
+    exec 9>&-
 }
 
 # Add ssl_engine directive to the beginning of nginx.conf main configuration
@@ -521,8 +530,30 @@ main() {
         exit 1
     fi
 
+    # --cert-only prepares the bundle for the config service and leaves nginx alone
+    local cert_only='false'
+    if [ "${1:-}" = '--cert-only' ]; then
+        cert_only='true'
+    fi
+
+    # The config service needs the bundle while the integration is still off
+    if [ -f "${ORIGINAL_CERT}" ]; then
+        prepare_device_cert_bundle
+    elif [ "${cert_only}" = 'false' ] && is_client_enabled; then
+        log_error 'Cant find device certificate!'
+        exit 1
+    else
+        log_warn 'Cant find device certificate, cloud requests will fail'
+    fi
+
+    if [ "${cert_only}" = 'true' ]; then
+        exit 0
+    fi
+
     if ! is_client_enabled; then
         log_info "Alice integration is disabled, proxy is not needed"
+        # The bundle above is not part of the nginx configuration
+        CHANGES_MADE='false'
         disable_site
         if [ "${CHANGES_MADE}" = 'true' ]; then
             reload_nginx || true
@@ -530,7 +561,6 @@ main() {
         exit 0
     fi
 
-    prepare_device_cert_bundle
     if ! add_ssl_engine_to_nginx; then
         log_error "Failed to configure ssl_engine"
         exit 1

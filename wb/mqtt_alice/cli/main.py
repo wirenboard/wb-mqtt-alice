@@ -156,8 +156,10 @@ def get_link_status():
 
         status_code = int(response.get("status_code") or 0)
         if status_code == 0:
-            logger.error("%s failed (no internet, server not reachable, etc)", CURRENT_LINK_STATUS_PREF)
-            print("%s failed (no internet, server not reachable, etc)" % CURRENT_LINK_STATUS_PREF)
+            # Without the reason from fetch_url a missing certificate reads as a network outage
+            reason = response.get("error") or "no internet, server not reachable, etc"
+            logger.error("%s failed (%s)", CURRENT_LINK_STATUS_PREF, reason)
+            print("%s failed (%s)" % (CURRENT_LINK_STATUS_PREF, reason))
             return ExitCode.GEN_ERROR
         if status_code > HTTPStatus.BAD_REQUEST:
             # there is no HTTPStatus for status code 0, so treat it as an error

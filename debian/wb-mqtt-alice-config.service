@@ -9,6 +9,8 @@ After=network.target
 
 [Service]
 Type=simple
+# "-": a failed certificate must not stop the service, only cloud requests fail
+ExecStartPre=-/usr/lib/wb-mqtt-alice/scripts/configure-nginx-proxy.sh --cert-only
 ExecStart=/usr/bin/python3 -m wb.mqtt_alice.config.main
 Restart=on-failure
 RestartSec=5
