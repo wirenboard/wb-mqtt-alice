@@ -1,3 +1,11 @@
+wb-mqtt-alice (0.13.11) stable; urgency=medium
+
+  * Require Debian trixie versions of the Python libraries
+  * Drop unused python3-requests and python3-websocket
+  * Use the paho-mqtt callback API v2
+
+ -- Valerii Trofimov <valeriy.trofimov@wirenboard.com>  Sun, 25 Oct 2026 21:45:00 +0300
+
 wb-mqtt-alice (0.13.10) stable; urgency=medium
 
   * Fix the first activation on a new controller

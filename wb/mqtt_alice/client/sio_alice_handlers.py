@@ -121,18 +121,18 @@ class SioAliceHandlers:
         # Subscribe to all topics from registry (if MQTT client is available)
         self._subscribe_registry_topics()
 
-    async def on_disconnect(self) -> None:
+    async def on_disconnect(self, reason: Optional[str] = None) -> None:
         """
         Handler: Connection to Socket.IO server lost
-
-        NOTE: Argument 'reason' is not available in Socket.IO version 5.0.3
-        (Released in Dec 14,2020). It was added in version 5.12+
 
         This handler is called when:
         - Connection is lost during operation
         - Server explicitly disconnects the client
+
+        Args:
+            reason: Why the connection ended, one of socketio.AsyncClient.reason values
         """
-        logger.debug("Business: Socket.IO connection lost")
+        logger.debug("Business: Socket.IO connection lost, reason %r", reason)
 
         # NOTE: Socket.IO will attempt automatic reconnection
         #       If reconnection fails permanently, monitor_task via sio.wait()
@@ -154,9 +154,7 @@ class SioAliceHandlers:
           - Or active connection was refused by server side by disconnect(sid)
 
         Args:
-            data: Error message from server (type varies by Socket.IO version)
-                NOTE: In actual Socket.IO versions - argument is "Dict[str, Any]",
-                but in old versions what we use - this is "str" -> now set "Any" type
+            data: Rejection reason from the server, a string or a dict with "message"
         """
         logger.error("Yandex Alice integration connection refused by server")
         # This typically indicates:
