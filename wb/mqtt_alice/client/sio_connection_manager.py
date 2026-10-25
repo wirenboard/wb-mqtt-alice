@@ -41,8 +41,11 @@ class SioConnectionManager:
     """
 
     # Connection timeouts (seconds)
-    CONNECT_TIMEOUT = 10.0
-    NAMESPACE_READY_WAIT = 2.0
+    # The server accepts the namespace only after its own checks (database, Yandex),
+    # in a connect storm after a server restart that takes tens of seconds
+    NAMESPACE_CONNECT_TIMEOUT = 30.0
+    # Longer than the namespace wait, so connect() gives up by itself and disconnects cleanly
+    CONNECT_TIMEOUT = NAMESPACE_CONNECT_TIMEOUT + 10.0
     DISCONNECT_TIMEOUT = 5.0
 
     # Default reconnection interval (seconds)
@@ -191,7 +194,7 @@ class SioConnectionManager:
             except Exception as e:
                 logger.exception("Error in user connect handler: %r", e)
 
-    async def _on_disconnect_wrapper(self) -> None:
+    async def _on_disconnect_wrapper(self, reason: Optional[str] = None) -> None:
         """
         System wrapper for 'disconnect' event.
 
@@ -199,15 +202,18 @@ class SioConnectionManager:
         1. Record disconnect event
         2. Log disconnect
         3. Call user handler (if registered)
+
+        Args:
+            reason: Why the connection ended, one of socketio.AsyncClient.reason values
         """
         # Manager's infrastructure work
-        self._record_disconnect("disconnect_event")
-        logger.warning("Manager: Socket.IO disconnected")
+        self._record_disconnect(f"disconnect_event: {reason}")
+        logger.warning("Manager: Socket.IO disconnected, reason %r", reason)
 
         # Call user's business logic handler
         if "disconnect" in self._user_handlers:
             try:
-                await self._user_handlers["disconnect"]()
+                await self._user_handlers["disconnect"](reason)
             except Exception as e:
                 logger.exception("Error in user disconnect handler: %r", e)
 
@@ -228,21 +234,6 @@ class SioConnectionManager:
                 await self._user_handlers["connect_error"](data)
             except Exception as e:
                 logger.exception("Error in user connect_error handler: %r", e)
-
-        # NOTE: This important if we get connect_error handling while work
-        #       standart Socket.IO reconnect mechanizm, not custom connect loop
-        # If not disconnect current client force - engine.io can work and
-        # we not get disconnect event -> sio.wait() not stop and we are looped
-        # client and server work with PING/PONG messages
-        if getattr(self._sio_client, "connected", False):
-            try:
-                logger.debug("Disconnecting from Socket.IO server after error")
-                await asyncio.wait_for(self._sio_client.disconnect(), timeout=self.DISCONNECT_TIMEOUT)
-                logger.info("Socket.IO disconnected successfully")
-            except asyncio.TimeoutError:
-                logger.warning("Timeout while disconnecting from Socket.IO server")
-            except Exception as e:
-                logger.warning("Error during Socket.IO disconnect: %r", e)
 
     def _create_client(self) -> socketio.AsyncClient:
         """
@@ -365,10 +356,8 @@ class SioConnectionManager:
         else:
             logger.debug("Reusing existing Socket.IO client instance for connect()")
 
-            # In v5.0.3 when get 'connect_error' - eio session not closed
-            # If we try connect without disconnect() - we get error from eio:
-            #   - 'ValueError': 'Client is not in a disconnected state'
-            # Ensure client is in disconnected state before reconnecting
+            # A connect() cut off by CONNECT_TIMEOUT leaves engine.io connected, and the next
+            # connect() fails with 'ValueError': 'Client is not in a disconnected state'
             if not self.is_connected():
                 try:
                     await self._sio_client.disconnect()
@@ -385,6 +374,9 @@ class SioConnectionManager:
                     socketio_path=self.socketio_path,
                     transports=["websocket"],  # Need sticky WebSocket sessions
                     headers={"WB-Client-Pkg-Ver": self.client_pkg_ver},
+                    # connect() returns once the server accepted namespace '/' and raises
+                    # ConnectionError if it refused or did not answer in time
+                    wait_timeout=self.NAMESPACE_CONNECT_TIMEOUT,
                 ),
                 timeout=self.CONNECT_TIMEOUT,
             )
@@ -392,7 +384,7 @@ class SioConnectionManager:
             logger.warning("Socket.IO Connection Failed: %r", str(e))
             return False
         except asyncio.TimeoutError:
-            logger.warning("Socket.IO Connection Timeout (>10s)")
+            logger.warning("Socket.IO Connection Timeout (>%.0fs)", self.CONNECT_TIMEOUT)
             return False
         except Exception as e:
             logger.exception(
@@ -400,24 +392,6 @@ class SioConnectionManager:
                 type(e).__name__,
                 str(e),
             )
-            return False
-
-        # Wait for namespace to be ready (important for socketio 5.0.3)
-        # FIXME(vg): In this place need add wait for namespace to be actually
-        #            connected.
-        # On this moment simply sleep, this not critical error, but show
-        # in log msg - ...
-        await asyncio.sleep(self.NAMESPACE_READY_WAIT)
-        namespace = "/"
-        # Check if client still connected
-        if not self._sio_client.connected:
-            logger.warning("Client disconnected while waiting for namespace")
-            # This may happen when client get errom message from server:
-            # - "YANDEX_SKILL_NOT_LINKED"
-            return False
-        # Check if namespace registered
-        if hasattr(self._sio_client, "namespaces") and namespace not in self._sio_client.namespaces:
-            logger.error("Default namespace failed to connect")
             return False
 
         # Record timestamp when connection established
@@ -579,8 +553,8 @@ class SioConnectionManager:
         """
         Detection of built-in Socket.IO auto-reconnect state
 
-        For python-socketio 5.0.3 the AsyncClient keeps a private
-        `_reconnect_task` attribute. When it is not None and not done(),
+        python-socketio has no public flag for this. The AsyncClient keeps a
+        private `_reconnect_task` attribute, when it is not None and not done(),
         the internal reconnect loop is active
 
         Returns:
@@ -620,12 +594,6 @@ class SioConnectionManager:
         ns_list = getattr(self._sio_client, "namespaces", {})
         if "/" not in ns_list:
             logger.warning("Namespace '/' not ready ")
-            return False
-
-        # BUG: Additional check for version SocketIO 5.0.3
-        #      (may delete this check when upgrade version)
-        if hasattr(self._sio_client.eio, "write_loop_task") and self._sio_client.eio.write_loop_task is None:
-            logger.warning("Write loop task is None, connection may be unstable")
             return False
 
         return True

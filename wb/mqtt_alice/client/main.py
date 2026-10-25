@@ -62,14 +62,12 @@ logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
 try:
-    # Client and server MUST have same Socket.IO versions = 5.0.3
     logger.debug("Socket.IO module path: %s", socketio.__file__)
     logger.debug("python-socketio version: %r", version("python-socketio"))
 except PackageNotFoundError:
     logger.warning("python-socketio is not installed.")
 
 try:
-    # Client and server MUST have same Engine.IO versions = 4.0.0
     logger.debug("Engine.IO module path: %s", engineio.__file__)
     logger.debug("python-engineio version: %r", version("python-engineio"))
 except PackageNotFoundError:
@@ -184,16 +182,28 @@ async def publish_to_mqtt(topic: str, payload: str) -> None:
 # ---------------------------------------------------------------------
 
 
-def mqtt_on_connect(client: mqtt_client.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
-    if rc != 0:
-        logger.error("MQTT Connection failed with code: %r", rc)
+def mqtt_on_connect(
+    client: mqtt_client.Client,
+    userdata: Any,
+    flags: mqtt_client.ConnectFlags,
+    reason_code: mqtt_client.ReasonCode,
+    properties: Optional[mqtt_client.Properties],
+) -> None:
+    if reason_code.is_failure:
+        logger.error("MQTT Connection failed: %s", reason_code)
         return None
 
     logger.info("MQTT connected - no subscriptions on this moment")
 
 
-def mqtt_on_disconnect(client: mqtt_client.Client, userdata: Any, rc: int) -> None:
-    logger.warning("MQTT Disconnected with code %r", rc)
+def mqtt_on_disconnect(
+    client: mqtt_client.Client,
+    userdata: Any,
+    flags: mqtt_client.DisconnectFlags,
+    reason_code: mqtt_client.ReasonCode,
+    properties: Optional[mqtt_client.Properties],
+) -> None:
+    logger.warning("MQTT Disconnected: %s", reason_code)
 
 
 def mqtt_on_message(client: mqtt_client.Client, userdata: Any, message: mqtt_client.MQTTMessage) -> None:
@@ -243,7 +253,9 @@ def setup_mqtt_client() -> mqtt_client.Client:
     - Called during initial setup
     - Not during reconnection
     """
-    client = mqtt_client.Client(client_id=generate_client_id())
+    client = mqtt_client.Client(
+        callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2, client_id=generate_client_id()
+    )
     client.on_connect = mqtt_on_connect
     client.on_disconnect = mqtt_on_disconnect
     client.on_message = mqtt_on_message

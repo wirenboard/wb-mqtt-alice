@@ -257,15 +257,24 @@ async def read_topic_once(
 
     loop = asyncio.get_running_loop()
     result: "asyncio.Future[Optional[mqtt_client.MQTTMessage]]" = loop.create_future()
-    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}")
+    client = mqtt_client.Client(
+        callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,
+        client_id=f"wb-alice-read-{uuid4().hex[:8]}",
+    )
 
     def _resolve(message: Optional[mqtt_client.MQTTMessage]) -> None:
         if not result.done():
             result.set_result(message)
 
-    def _on_connect(cli: mqtt_client.Client, _userdata: Any, _flags: Dict[str, Any], rc: int) -> None:
-        if rc != 0:
-            logger.warning("Read of %r failed, broker refused connection with code %r", topic, rc)
+    def _on_connect(
+        cli: mqtt_client.Client,
+        _userdata: Any,
+        _flags: mqtt_client.ConnectFlags,
+        reason_code: mqtt_client.ReasonCode,
+        _properties: Optional[mqtt_client.Properties],
+    ) -> None:
+        if reason_code.is_failure:
+            logger.warning("Read of %r failed, broker refused connection: %s", topic, reason_code)
             loop.call_soon_threadsafe(_resolve, None)
             return None
         cli.subscribe(topic, qos=0)
@@ -334,15 +343,24 @@ async def read_retained_value(
     """
     loop = asyncio.get_running_loop()
     result: "asyncio.Future[Optional[str]]" = loop.create_future()
-    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}")
+    client = mqtt_client.Client(
+        callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,
+        client_id=f"wb-alice-read-{uuid4().hex[:8]}",
+    )
 
     def _resolve(value: Optional[str]) -> None:
         if not result.done():
             result.set_result(value)
 
-    def _on_connect(cli: mqtt_client.Client, _userdata: Any, _flags: Dict[str, Any], rc: int) -> None:
-        if rc != 0:
-            logger.warning("Read of %r failed, broker refused connection with code %r", topic, rc)
+    def _on_connect(
+        cli: mqtt_client.Client,
+        _userdata: Any,
+        _flags: mqtt_client.ConnectFlags,
+        reason_code: mqtt_client.ReasonCode,
+        _properties: Optional[mqtt_client.Properties],
+    ) -> None:
+        if reason_code.is_failure:
+            logger.warning("Read of %r failed, broker refused connection: %s", topic, reason_code)
             loop.call_soon_threadsafe(_resolve, None)
             return None
         cli.subscribe(topic, qos=0)
