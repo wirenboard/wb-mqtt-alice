@@ -41,11 +41,7 @@ class SioConnectionManager:
     """
 
     # Connection timeouts (seconds)
-    # The server accepts the namespace only after its own checks (database, Yandex),
-    # in a connect storm after a server restart that takes tens of seconds
-    NAMESPACE_CONNECT_TIMEOUT = 30.0
-    # Longer than the namespace wait, so connect() gives up by itself and disconnects cleanly
-    CONNECT_TIMEOUT = NAMESPACE_CONNECT_TIMEOUT + 10.0
+    CONNECT_TIMEOUT = 10.0
     DISCONNECT_TIMEOUT = 5.0
 
     # Default reconnection interval (seconds)
@@ -367,6 +363,8 @@ class SioConnectionManager:
 
         logger.info("Connecting Socket.IO client to %r...", self.server_url)
 
+        # connect() returns once the server accepted namespace '/' and raises ConnectionError
+        # if it refused or did not answer in time
         try:
             await asyncio.wait_for(
                 self._sio_client.connect(
@@ -374,9 +372,6 @@ class SioConnectionManager:
                     socketio_path=self.socketio_path,
                     transports=["websocket"],  # Need sticky WebSocket sessions
                     headers={"WB-Client-Pkg-Ver": self.client_pkg_ver},
-                    # connect() returns once the server accepted namespace '/' and raises
-                    # ConnectionError if it refused or did not answer in time
-                    wait_timeout=self.NAMESPACE_CONNECT_TIMEOUT,
                 ),
                 timeout=self.CONNECT_TIMEOUT,
             )
@@ -384,7 +379,7 @@ class SioConnectionManager:
             logger.warning("Socket.IO Connection Failed: %r", str(e))
             return False
         except asyncio.TimeoutError:
-            logger.warning("Socket.IO Connection Timeout (>%.0fs)", self.CONNECT_TIMEOUT)
+            logger.warning("Socket.IO Connection Timeout (>10s)")
             return False
         except Exception as e:
             logger.exception(
