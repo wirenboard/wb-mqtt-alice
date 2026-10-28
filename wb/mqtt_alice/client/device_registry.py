@@ -9,13 +9,13 @@ Handles device configuration, MQTT-Yandex routing
 import asyncio
 import json
 import logging
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from uuid import uuid4
 
 import paho.mqtt.client as mqtt_client
-import paho.mqtt.subscribe as subscribe
 
 from wb.mqtt_alice.common.constants import (
     CAP_COLOR_SETTING,
@@ -49,6 +49,9 @@ logger = logging.getLogger(__name__)
 # Kept short: Yandex is waiting for the response, and the value is retained.
 RELATIVE_READ_TIMEOUT_S = 1.0
 
+# How long to wait for the state of a single control during a query
+STATE_READ_TIMEOUT_S = 1.0
+
 
 class ActionError(Exception):
     """
@@ -80,6 +83,8 @@ def is_property_event(prop: str = "") -> bool:
         >>> is_property_event("devices.properties.float")
         False
     """
+    if not isinstance(prop, str):
+        return False
     if prop.lower() == "devices.properties.event":
         return True
     return False
@@ -219,6 +224,15 @@ def extract_event_value(value: Any) -> str:
     return value
 
 
+def _close_read_client(client: mqtt_client.Client, topic: str) -> None:
+    """Disconnect the read client and join its network thread"""
+    try:
+        client.disconnect()
+        client.loop_stop()
+    except Exception:
+        logger.debug("Cleanup after reading %r failed", topic, exc_info=True)
+
+
 async def read_topic_once(
     topic: str,
     *,
@@ -230,7 +244,7 @@ async def read_topic_once(
     unit_or_event_value: Optional[str] = None,
 ) -> Optional[Any]:
     """
-    Reads a single retained MQTT message in a separate thread
+    Reads a single MQTT message on its own client
     Returns paho.mqtt.client.MQTTMessage or None on timeout
     """
     logger.debug(
@@ -241,28 +255,60 @@ async def read_topic_once(
         timeout,
     )
 
+    loop = asyncio.get_running_loop()
+    result: "asyncio.Future[Optional[mqtt_client.MQTTMessage]]" = loop.create_future()
+    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}")
+
+    def _resolve(message: Optional[mqtt_client.MQTTMessage]) -> None:
+        if not result.done():
+            result.set_result(message)
+
+    def _on_connect(cli: mqtt_client.Client, _userdata: Any, _flags: Dict[str, Any], rc: int) -> None:
+        if rc != 0:
+            logger.warning("Read of %r failed, broker refused connection with code %r", topic, rc)
+            loop.call_soon_threadsafe(_resolve, None)
+            return None
+        cli.subscribe(topic, qos=0)
+
+    def _on_message(_cli: mqtt_client.Client, _userdata: Any, message: mqtt_client.MQTTMessage) -> None:
+        # retain=False means "wait for a live publication"
+        if not retain and message.retain:
+            return
+        loop.call_soon_threadsafe(_resolve, message)
+
+    client.on_connect = _on_connect
+    client.on_message = _on_message
+
     try:
-        res = await asyncio.wait_for(
-            asyncio.to_thread(subscribe.simple, topic, hostname=host, retained=retain, msg_count=1),
-            timeout=timeout,
-        )
-        if res:
-            payload = res.payload.decode().strip()
-            if is_property_event(prop_type):
-                res.payload = convert_mqtt_event_value(
-                    event_type=instance,
-                    event_type_value=unit_or_event_value,
-                    value=res.payload.decode().strip(),
-                ).encode()
-
-            logger.debug("Current topic %r state payload: %r", topic, payload)
-        else:
-            logger.debug("Current topic %r state: None", topic)
-
-        return res
+        # connect_async() never blocks, so no worker thread can be stranded here
+        client.connect_async(host)
+        client.loop_start()
+        res = await asyncio.wait_for(result, timeout)
     except asyncio.TimeoutError:
         logger.warning("Read topic timeout waiting %r", topic)
         return None
+    except Exception as e:
+        logger.warning("Failed to read topic %r: %r", topic, e)
+        return None
+    finally:
+        # loop_stop() joins the network thread, and that thread sits in a reconnect
+        # wait while the broker is down - joining it here would stall the event loop
+        loop.run_in_executor(None, _close_read_client, client, topic)
+
+    if res is None:
+        logger.debug("Current topic %r state: None", topic)
+        return None
+
+    payload = res.payload.decode().strip()
+    if is_property_event(prop_type):
+        res.payload = convert_mqtt_event_value(
+            event_type=instance,
+            event_type_value=unit_or_event_value,
+            value=payload,
+        ).encode()
+
+    logger.debug("Current topic %r state payload: %r", topic, payload)
+    return res
 
 
 async def read_retained_value(
@@ -273,12 +319,6 @@ async def read_retained_value(
 ) -> Optional[str]:
     """
     Read the current retained payload of a topic, or None if it does not arrive
-
-    Deliberately does not reuse read_topic_once(): that one blocks inside
-    subscribe.simple(), so an expired asyncio.wait_for() abandons the coroutine
-    while the thread behind asyncio.to_thread() keeps waiting for a message that
-    may never come. Here the client is ours, so the timeout path can tear the
-    connection down and let the network thread exit
 
     TODO: this whole helper goes away once DeviceRegistry keeps a state cache -
           see the note in _resolve_relative_value()
@@ -331,13 +371,7 @@ async def read_retained_value(
         logger.warning("Failed to read current value of %r: %r", topic, e)
         return None
     finally:
-        # Both calls are needed: disconnect() wakes the network thread up,
-        # loop_stop() joins it - otherwise every command leaks one thread
-        try:
-            client.disconnect()
-            client.loop_stop()
-        except Exception:
-            logger.debug("Cleanup after reading %r failed", topic, exc_info=True)
+        loop.run_in_executor(None, _close_read_client, client, topic)
 
 
 class DeviceRegistry:
@@ -406,35 +440,46 @@ class DeviceRegistry:
         self.rooms = config_data.get("rooms", {})
         devices_config = config_data.get("devices", {})
         for device_id, device_data in devices_config.items():
-            self.devices[device_id] = device_data
-            for i, cap in enumerate(device_data.get("capabilities", [])):
-                mqtt_topic = MQTTTopic(cap["mqtt"])  # convert once
-                full = mqtt_topic.full  # always full form
-                # event-rate timer
-                event_rate_info = config_evets.get(
-                    cap["type"],
-                    config_evets.get("devices.capabilities.default", {}),
-                )
-                event_rate = AliceDeviceEventRate(event_rate_info)
-                self.topic2info[full] = (device_id, "capabilities", i, event_rate)
-                # Instance types for each capability
-                # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
-                instance, instance_value = self._extract_instance_with_value(cap)
-                self.cap_index[(device_id, cap["type"], instance, instance_value)] = full
+            # Index into scratch dicts first: one malformed device must be skipped
+            # whole, not leave half of its topics in the registry
+            device_topics: Dict[str, Any] = {}
+            device_index: Dict[Any, str] = {}
+            try:
+                for i, cap in enumerate(device_data.get("capabilities", [])):
+                    mqtt_topic = MQTTTopic(cap["mqtt"])  # convert once
+                    full = mqtt_topic.full  # always full form
+                    # event-rate timer
+                    event_rate_info = config_evets.get(
+                        cap["type"],
+                        config_evets.get("devices.capabilities.default", {}),
+                    )
+                    event_rate = AliceDeviceEventRate(event_rate_info)
+                    device_topics[full] = (device_id, "capabilities", i, event_rate)
+                    # Instance types for each capability
+                    # https://yandex.ru/dev/dialogs/smart-home/doc/en/concepts/capability-types
+                    instance, instance_value = self._extract_instance_with_value(cap)
+                    device_index[(device_id, cap["type"], instance, instance_value)] = full
 
-            for i, prop in enumerate(device_data.get("properties", [])):
-                mqtt_topic = MQTTTopic(prop["mqtt"])
-                full = mqtt_topic.full
-                # event-rate timer
-                event_rate_info = config_evets.get(
-                    prop["type"],
-                    config_evets.get("devices.properties.default", {}),
-                )
-                event_rate = AliceDeviceEventRate(event_rate_info)
-                self.topic2info[full] = (device_id, "properties", i, event_rate)
-                instance, instance_value = self._extract_instance_with_value(prop)
-                index_key = (device_id, prop["type"], instance, instance_value)
-                self.cap_index[index_key] = full
+                for i, prop in enumerate(device_data.get("properties", [])):
+                    mqtt_topic = MQTTTopic(prop["mqtt"])
+                    full = mqtt_topic.full
+                    # event-rate timer
+                    event_rate_info = config_evets.get(
+                        prop["type"],
+                        config_evets.get("devices.properties.default", {}),
+                    )
+                    event_rate = AliceDeviceEventRate(event_rate_info)
+                    device_topics[full] = (device_id, "properties", i, event_rate)
+                    instance, instance_value = self._extract_instance_with_value(prop)
+                    index_key = (device_id, prop["type"], instance, instance_value)
+                    device_index[index_key] = full
+            except Exception as e:
+                logger.error("Skipping device %r with malformed configuration: %r", device_id, e)
+                continue
+
+            self.devices[device_id] = device_data
+            self.topic2info.update(device_topics)
+            self.cap_index.update(device_index)
 
         logger.info(
             "Devices loaded: %r, mqtt topics: %r",
@@ -614,7 +659,7 @@ class DeviceRegistry:
         """
         props: List[Dict[str, Any]] = []
         for prop in dev.get("properties", []):
-            is_event = is_property_event(prop["type"])
+            is_event = is_property_event(prop.get("type"))
 
             # 'retrievable' tells whether Yandex may query the property state
             # Event properties are forced to false: events may span multiple MQTT
@@ -649,7 +694,7 @@ class DeviceRegistry:
                 reportable = prop.get("reportable", True)
 
             prop_obj = {
-                "type": prop["type"],
+                "type": prop.get("type"),
                 "retrievable": retrievable,
                 "reportable": reportable,
             }
@@ -674,23 +719,35 @@ class DeviceRegistry:
                     prop_params["value"] = value_cfg.strip()
                 counter = 0
                 for cur_prop in props:
-                    if cur_prop["parameters"]["instance"] == instance:
+                    # a property with no usable "instance" was appended without "parameters"
+                    if (cur_prop.get("parameters") or {}).get("instance") == instance:
                         counter += 1
                 # append default oppozit values for some events
                 if counter == 0:
-                    _oppozit_obj = dict(prop_obj)
-                    _oppozit_params = dict(prop_params)
-                    _prefix, _value = value_cfg.strip().split(".")
-                    if instance in [EventType.OPEN, EventType.WATER_LEAK, EventType.MOTION]:
-                        oppozit_val = convert_mqtt_event_value(
-                            event_type=instance,
-                            event_type_value=_value,
-                            value=0,
-                            event_single_topic=True,
+                    # Deriving the opposite event needs the "<prefix>.<value>" form
+                    value_parts = str(prop_params.get("value", "")).split(".")
+                    if len(value_parts) != 2:
+                        logger.warning(
+                            "Property %r on device %r has event value %r, expected"
+                            " '<prefix>.<value>'; default opposite event is not added",
+                            prop.get("type"),
+                            dev_id,
+                            params.get("value"),
                         )
-                        _oppozit_params["value"] = _prefix + "." + oppozit_val
-                    _oppozit_obj["parameters"] = _oppozit_params
-                    props.append(_oppozit_obj)
+                    else:
+                        _oppozit_obj = dict(prop_obj)
+                        _oppozit_params = dict(prop_params)
+                        _prefix, _value = value_parts
+                        if instance in [EventType.OPEN, EventType.WATER_LEAK, EventType.MOTION]:
+                            oppozit_val = convert_mqtt_event_value(
+                                event_type=instance,
+                                event_type_value=_value,
+                                value=0,
+                                event_single_topic=True,
+                            )
+                            _oppozit_params["value"] = _prefix + "." + oppozit_val
+                        _oppozit_obj["parameters"] = _oppozit_params
+                        props.append(_oppozit_obj)
             else:
                 # Float property (or non-event property)
                 # "unit" is required for float properties
@@ -1109,7 +1166,9 @@ class DeviceRegistry:
         await self._publish_to_mqtt(cmd_topic, payload)
         logger.debug("Published %r → %r", payload, cmd_topic)
 
-    async def _read_capability_state(self, device_id: str, cap: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _read_capability_state(
+        self, device_id: str, cap: Dict[str, Any], *, timeout: float = STATE_READ_TIMEOUT_S
+    ) -> Optional[Dict[str, Any]]:
         """
         Read capability state from MQTT and convert to Yandex format
         """
@@ -1117,8 +1176,7 @@ class DeviceRegistry:
         if cap.get("retrievable", True) is False:
             return None
 
-        cap_type = cap["type"]
-        instance = cap.get("parameters", {}).get("instance")
+        cap_type = cap.get("type")
         instance, instance_value = self._extract_instance_with_value(cap)
         key = (device_id, cap_type, instance, instance_value)
 
@@ -1128,7 +1186,7 @@ class DeviceRegistry:
             return None
 
         try:
-            msg = await read_topic_once(topic, timeout=1)
+            msg = await read_topic_once(topic, timeout=timeout)
             if msg is None:
                 return None  # topic not found
             raw = msg.payload.decode().strip()
@@ -1172,21 +1230,24 @@ class DeviceRegistry:
             ...     "parameters": {"instance": "temperature"}})
             ('temperature', None)
         """
-        prop_type = prop["type"]
-        instance = prop.get("parameters", {}).get("instance")
+        # "parameters": null is a valid JSON config, so .get() defaults are not enough
+        params = prop.get("parameters") or {}
+        instance = params.get("instance")
         if not instance:
             # we have events => we have Enum values
-            instance = prop.get("state", {}).get("instance")
-            unit_or_event_value = prop.get("parameters", {}).get("value")
+            instance = (prop.get("state") or {}).get("instance")
+            unit_or_event_value = params.get("value")
         else:
             # we have digit values
             # TODO (v.fedorov): need to check Float properties with enum values (battery_level, food_level, etc.)
             unit_or_event_value = None
-        if is_property_event(prop["type"]):
-            unit_or_event_value = extract_event_value(prop.get("parameters", {}).get("value"))
+        if is_property_event(prop.get("type")):
+            unit_or_event_value = extract_event_value(params.get("value"))
         return instance, unit_or_event_value
 
-    async def _read_property_state(self, device_id: str, prop: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _read_property_state(
+        self, device_id: str, prop: Dict[str, Any], *, timeout: float = STATE_READ_TIMEOUT_S
+    ) -> Optional[Dict[str, Any]]:
         """
         Asynchronously read the current state of a device property from MQTT and convert it to Yandex Smart Home format
 
@@ -1205,7 +1266,7 @@ class DeviceRegistry:
             cap_index: maps to full MQTT topic.
             instance_value is used only for event properties, for other properties it is None.
         """
-        prop_type = prop["type"]
+        prop_type = prop.get("type")
         instance, instance_value = self._extract_instance_with_value(prop)
         key = (device_id, prop_type, instance, instance_value)
         if is_property_event(prop_type):
@@ -1224,7 +1285,11 @@ class DeviceRegistry:
             return None
         try:
             msg = await read_topic_once(
-                topic, timeout=1, prop_type=prop_type, instance=instance, unit_or_event_value=instance_value
+                topic,
+                timeout=timeout,
+                prop_type=prop_type,
+                instance=instance,
+                unit_or_event_value=instance_value,
             )
             # TODO (victor.fedorov): Differentiate return values for errors vs events.
             #      Event properties are currently non-retrievable and therefore treated
@@ -1254,13 +1319,19 @@ class DeviceRegistry:
             logger.warning("Failed to read property topic %r: %r", topic, e)
             return None
 
-    async def get_device_current_state(self, device_id: str) -> Dict[str, Any]:
+    async def get_device_current_state(
+        self, device_id: str, *, deadline: Optional[float] = None
+    ) -> Dict[str, Any]:
         """
         Build the device state response for Yandex `/user/devices/{id}/query`
 
         Filter capabilities/properties Yandex may query, then read MQTT state
         for those items. Write-only and event-only devices return an empty
         response (not DEVICE_UNREACHABLE) — they are stateless by design
+
+        Args:
+            device_id: Device to report
+            [deadline]: time.monotonic() value the reads must not run past
         """
         logger.debug("Reading current state for device: %r", device_id)
 
@@ -1295,18 +1366,35 @@ class DeviceRegistry:
             )
             return {"id": device_id}
 
+        def read_timeout() -> Optional[float]:
+            """Budget for the next read, None once the deadline has passed"""
+            if deadline is None:
+                return STATE_READ_TIMEOUT_S
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            return min(STATE_READ_TIMEOUT_S, left)
+
         capabilities_output: List[Dict[str, Any]] = []
         for cap in queryable_capabilities:
+            timeout = read_timeout()
+            if timeout is None:
+                logger.warning("Query deadline reached, %r reported without the remaining state", device_id)
+                break
             logger.debug("Reading capability state: %r", cap)
-            cap_state = await self._read_capability_state(device_id, cap)
+            cap_state = await self._read_capability_state(device_id, cap, timeout=timeout)
             logger.debug("Capability result: %r", cap_state)
             if cap_state:
                 capabilities_output.append(cap_state)
 
         properties_output: List[Dict[str, Any]] = []
         for prop in queryable_properties:
+            timeout = read_timeout()
+            if timeout is None:
+                logger.warning("Query deadline reached, %r reported without the remaining state", device_id)
+                break
             logger.debug("Reading property state: %r", prop)
-            prop_state = await self._read_property_state(device_id, prop)
+            prop_state = await self._read_property_state(device_id, prop, timeout=timeout)
             if prop_state:
                 properties_output.append(prop_state)
 

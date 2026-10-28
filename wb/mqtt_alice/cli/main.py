@@ -5,9 +5,12 @@ import logging
 import sys
 from enum import IntEnum
 from http import HTTPStatus
+from importlib.metadata import PackageNotFoundError
+from typing import Any, Optional
 
 from wb.mqtt_alice.common.constants import WB_MQTT_ALICE_CLI_LOGGER_NAME
 from wb.mqtt_alice.common.fetch_url import fetch_url
+from wb.mqtt_alice.common.version import get_version
 from wb.mqtt_alice.common.wb_mqtt_load_config import (
     get_board_revision,
     get_key_id,
@@ -153,8 +156,10 @@ def get_link_status():
 
         status_code = int(response.get("status_code") or 0)
         if status_code == 0:
-            logger.error("%s failed (no internet, server not reachable, etc)", CURRENT_LINK_STATUS_PREF)
-            print("%s failed (no internet, server not reachable, etc)" % CURRENT_LINK_STATUS_PREF)
+            # Without the reason from fetch_url a missing certificate reads as a network outage
+            reason = response.get("error") or "no internet, server not reachable, etc"
+            logger.error("%s failed (%s)", CURRENT_LINK_STATUS_PREF, reason)
+            print("%s failed (%s)" % (CURRENT_LINK_STATUS_PREF, reason))
             return ExitCode.GEN_ERROR
         if status_code > HTTPStatus.BAD_REQUEST:
             # there is no HTTPStatus for status code 0, so treat it as an error
@@ -184,7 +189,29 @@ def get_link_status():
         return ExitCode.STATUS_CHECK_FAILED
 
 
-def main():
+class _PrintVersionAction(argparse.Action):
+    """
+    Reads the version only when the flag is actually used.
+    """
+
+    def __init__(self, option_strings: list[str], dest: str, **kwargs: Any) -> None:
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: Optional[str] = None,
+    ) -> None:
+        try:
+            print(get_version())
+        except PackageNotFoundError:
+            parser.exit(2, "Package metadata not found, install the package to use --version\n")
+        parser.exit()
+
+
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="wb-mqtt-alice",
         description="Manage Yandex Alice integration for Wiren Board controllers",
@@ -197,6 +224,7 @@ Example:
     )
 
     parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+    parser.add_argument("--version", action=_PrintVersionAction, help="Show service version and exit")
 
     subparsers = parser.add_subparsers(
         dest="command", title="Available commands", metavar="<command>          "  # 10 Spaces needed for it
@@ -204,7 +232,7 @@ Example:
 
     subparsers.add_parser("unlink-controller", help="Unlink from Yandex account")
     subparsers.add_parser("get-link-status", help="Check link status")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.command == "unlink-controller":
         return int(unlink_controller())
     if args.command == "get-link-status":

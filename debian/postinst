@@ -7,6 +7,7 @@ set -e
 NEW_CONF="/etc/wb-mqtt-alice-client.conf"
 MIGRATION_FLAG="/var/lib/wb-mqtt-alice-migration-flag"
 MIGRATION_SCRIPT="/usr/lib/wb-mqtt-alice/scripts/wb_alice_migrate_client_config.py"
+CONFFILE_DEVICES="/etc/wb-mqtt-alice-devices.conf"
 
 case "$1" in
     configure)
@@ -16,6 +17,14 @@ case "$1" in
             python3 "$MIGRATION_SCRIPT" "$NEW_CONF" "$VALUE"
             # Clean up migration flag
             rm -f "$MIGRATION_FLAG"
+        fi
+        # 0.13.6 and 0.13.7 saved the devices config over the wb_move symlink, move it to /mnt/data and restore the link
+        if dpkg --compare-versions "$2" lt-nl 0.13.8 && [ -f "$CONFFILE_DEVICES" ] && [ ! -L "$CONFFILE_DEVICES" ] \
+            && [ -f "/mnt/data$CONFFILE_DEVICES" ]; then
+            cp -a "$CONFFILE_DEVICES" "/mnt/data$CONFFILE_DEVICES.new"
+            sync -f "/mnt/data$CONFFILE_DEVICES.new"
+            mv -T "/mnt/data$CONFFILE_DEVICES.new" "/mnt/data$CONFFILE_DEVICES"
+            ln -sfT "/mnt/data$CONFFILE_DEVICES" "$CONFFILE_DEVICES"
         fi
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)

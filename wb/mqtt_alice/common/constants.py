@@ -49,6 +49,9 @@ ERR_DEVICE_UNREACHABLE = "DEVICE_UNREACHABLE"  # Current device state is not ava
 ERR_INVALID_ACTION = "INVALID_ACTION"  # Operation is not supported by the capability
 ERR_INVALID_VALUE = "INVALID_VALUE"  # Value cannot be applied to the capability
 ERR_INTERNAL_ERROR = "INTERNAL_ERROR"  # Anything that does not fit the codes above
+# Yandex waits 3 s for the whole chain (cloud included), so the controller
+# must finish its part well before that
+QUERY_DEADLINE_S = 1.5
 # Configuration file paths
 SHORT_SN_PATH = "/var/lib/wirenboard/short_sn.conf"
 DEVICE_PATH = "/etc/wb-mqtt-alice-devices.conf"

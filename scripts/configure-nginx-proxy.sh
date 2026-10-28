@@ -5,14 +5,18 @@ set -e  # exit immediately on first error
 PACKET_NAME='wb-mqtt-alice'
 SITE_NAME="${PACKET_NAME}-proxy"
 SITE_CONFIG="/etc/nginx/sites-available/${SITE_NAME}"
+ENABLED_SITE="/etc/nginx/sites-enabled/${SITE_NAME}"
 BOARD_REVISION_PATH='/proc/device-tree/wirenboard/board-revision'
 
 ORIGINAL_CERT='/etc/ssl/certs/device_bundle.crt.pem'
 TARGET_CERT="/var/lib/${PACKET_NAME}/device_bundle.crt.pem"
+CERT_LOCK="/run/${PACKET_NAME}-cert.lock"
+CERT_LOCK_TIMEOUT_S=10
 
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
 CONFIG_FILE='/usr/share/wb-mqtt-alice/wb-mqtt-alice-server.conf'
+CLIENT_CONFIG_FILE='/etc/wb-mqtt-alice-client.conf'
 
 # Global flag to track if any changes were made
 CHANGES_MADE='false'
@@ -68,6 +72,10 @@ cert_is_valid() {
     (openssl x509 -in "${1}" -noout -subject || true) | grep -q "Production"
 }
 
+is_client_enabled() {
+    jq -e '.client_enabled == true' "${CLIENT_CONFIG_FILE}" >/dev/null 2>&1
+}
+
 # Prepare and validate device certificate bundle for ATECCx08 authentication.
 # Creates target certificate by either symlinking to original certificate
 # (if valid) or reordering certificate parts for proper chain validation
@@ -77,16 +85,21 @@ cert_is_valid() {
 #
 # Returns:
 #   0 - Success (certificate prepared and validated)
-#   exit 1 - Critical failure (original certificate not found)
+# The caller checks that ORIGINAL_CERT exists
 prepare_device_cert_bundle() {
     log_debug "Preparing device certificate bundle..."
 
-    if [ ! -f "${ORIGINAL_CERT}" ]; then
-        log_error 'Cant find device certificate!'
-        exit 1
-    fi
-
     mkdir -p "/var/lib/${PACKET_NAME}"
+
+    # Both services prepare the bundle, and the write is not atomic
+    exec 9>"${CERT_LOCK}"
+    # Waiting forever here would hang the service start, and a held lock means
+    # the other service is already preparing the bundle
+    if ! flock -w "${CERT_LOCK_TIMEOUT_S}" 9; then
+        log_warn 'Another instance is preparing the certificate, skipping'
+        exec 9>&-
+        return 0
+    fi
 
     # create correct certificate for agent to use
     if [ ! -f "${TARGET_CERT}" ] || ! cert_is_valid "${TARGET_CERT}"; then
@@ -103,6 +116,8 @@ prepare_device_cert_bundle() {
     else
         log_debug 'Device cert already valid'
     fi
+
+    exec 9>&-
 }
 
 # Add ssl_engine directive to the beginning of nginx.conf main configuration
@@ -413,20 +428,63 @@ EOF
 #   0 - Always returns success
 enable_site() {
     log_debug "Enabling site..."
-    local enabled_site="/etc/nginx/sites-enabled/${SITE_NAME}"
 
     # Check if symlink exists and points to correct target
-    if [[ -L "${enabled_site}" ]] && [[ "$(readlink "${enabled_site}")" == "${SITE_CONFIG}" ]]; then
+    if [[ -L "${ENABLED_SITE}" ]] && [[ "$(readlink "${ENABLED_SITE}")" == "${SITE_CONFIG}" ]]; then
         log_debug "Site already enabled and pointing to correct config"
         return 0
     fi
 
     # Remove old symlink if exists and create new symlink
-    rm -f "${enabled_site}"
+    rm -f "${ENABLED_SITE}"
     ln -sf "${SITE_CONFIG}" "/etc/nginx/sites-enabled/"
     
     CHANGES_MADE='true'
     log_info "Nginx site enabled"
+}
+
+# Disable nginx site by removing it from sites-enabled
+#
+# Parameters:
+#   None
+#
+# Returns:
+#   0 - Always returns success
+disable_site() {
+    if [[ ! -e "${ENABLED_SITE}" ]] && [[ ! -L "${ENABLED_SITE}" ]]; then
+        log_debug "Site already disabled"
+        return 0
+    fi
+
+    rm -f "${ENABLED_SITE}"
+    CHANGES_MADE='true'
+    log_info "Nginx site disabled"
+}
+
+# Disable the site when the device certificate does not match the ATECCx08 key.
+# Such a site breaks the whole nginx configuration, and nginx fails to start
+# on the next boot together with the web interface
+#
+# Parameters:
+#   None
+#
+# Returns:
+#   0 - Certificate matches the key or nginx fails for another reason
+#   exit 0 - Site was disabled, the client runs without the proxy
+disable_site_on_key_mismatch() {
+    local test_output
+    if test_output=$(nginx -t 2>&1); then
+        return 0
+    fi
+    if ! grep -q 'key values mismatch' <<< "${test_output}"; then
+        return 0
+    fi
+
+    disable_site
+    log_error "Certificate ${TARGET_CERT} does not match the ATECCx08 key, site ${SITE_NAME} disabled:"
+    log_error "$(grep 'key values mismatch' <<< "${test_output}")"
+    reload_nginx || true
+    exit 0
 }
 
 # Verify by test configuration and reloads/starts nginx service
@@ -454,6 +512,8 @@ reload_nginx() {
         systemctl reload nginx
         log_info "Nginx reloaded"
     else
+        # nginx may have hit its start limit while the configuration was broken
+        systemctl reset-failed nginx
         systemctl start nginx
         log_info "Nginx started"
     fi
@@ -470,7 +530,37 @@ main() {
         exit 1
     fi
 
-    prepare_device_cert_bundle
+    # --cert-only prepares the bundle for the config service and leaves nginx alone
+    local cert_only='false'
+    if [ "${1:-}" = '--cert-only' ]; then
+        cert_only='true'
+    fi
+
+    # The config service needs the bundle while the integration is still off
+    if [ -f "${ORIGINAL_CERT}" ]; then
+        prepare_device_cert_bundle
+    elif [ "${cert_only}" = 'false' ] && is_client_enabled; then
+        log_error 'Cant find device certificate!'
+        exit 1
+    else
+        log_warn 'Cant find device certificate, cloud requests will fail'
+    fi
+
+    if [ "${cert_only}" = 'true' ]; then
+        exit 0
+    fi
+
+    if ! is_client_enabled; then
+        log_info "Alice integration is disabled, proxy is not needed"
+        # The bundle above is not part of the nginx configuration
+        CHANGES_MADE='false'
+        disable_site
+        if [ "${CHANGES_MADE}" = 'true' ]; then
+            reload_nginx || true
+        fi
+        exit 0
+    fi
+
     if ! add_ssl_engine_to_nginx; then
         log_error "Failed to configure ssl_engine"
         exit 1
@@ -479,6 +569,7 @@ main() {
     setup_i2c_permissions
     create_site_config
     enable_site
+    disable_site_on_key_mismatch
 
     # Only reload nginx if any changes were made
     if [ "${CHANGES_MADE}" = 'true' ]; then
