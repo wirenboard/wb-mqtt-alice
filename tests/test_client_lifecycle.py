@@ -5,8 +5,9 @@
 """
 Exit codes and the MQTT lifecycle of the client: missing configs end with 6, a disabled client
 with 7, a rejected MQTT login with 2, a stop signal with 0 even while the server connection is
-still being retried; a reconnect restores the subscriptions. Only the config reads, the device
-registry, the MQTT client and the loop's signal handler registration are stubbed.
+still being retried, an unhandled exception with 1; a reconnect restores the subscriptions. Only
+the config reads, the device registry, the MQTT client and the loop's signal handler registration
+are stubbed.
 """
 
 import asyncio
@@ -87,6 +88,20 @@ async def test_missing_or_broken_configs_exit_with_6(monkeypatch, missing_path, 
     by_path = {client_main.SERVER_CONFIG_PATH: SERVER_CFG, client_main.CLIENT_CONFIG_PATH: CLIENT_CFG}
     by_path[missing_path] = present_content
     monkeypatch.setattr(client_main, "read_config", by_path.get)
+    assert await client_main.main() == client_main.EXIT_NOTCONFIGURED
+
+
+@pytest.mark.parametrize(
+    "content", ['["client_enabled"]', '"enabled"', "1"], ids=["array", "string", "number"]
+)
+def test_read_config_rejects_a_json_value_that_is_not_an_object(tmp_path, content):
+    path = tmp_path / "client.conf"
+    path.write_text(content, encoding="utf-8")
+    assert client_main.read_config(str(path)) is None
+
+
+async def test_unknown_log_level_exits_with_6(monkeypatch):
+    _configs(monkeypatch, client={"client_enabled": True, "log_level": "verbose"})
     assert await client_main.main() == client_main.EXIT_NOTCONFIGURED
 
 
@@ -172,6 +187,23 @@ def test_exit_message_matches_the_unit_restart_policy(monkeypatch, caplog, code,
 
     assert exc.value.code == code
     assert expected in caplog.text
+
+
+def test_an_unhandled_exception_exits_with_1_so_systemd_restarts(monkeypatch, caplog):
+    def crash(coro, **_kwargs):
+        coro.close()
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(asyncio, "run", crash)
+    monkeypatch.setattr(logging, "basicConfig", lambda **_kwargs: None)
+    monkeypatch.delitem(sys.modules, client_main.__name__)
+    caplog.set_level(logging.INFO)
+
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("wb.mqtt_alice.client.main", run_name="__main__")
+
+    assert exc.value.code == 1
+    assert "Unhandled exception" in caplog.text
 
 
 async def test_reconnect_restores_the_registry_subscriptions():

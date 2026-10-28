@@ -340,7 +340,11 @@ def read_config(filename: str) -> Optional[Dict[str, Any]]:
 
         with open(filename, "r") as file:
             config = json.load(file)
-            return config
+        if not isinstance(config, dict):
+            # valid JSON, but an array or a scalar: nothing below could read a field from it
+            logger.error("Configuration file %r is not a JSON object", filename)
+            return None
+        return config
     except json.JSONDecodeError:
         logger.error("Parsing configuration file: Invalid JSON format")
         return None
@@ -661,9 +665,13 @@ async def main() -> int:  # pylint: disable=too-many-return-statements
         logger.error("Cannot proceed without client configuration")
         return EXIT_NOTCONFIGURED
 
-    # Apply log level from client config
+    # Apply log level from client config; a name Python does not know is a config error (6)
     log_level_name = str(client_cfg.get("log_level", "INFO")).upper()
-    logging.getLogger().setLevel(log_level_name)  # Change root logger
+    try:
+        logging.getLogger().setLevel(log_level_name)  # Change root logger
+    except ValueError:
+        logger.error("Unknown 'log_level' %r in client config %r", log_level_name, CLIENT_CONFIG_PATH)
+        return EXIT_NOTCONFIGURED
 
     if not client_cfg.get("client_enabled", False):
         logger.info("Alice integration is DISABLED in configuration")
@@ -692,7 +700,7 @@ async def main() -> int:  # pylint: disable=too-many-return-statements
         )
         logger.debug("Registry created with %r devices", len(ctx.registry.devices))
     except Exception as e:
-        # a broken devices file is a config error (6); the configurator rewrites it on its next read
+        # a broken devices file is a config error (6), the client stays stopped until the file is fixed
         logger.error("Failed to read the devices configuration %r: %r", DEVICE_PATH, e)
         return EXIT_NOTCONFIGURED
 
@@ -760,5 +768,6 @@ if __name__ == "__main__":
         raise
     except Exception as e:
         logger.exception("Unhandled exception: %r", e)
+        sys.exit(1)  # a crash, systemd restarts the service
     finally:
         logger.warning("Client shutdown complete — exiting service")
