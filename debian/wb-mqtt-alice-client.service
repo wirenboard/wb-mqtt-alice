@@ -14,6 +14,9 @@ ExecStart=/usr/bin/python3 -m wb.mqtt_alice.client.main
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10
+# 2: a rejected MQTT login, 6: a missing or broken config; 7: the client is disabled
+RestartPreventExitStatus=2 6
+SuccessExitStatus=7
 
 # This service starts automatically upon system startup
 [Install]

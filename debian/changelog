@@ -1,3 +1,13 @@
+wb-mqtt-alice (0.14.0) stable; urgency=medium
+
+  * Client: service guideline exit codes: 6 on a broken config, 7 when disabled, 2 when the
+    MQTT broker rejects the login, 1 on a crash; the unit does not restart after 2 and 6
+  * Client: wait for an unavailable MQTT broker and restore the subscriptions after a reconnect
+  * Client: stop on SIGTERM/SIGINT while the server connection is still being retried
+  * Package data moved to /usr/share/wb-mqtt-alice
+
+ -- Ekaterina Volkova <ekaterina.volkova@wirenboard.com>  Wed, 28 Oct 2026 12:45:55 +0000
+
 wb-mqtt-alice (0.13.10) stable; urgency=medium
 
   * Fix the first activation on a new controller

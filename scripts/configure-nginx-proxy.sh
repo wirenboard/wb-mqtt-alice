@@ -15,7 +15,7 @@ CERT_LOCK_TIMEOUT_S=10
 
 NGINX_CONF='/etc/nginx/nginx.conf'
 ENGINE_LINE='ssl_engine ateccx08;'
-CONFIG_FILE='/usr/lib/wb-mqtt-alice/configs/wb-mqtt-alice-server.conf'
+CONFIG_FILE='/usr/share/wb-mqtt-alice/wb-mqtt-alice-server.conf'
 CLIENT_CONFIG_FILE='/etc/wb-mqtt-alice-client.conf'
 
 # Global flag to track if any changes were made
