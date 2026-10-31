@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.14.1) stable; urgency=medium
+
+  * Discard transient events on disconnect without dropping ordinary state
+
+ -- Slava Shahoika <vistova@gmail.com>  Sat, 31 Oct 2026 23:10:00 +0300
+
 wb-mqtt-alice (0.14.0) stable; urgency=medium
 
   * Client: service guideline exit codes: 6 on a broken config, 7 when disabled, 2 when the
