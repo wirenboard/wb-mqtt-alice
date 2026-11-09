@@ -5,7 +5,7 @@
 [Unit]
 Description=Client for Wiren Board Yandex Alice to MQTT integration
 Wants=network-online.target
-After=network-online.target
+After=network-online.target mosquitto.service
 
 [Service]
 Type=simple

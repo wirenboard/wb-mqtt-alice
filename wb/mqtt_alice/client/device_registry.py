@@ -25,6 +25,7 @@ from wb.mqtt_alice.common.constants import (
     ERR_DEVICE_UNREACHABLE,
     ERR_INVALID_ACTION,
     ERR_INVALID_VALUE,
+    MQTT_BROKER_SOCKET,
 )
 
 from .converters import (
@@ -236,7 +237,7 @@ def _close_read_client(client: mqtt_client.Client, topic: str) -> None:
 async def read_topic_once(
     topic: str,
     *,
-    host: str = "localhost",
+    broker_socket: str = MQTT_BROKER_SOCKET,
     retain: bool = True,
     timeout: float = 2.0,
     prop_type: str = "",
@@ -257,7 +258,7 @@ async def read_topic_once(
 
     loop = asyncio.get_running_loop()
     result: "asyncio.Future[Optional[mqtt_client.MQTTMessage]]" = loop.create_future()
-    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}")
+    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}", transport="unix")
 
     def _resolve(message: Optional[mqtt_client.MQTTMessage]) -> None:
         if not result.done():
@@ -281,7 +282,7 @@ async def read_topic_once(
 
     try:
         # connect_async() never blocks, so no worker thread can be stranded here
-        client.connect_async(host)
+        client.connect_async(broker_socket)
         client.loop_start()
         res = await asyncio.wait_for(result, timeout)
     except asyncio.TimeoutError:
@@ -314,7 +315,7 @@ async def read_topic_once(
 async def read_retained_value(
     topic: str,
     *,
-    host: str = "localhost",
+    broker_socket: str = MQTT_BROKER_SOCKET,
     timeout: float = RELATIVE_READ_TIMEOUT_S,
 ) -> Optional[str]:
     """
@@ -325,7 +326,7 @@ async def read_retained_value(
 
     Args:
         topic: Full MQTT topic of the control (without the /on suffix)
-        [host]: Broker address, local broker by default
+        [broker_socket]: Path to the broker's unix socket, the local mosquitto by default
         [timeout]: How long to wait for the retained message
 
     Returns:
@@ -334,7 +335,7 @@ async def read_retained_value(
     """
     loop = asyncio.get_running_loop()
     result: "asyncio.Future[Optional[str]]" = loop.create_future()
-    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}")
+    client = mqtt_client.Client(client_id=f"wb-alice-read-{uuid4().hex[:8]}", transport="unix")
 
     def _resolve(value: Optional[str]) -> None:
         if not result.done():
@@ -359,7 +360,7 @@ async def read_retained_value(
     client.on_message = _on_message
 
     try:
-        await asyncio.to_thread(client.connect, host)
+        await asyncio.to_thread(client.connect, broker_socket)
         client.loop_start()
         payload = await asyncio.wait_for(result, timeout)
         logger.debug("Current value of %r: %r", topic, payload)
