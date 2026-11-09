@@ -1,4 +1,4 @@
-wb-mqtt-alice (0.15.0) stable; urgency=medium
+wb-mqtt-alice (0.14.1) stable; urgency=medium
 
   * Client: connect to the MQTT broker through the unix socket
     /var/run/mosquitto/mosquitto.sock instead of localhost:1883
