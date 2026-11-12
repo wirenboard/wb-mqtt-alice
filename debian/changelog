@@ -1,3 +1,11 @@
+wb-mqtt-alice (0.14.2) stable; urgency=medium
+
+  * Update LICENSE: Automation Technologies, LLC (Wiren Board) as the copyright holder,
+    2025 as the first publication year
+  * Set license="MIT-WB" in setup.py to match LICENSE
+
+ -- Ekaterina Volkova <ekaterina.volkova@wirenboard.com>  Thu, 12 Nov 2026 13:37:56 +0300
+
 wb-mqtt-alice (0.14.1) stable; urgency=medium
 
   * Client: connect to the MQTT broker through the unix socket
