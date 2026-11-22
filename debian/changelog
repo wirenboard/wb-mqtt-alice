@@ -1,3 +1,9 @@
+wb-mqtt-alice (0.14.2) stable; urgency=medium
+
+  * Discard transient events on disconnect without dropping ordinary state
+
+ -- Slava Shahoika <vistova@gmail.com>  Sun, 22 Nov 2026 21:22:37 +0300
+
 wb-mqtt-alice (0.14.1) stable; urgency=medium
 
   * Client: connect to the MQTT broker through the unix socket

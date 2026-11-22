@@ -121,6 +121,17 @@ class BatchDeviceStore:
                 key = (prop["type"], prop["state"]["instance"])
                 device["properties"][key] = prop
 
+    def discard_events(self) -> None:
+        """Drop transient events while retaining ordinary pending state."""
+        with self._lock:
+            for device_id, device in list(self._devices.items()):
+                device["properties"] = {
+                    key: value for key, value in device["properties"].items()
+                    if key[0] != PROP_EVENT_TYPE
+                }
+                if not device["properties"] and not device["capabilities"]:
+                    del self._devices[device_id]
+
     def drain(self) -> List[Dict[str, Any]]:
         """
         Return all accumulated devices as list and clear storage
@@ -195,9 +206,16 @@ class AliceDeviceStateSender:
     async def stop(self):
         """
         Stop the background send loop
-        Wakes loop so it can do a final flush before exiting
+        Discard transient events; ordinary pending state may be flushed on exit
         """
         self.running = False
+        self._cancel_flush_timer()
+        async with self._topic_buffers_lock:
+            for topic in list(self.topic_buffers):
+                if self._is_event_topic(topic):
+                    del self.topic_buffers[topic]
+                    self.last_send_times.pop(topic, None)
+        self._batch_store.discard_events()
         logger.info("Stopping alice device state sender")
         if self._task is not None:
             try:
@@ -219,6 +237,10 @@ class AliceDeviceStateSender:
                 return
 
             device_id, cap_prop, idx, event_rate = info
+            # A callback queued when disconnect began must not create an
+            # event for the next connection.
+            if not self.running and self._is_event_topic(topic_str):
+                return
             message = {
                 "topic": topic_str,
                 "cap_prop": cap_prop,
@@ -230,6 +252,17 @@ class AliceDeviceStateSender:
             # Limit buffer size (sliding window)
             if len(self.topic_buffers[topic_str]) > MAX_BUFFER_SIZE:
                 self.topic_buffers[topic_str] = self.topic_buffers[topic_str][-MAX_BUFFER_SIZE:]
+
+    def _is_event_topic(self, topic: str) -> bool:
+        info = self.device_registry.topic2info.get(topic)
+        if info is None:
+            return False
+        device_id, cap_prop, idx, _ = info
+        try:
+            kind = self.device_registry.devices[device_id][cap_prop][idx].get("type", "")
+            return kind.lower() == PROP_EVENT_TYPE
+        except (KeyError, IndexError):
+            return False
 
     def _needs_immediate_flush(self, topic: str) -> bool:
         """
@@ -290,6 +323,8 @@ class AliceDeviceStateSender:
         Returns:
             True if data was flushed, False if store was empty
         """
+        if not self.running:
+            self._batch_store.discard_events()
         if self._batch_store.is_empty:
             return False
         merged = self._batch_store.drain()
