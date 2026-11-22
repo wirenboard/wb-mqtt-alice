@@ -124,9 +124,14 @@ async def test_rejected_mqtt_login_exits_with_2(monkeypatch, connack):
     assert await client_main.main() == client_main.EXIT_INVALIDARGUMENT
 
     fake.connect_async.assert_called_once_with(
-        client_main.MQTT_HOST, client_main.MQTT_PORT, client_main.MQTT_KEEPALIVE
+        client_main.MQTT_BROKER_SOCKET, keepalive=client_main.MQTT_KEEPALIVE
     )
     fake.loop_stop.assert_called_once_with()
+
+
+def test_mqtt_client_connects_through_the_unix_socket():
+    assert client_main.MQTT_BROKER_SOCKET == "/var/run/mosquitto/mosquitto.sock"
+    assert client_main.setup_mqtt_client().transport == "unix"
 
 
 async def test_signal_while_waiting_for_the_broker_exits_with_0(monkeypatch, signal_handlers):

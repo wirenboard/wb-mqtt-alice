@@ -33,6 +33,7 @@ import socketio
 from wb.mqtt_alice.common.constants import (
     CLIENT_CONFIG_PATH,
     DEVICE_PATH,
+    MQTT_BROKER_SOCKET,
     SERVER_CONFIG_PATH,
     SHORT_SN_PATH,
 )
@@ -44,8 +45,6 @@ from .wb_alice_device_state_sender import AliceDeviceStateSender
 from .yandex_handlers import convert_to_yandex_block, set_emit_callback
 
 # Configuration constants
-MQTT_HOST = "localhost"
-MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60
 LOCAL_PROXY_HOST = "localhost"
 LOCAL_PROXY_PORT = 8042
@@ -266,7 +265,7 @@ def setup_mqtt_client() -> mqtt_client.Client:
     - Called during initial setup
     - Not during reconnection
     """
-    client = mqtt_client.Client(client_id=generate_client_id())
+    client = mqtt_client.Client(client_id=generate_client_id(), transport="unix")
     client.on_connect = mqtt_on_connect
     client.on_disconnect = mqtt_on_disconnect
     client.on_message = mqtt_on_message
@@ -704,16 +703,17 @@ async def main() -> int:  # pylint: disable=too-many-return-statements
         logger.error("Failed to read the devices configuration %r: %r", DEVICE_PATH, e)
         return EXIT_NOTCONFIGURED
 
-    # Connect to the local MQTT broker (Wiren Board default: localhost:1883). paho retries an
+    # Connect to the local MQTT broker through its unix socket, the listener meant for WB services
+    # (the unix transport takes the socket path as the host and ignores the port). paho retries an
     # unavailable broker in its thread; nothing is subscribed before the first CONNACK.
     ctx.mqtt_client = setup_mqtt_client()
-    ctx.mqtt_client.connect_async(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE)
+    ctx.mqtt_client.connect_async(MQTT_BROKER_SOCKET, keepalive=MQTT_KEEPALIVE)
     ctx.mqtt_client.loop_start()
     await wait_for_mqtt_connection()
     if ctx.stop_event.is_set():
         await graceful_shutdown()
         return ctx.exit_code
-    logger.info("Connected to %r MQTT broker", MQTT_HOST)
+    logger.info("Connected to MQTT broker at %r", MQTT_BROKER_SOCKET)
 
     # Set emit callback for yandex_handlers module
     set_emit_callback(_emit_async)
