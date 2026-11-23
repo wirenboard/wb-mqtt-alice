@@ -12,7 +12,7 @@ setup(
     maintainer="Wiren Board Team",
     maintainer_email="info@wirenboard.com",
     description="Yandex Alice to MQTT integration for Wiren Board controllers",
-    license="MIT",
+    license="MIT-WB",
     url="https://github.com/wirenboard/wb-mqtt-alice",
     packages=[
         # "wb"                   # Explicitly excluded: provided by base package
