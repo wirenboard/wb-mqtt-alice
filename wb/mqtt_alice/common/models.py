@@ -4,6 +4,13 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
+def model_to_dict(model: BaseModel) -> dict:
+    """Convert a model to dict on both pydantic v1 and v2"""
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 class StatusInfo(BaseModel):
     reportable: bool = False
 
