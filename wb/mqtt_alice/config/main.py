@@ -8,6 +8,7 @@ import stat
 import subprocess
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from http import HTTPStatus
 from pathlib import Path
@@ -35,6 +36,7 @@ from wb.mqtt_alice.common.models import (
     Property,
     Room,
     RoomID,
+    model_to_dict,
 )
 from wb.mqtt_alice.common.wb_mqtt_load_config import (
     get_board_revision,
@@ -42,10 +44,24 @@ from wb.mqtt_alice.common.wb_mqtt_load_config import (
     load_server_config,
 )
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Application startup tasks"""
+    init_globals()
+    config = load_config()
+
+    finalize_config_change(config, force_client_reload=False)
+
+    await restore_client_status_if_needed(config)
+    yield
+
+
 # FastAPI initialization
 app = FastAPI(
     title="Alice Integration API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Setting up the logger
@@ -211,7 +227,7 @@ def save_client_config(client_config: ClientConfig) -> None:
     logger.info("Saving client configuration file...")
 
     try:
-        content = json.dumps(client_config.dict(), ensure_ascii=False, indent=2)
+        content = json.dumps(model_to_dict(client_config), ensure_ascii=False, indent=2)
         _atomic_write(Path(CLIENT_CONFIG_PATH), content, prefix=".tmp_config_")
         logger.debug("Client config saved successfully")
     except Exception as e:
@@ -224,7 +240,7 @@ def save_devices_config(config: Config) -> None:
     logger.debug("Saving yandex devices configuration file...")
 
     try:
-        content = json.dumps(config.dict(), ensure_ascii=False, indent=2)
+        content = json.dumps(model_to_dict(config), ensure_ascii=False, indent=2)
         _atomic_write(DEVICES_CONFIG_PATH, content, prefix=".tmp_devices_")
         logger.debug("Devices config saved successfully")
     except Exception as e:
@@ -1087,16 +1103,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Application startup tasks"""
-    init_globals()
-    config = load_config()
-
-    finalize_config_change(config, force_client_reload=False)
-
-    await restore_client_status_if_needed(config)
-
-
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8011, log_config=None)
+    # The backend has only HTTP endpoints and little traffic: ws="none" keeps uvicorn from
+    # loading the websockets library and loop="asyncio" from loading uvloop, ~2.3 MB of RAM
+    uvicorn.run(app, host="127.0.0.1", port=8011, log_config=None, ws="none", loop="asyncio")
