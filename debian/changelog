@@ -1,3 +1,10 @@
+wb-mqtt-alice (0.14.2) stable; urgency=medium
+
+  * Client: fix Yandex realistic sunrise and sunset stopping after the first step
+  * Client: send the device list to Yandex on each connection
+
+ -- Valerii Trofimov <valeriy.trofimov@wirenboard.com>  Fri, 27 Nov 2026 14:30:00 +0300
+
 wb-mqtt-alice (0.14.1) stable; urgency=medium
 
   * Client: connect to the MQTT broker through the unix socket
