@@ -126,6 +126,15 @@ class SioAliceHandlers:
         # Subscribe to all topics from registry (if MQTT client is available)
         self.subscribe_registry_topics()
 
+        # Yandex reads the device list only on discovery, so send it on each connection.
+        # NOTE: manager.emit() fails until connect() is complete, so use the client directly
+        if self._manager is not None and self._manager.client is not None:
+            try:
+                await self._manager.client.emit("device_discovery", {"payload": {}})
+                logger.info("Device discovery sent to Yandex")
+            except Exception as e:
+                logger.warning("Failed to send device discovery after connect: %r", e)
+
     async def on_disconnect(self) -> None:
         """
         Handler: Connection to Socket.IO server lost

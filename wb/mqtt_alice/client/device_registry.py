@@ -622,10 +622,11 @@ class DeviceRegistry:
             if cap["type"] == CAP_COLOR_SETTING:
                 continue  # Will be merged later
 
+            # The configurator writes null for a flag without a value. Null means true
             cap_dict = {
                 "type": cap["type"],
-                "retrievable": cap.get("retrievable", True),
-                "reportable": cap.get("reportable", True),
+                "retrievable": cap.get("retrievable") is not False,
+                "reportable": cap.get("reportable") is not False,
             }
             if cap["type"] == CAP_MODE:
                 cap_dict["parameters"] = self._build_mode_params(cap.get("parameters") or {})
@@ -646,8 +647,8 @@ class DeviceRegistry:
             caps.append(
                 {
                     "type": CAP_COLOR_SETTING,
-                    "retrievable": all(c.get("retrievable", True) for c in color_caps),
-                    "reportable": all(c.get("reportable", True) for c in color_caps),
+                    "retrievable": all(c.get("retrievable") is not False for c in color_caps),
+                    "reportable": all(c.get("reportable") is not False for c in color_caps),
                     "parameters": color_params,
                 }
             )
@@ -677,7 +678,7 @@ class DeviceRegistry:
                     )
                 retrievable = False
             else:
-                retrievable = prop.get("retrievable", True)
+                retrievable = prop.get("retrievable") is not False
 
             # 'reportable' tells whether we push state updates to Yandex
             # Event properties are forced to true: an event only exists as a push,
@@ -692,7 +693,7 @@ class DeviceRegistry:
                     )
                 reportable = True
             else:
-                reportable = prop.get("reportable", True)
+                reportable = prop.get("reportable") is not False
 
             prop_obj = {
                 "type": prop.get("type"),
